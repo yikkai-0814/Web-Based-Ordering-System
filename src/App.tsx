@@ -8,6 +8,7 @@ import { RequireRole } from '@/features/auth/RequireRole'
 import { CategoriesPage } from '@/features/menu/CategoriesPage'
 import { MenuItemFormPage } from '@/features/menu/MenuItemFormPage'
 import { MenuListPage } from '@/features/menu/MenuListPage'
+import { ReportsPage } from '@/features/reports/ReportsPage'
 import { OrderDetailPage } from '@/features/pos/OrderDetailPage'
 import { OrdersListPage } from '@/features/pos/OrdersListPage'
 import { TerminalPage } from '@/features/pos/TerminalPage'
@@ -41,6 +42,7 @@ export function App() {
                   repeating the guard. */}
               <Route element={<RequireRole allow={['admin']} />}>
                 <Route path="/admin" element={<AdminPage />} />
+                <Route path="/reports" element={<ReportsPage />} />
                 <Route path="/menu/categories" element={<CategoriesPage />} />
                 <Route path="/menu/new" element={<MenuItemFormPage />} />
                 <Route path="/menu/:itemId/edit" element={<MenuItemFormPage />} />

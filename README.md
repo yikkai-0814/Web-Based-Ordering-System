@@ -12,12 +12,14 @@ read by staff, with costs visible to admins only.
 **Phase 3** added the till: a touch-operated terminal, a cart, cash or e-wallet payment,
 and an immutable order with a daily number and snapshotted line items.
 
-**Phase 4** adds voiding: an admin can cancel a completed sale with a stated reason,
+**Phase 4** added voiding: an admin can cancel a completed sale with a stated reason,
 without altering the sale itself.
 
-Still to come — no partial refunds, no tax or discounts, no reports, no receipt printing.
-The dashboard and admin pages remain deliberate placeholders that prove access control
-works end to end.
+**Phase 5** adds reports: an admin-only view of revenue, item performance, payment mix,
+voids, and estimated cost and profit resolved from the cost-history journal.
+
+Still to come — no partial refunds, no tax or discounts, no receipt printing. The dashboard
+and admin page remain deliberate placeholders that prove access control works end to end.
 
 ---
 
@@ -330,6 +332,72 @@ stops being true.
 
 ---
 
+## Reports
+
+`/reports` is **admin only**, at the route, in the navigation, and — the part that matters
+— at the database. It shows cost, estimated profit and margin, which staff must never see.
+
+Reporting adds **no collection and no security rule**. It is read-only aggregation over
+data the reader already has permission to see, so it cannot weaken the immutable-order or
+void models. The protection is the one already built: `menuItemCosts` and
+`menuItemCostHistory` are admin-only, so a staff session cannot obtain cost data even by
+calling the reporting code directly. `tests/rules/reporting.rules.test.ts` pins that.
+
+### How the figures are computed
+
+**Revenue** is the sum of `total` over non-voided orders in range. There is no tax, service
+charge or discount, so an order's total _is_ its revenue.
+
+**Voided orders are removed once**, before anything is counted, so they are absent from
+revenue, order count, average order value, payment mix and item performance alike. They
+appear only in the Voids section. Filtering in one place is what stops a cancelled sale
+leaking into a total somebody forgot to guard.
+
+**Historical cost** is resolved per line, at the moment of the sale (`createdAt`, not the
+business date, so two sales either side of a midday change differ):
+
+| Situation                               | Result                                                                                     |
+| --------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Entries exist at or before the sale     | the newest such entry's cost                                                               |
+| ...and that entry **cleared** the cost  | **unknown** — a clearing is a real event, so falling back would resurrect a removed figure |
+| No history at all for the item          | the current cost, which has applied for all time                                           |
+| History exists but every entry is later | **unknown** — a later figure would be a guess presented as fact                            |
+| Order has no timestamp                  | **unknown**                                                                                |
+
+Resolution keys on `menuItemId`, so renaming or repricing an item afterwards changes
+nothing; revenue always uses the price snapshotted on the order line.
+
+### Estimated, not actual
+
+```
+estimatedCost   = Σ (unit cost in force × quantity)   over lines with a KNOWN cost
+estimatedProfit = revenue − estimatedCost
+costCoverage %  = revenue from known-cost lines ÷ total revenue
+```
+
+Lines with no recorded cost contribute **nothing** to estimated cost, which means profit and
+margin are an **upper bound** whenever coverage is below 100%. The page says so: the tiles
+are relabelled "(incomplete)" and a warning states what share of revenue has a recorded
+cost. An estimate must never be read as an actual figure.
+
+### Queries and performance
+
+Reports use one-shot `getDocs`, not the live `onSnapshot` subscriptions the rest of the app
+uses — a report is a point-in-time answer, and holding listeners over thousands of orders
+costs reads for no benefit.
+
+Orders are fetched with a `businessDate` range filter. That field is `YYYY-MM-DD`, so
+lexicographic order is chronological order and the automatic single-field index serves it —
+**`firestore.indexes.json` stays empty**. Voids, current costs and cost history are small
+collections read whole; voids cannot be date-filtered because the void record carries no
+business date, and adding one would mean changing the void model.
+
+Reads scale with the range: a month at 150 orders/day is roughly 4,500 documents per load.
+Custom ranges are capped at 366 days. If that ever becomes expensive, pre-aggregated daily
+rollups are the answer — deliberately not built now.
+
+---
+
 ## Project structure
 
 ```
@@ -343,7 +411,8 @@ src/
 ├─ features/
 │  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage
 │  ├─ menu/                    catalog: hooks, write API, list/form/categories pages
-│  └─ pos/                     till: cart logic, order transaction, receipts, voids
+│  ├─ pos/                     till: cart logic, order transaction, receipts, voids
+│  └─ reports/                 admin-only: aggregation, cost resolution, CSV export
 ├─ lib/                        firebase, env, auth-errors, money, utils
 └─ pages/                      Dashboard, Admin, 403, 404
 
@@ -362,8 +431,10 @@ plus a route — not an edit to the Sidebar.
 ## Not in scope
 
 Deliberately absent, and not to be scaffolded ahead of time: partial and line-level
-refunds, tax, service charge and discounts, reports and analytics, held or parked orders,
-table service, customer accounts, **inventory in every form** (stock, recipes, ingredients,
-suppliers, purchasing), an in-app user-management screen, shift and cash-drawer handling,
-offline/PWA support, multi-outlet tenancy, general audit logging, receipt printing and
-printer integration, and deployment/CI. Each arrives in the phase that calls for it.
+refunds, tax, service charge and discounts, charts and any charting library, Excel and PDF
+export, scheduled or emailed reports, pre-aggregated rollups, per-staff performance
+reports, held or parked orders, table service, customer accounts, **inventory in every
+form** (stock, recipes, ingredients, suppliers, purchasing), an in-app user-management
+screen, shift and cash-drawer handling, offline/PWA support, multi-outlet tenancy, general
+audit logging, receipt printing and printer integration, and deployment/CI. Each arrives in
+the phase that calls for it.

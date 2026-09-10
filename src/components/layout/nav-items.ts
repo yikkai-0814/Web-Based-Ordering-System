@@ -1,4 +1,5 @@
 import {
+  ChartColumn,
   CupSoda,
   LayoutDashboard,
   ReceiptText,
@@ -45,6 +46,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Menu',
     icon: CupSoda,
     roles: ROLES,
+  },
+  {
+    to: '/reports',
+    label: 'Reports',
+    icon: ChartColumn,
+    // Admin only: the page shows cost, estimated profit and margin.
+    roles: ['admin'],
   },
   {
     to: '/admin',
