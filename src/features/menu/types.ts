@@ -1,0 +1,115 @@
+import type { Timestamp } from 'firebase/firestore'
+
+/**
+ * A grouping on the menu — Coffee, Pastries, Cold Drinks.
+ *
+ * `sortOrder` decides display order; ties break alphabetically by name so the list is
+ * always deterministic even when an admin leaves several categories at 0.
+ */
+export interface Category {
+  id: string
+  name: string
+  sortOrder: number
+  active: boolean
+  createdAt: Timestamp | null
+  updatedAt: Timestamp | null
+}
+
+/**
+ * Something the café sells.
+ *
+ * `price` is **whole sen**, never a float — see src/lib/money.ts for why. The security
+ * rules enforce the same invariant, so a bad price cannot be written even from devtools.
+ */
+export interface MenuItem {
+  id: string
+  name: string
+  description: string
+  categoryId: string
+  price: number
+  sortOrder: number
+  active: boolean
+  createdAt: Timestamp | null
+  updatedAt: Timestamp | null
+}
+
+/**
+ * What the café pays for an item, in whole sen.
+ *
+ * Stored in its own `menuItemCosts` collection, keyed by the menu item's id, and readable
+ * only by admins. Firestore permissions are per-document, so a cost field on the menu item
+ * itself would be readable by every staff account that reads the menu. See firestore.rules.
+ */
+export interface ItemCost {
+  itemId: string
+  cost: number
+  updatedAt: Timestamp | null
+}
+
+export function parseItemCost(itemId: string, data: Record<string, unknown>): ItemCost | null {
+  const { cost, updatedAt } = data
+  if (typeof cost !== 'number' || !Number.isInteger(cost) || cost < 0) return null
+  return {
+    itemId,
+    cost,
+    updatedAt: (updatedAt as Timestamp | undefined) ?? null,
+  }
+}
+
+export const CATEGORY_NAME_MAX = 60
+export const ITEM_NAME_MAX = 80
+export const ITEM_DESCRIPTION_MAX = 300
+
+/**
+ * Firestore documents are untyped on the wire, so every document is validated before the
+ * app trusts it — the same approach as `parseUserProfile` in src/features/auth/types.ts.
+ * A malformed document returns null and is skipped by the hooks rather than rendering as
+ * "undefined" or, worse, a NaN price.
+ */
+export function parseCategory(id: string, data: Record<string, unknown>): Category | null {
+  const { name, sortOrder, active, createdAt, updatedAt } = data
+
+  if (typeof name !== 'string' || name.trim() === '') return null
+  if (typeof active !== 'boolean') return null
+
+  return {
+    id,
+    name,
+    sortOrder: typeof sortOrder === 'number' && Number.isFinite(sortOrder) ? sortOrder : 0,
+    active,
+    createdAt: (createdAt as Timestamp | undefined) ?? null,
+    updatedAt: (updatedAt as Timestamp | undefined) ?? null,
+  }
+}
+
+export function parseMenuItem(id: string, data: Record<string, unknown>): MenuItem | null {
+  const { name, description, categoryId, price, sortOrder, active, createdAt, updatedAt } = data
+
+  if (typeof name !== 'string' || name.trim() === '') return null
+  if (typeof categoryId !== 'string' || categoryId === '') return null
+  if (typeof active !== 'boolean') return null
+  // A non-integer price means the document was written by something that bypassed both
+  // the form and the rules. Refuse it rather than display a rounded lie.
+  if (typeof price !== 'number' || !Number.isInteger(price) || price < 0) return null
+
+  return {
+    id,
+    name,
+    description: typeof description === 'string' ? description : '',
+    categoryId,
+    price,
+    sortOrder: typeof sortOrder === 'number' && Number.isFinite(sortOrder) ? sortOrder : 0,
+    active,
+    createdAt: (createdAt as Timestamp | undefined) ?? null,
+    updatedAt: (updatedAt as Timestamp | undefined) ?? null,
+  }
+}
+
+/** Shared ordering: explicit sortOrder first, then name, so lists never jitter. */
+export function bySortOrderThenName<T extends { sortOrder: number; name: string }>(
+  a: T,
+  b: T,
+): number {
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+  return a.name.localeCompare(b.name)
+}

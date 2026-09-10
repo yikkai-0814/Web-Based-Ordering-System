@@ -1,4 +1,4 @@
-import { LayoutDashboard, Settings, type LucideIcon } from 'lucide-react'
+import { CupSoda, LayoutDashboard, Settings, type LucideIcon } from 'lucide-react'
 
 import { ROLES, type Role } from '@/features/auth/types'
 
@@ -19,6 +19,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
     to: '/dashboard',
     label: 'Dashboard',
     icon: LayoutDashboard,
+    roles: ROLES,
+  },
+  {
+    to: '/menu',
+    label: 'Menu',
+    icon: CupSoda,
     roles: ROLES,
   },
   {

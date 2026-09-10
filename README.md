@@ -2,13 +2,15 @@
 
 A café / food-vendor point-of-sale and sales management system, built one phase at a time.
 
-**Phase 1 (this code) is the foundation only:** tooling, styling, Firebase configuration,
-the emulator suite, email/password authentication, Admin/Staff roles, Firestore security
-rules, protected routing, and a role-aware layout.
+**Phase 1** built the foundation: tooling, styling, Firebase configuration, the emulator
+suite, email/password authentication, Admin/Staff roles, Firestore security rules,
+protected routing, and a role-aware layout.
 
-No café domain functionality exists yet — no menu, no cart, no orders, no payments, no
-reports. The dashboard and admin pages are deliberate placeholders whose purpose is to
-prove that access control works end to end.
+**Phase 2** adds the menu catalog: categories and priced items, managed by an admin and
+read by staff.
+
+Still to come — no cart, no orders, no payments, no reports. The dashboard and admin pages
+remain deliberate placeholders that prove access control works end to end.
 
 ---
 
@@ -132,6 +134,8 @@ npm run dev
 | `npm run lint`       | oxlint                                                                   |
 | `npm run format`     | Prettier, writing changes                                                |
 | `npm run emulators`  | Start the Firebase Emulator Suite                                        |
+| `npm test`           | Both suites: unit then rules                                             |
+| `npm run test:unit`  | Pure-logic tests (money handling). No emulator needed                    |
 | `npm run test:rules` | Start the Firestore emulator and run the security-rules tests against it |
 
 ---
@@ -159,6 +163,72 @@ re-login.
 
 ---
 
+## Money
+
+**Prices are integers in sen. RM 12.50 is stored as `1250`, never as `12.5`.**
+
+Floating-point money is the classic point-of-sale defect: the error is invisible on a
+single item and compounds across a cart until the printed total disagrees with the cash
+drawer. `parseFloat('1.15') * 100` is `114.99999999999999`, and that is how a menu quietly
+goes a cent out.
+
+All conversion lives in `src/lib/money.ts` — `parsePriceInput` (text from a form to sen)
+and `formatMoney` (sen to `"RM 12.50"`). **Nothing else in the codebase should multiply or
+divide a price by 100.** The currency is two constants at the top of that file.
+
+The security rules enforce the same invariant with `price is int && price >= 0`, so a
+float cannot be written even by something that bypasses the form entirely.
+
+---
+
+## Data model
+
+```
+users/{uid}          uid, email, displayName, role: 'admin'|'staff', active, createdAt
+categories/{id}      name, sortOrder, active, createdAt, updatedAt
+menuItems/{id}       name, description, categoryId, price (sen), sortOrder, active,
+                     createdAt, updatedAt
+menuItemCosts/{id}   cost (sen), updatedAt          ← ADMIN ONLY, same id as the item
+```
+
+### Why cost lives in its own collection
+
+Firestore grants or denies **a whole document** — there is no field-level read permission.
+Staff must read `menuItems` to serve customers, so a `cost` field on that document would be
+readable by every staff account no matter what the UI showed. Hiding a column would leave
+the cost one devtools tab away.
+
+Keying an admin-only `menuItemCosts` collection by the item's own id is what makes "staff
+cannot see cost" true rather than merely apparent. Item and cost are written together in a
+`writeBatch` so they cannot drift apart, and deleting an item deletes its cost in the same
+batch.
+
+Cost is **optional**, and absent is not zero: an unrecorded cost stores no document and
+renders as `—`. Recording it as `0` would claim the item is free to make and would poison
+any margin figure later derived from it.
+
+Profit and margin are **not computed or stored anywhere yet**. When reporting arrives it
+will need to snapshot cost onto each order line, for the same reason order lines snapshot
+price: today's cost cannot answer what last month's margin was.
+
+`categories` and `menuItems` are readable by any signed-in **active** user — staff serve
+from the menu — and writable only by an admin. `menuItemCosts` is admin-only for both read
+and write. Every document is validated by a `parse*` function before the app trusts it, so
+a malformed document is skipped rather than rendered.
+
+**Archive vs delete.** Setting `active: false` archives an item: it stays in the catalog
+for admins but is out of service. Deleting removes it outright. Deleting stays safe because
+when orders arrive in a later phase, each order line will **snapshot** the item's name and
+price at the time of sale rather than referencing the item document — a price change must
+never rewrite yesterday's receipts.
+
+The catalog is fetched whole and filtered in memory rather than queried per category. A
+café menu is tens of items, so this keeps `firestore.indexes.json` empty and avoids index
+deploys. `src/features/menu/use-collection.ts` is the single place to revisit if that ever
+stops being true.
+
+---
+
 ## Project structure
 
 ```
@@ -170,8 +240,9 @@ src/
 │  ├─ ui/                      shadcn primitives (generated; not hand-edited)
 │  └─ layout/                  AppShell, Sidebar, Topbar, UserMenu, nav-items
 ├─ features/
-│  └─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage
-├─ lib/                        firebase, env, auth-errors, utils
+│  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage
+│  └─ menu/                    catalog: hooks, write API, list/form/categories pages
+├─ lib/                        firebase, env, auth-errors, money, utils
 └─ pages/                      Dashboard, Admin, 403, 404
 
 tests/rules/                   Firestore security-rules tests

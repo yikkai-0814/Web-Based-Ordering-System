@@ -12,7 +12,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "emulators": "firebase emulators:start",
-    "test:rules": "firebase emulators:exec --only firestore \"vitest run\""
+    "test": "npm run test:unit && npm run test:rules",
+    "test:unit": "vitest run tests/unit",
+    "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules\""
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

@@ -47,6 +47,85 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // ---- Menu catalog ------------------------------------------------------
+    // Any signed-in, active user reads the menu — staff need it to serve customers.
+    // Only an admin writes it.
+    //
+    // The shape checks below are not duplicated form validation: the form is not the
+    // security boundary. Anyone can call Firestore straight from devtools, so the
+    // invariants the rest of the system relies on — above all that `price` is a whole
+    // number of sen and never a float — are enforced here, at the database.
+
+    function validCategory() {
+      let d = request.resource.data;
+      return d.name is string && d.name.size() > 0 && d.name.size() <= 60
+        && d.sortOrder is int
+        && d.active is bool;
+    }
+
+    function validMenuItem() {
+      let d = request.resource.data;
+      return d.name is string && d.name.size() > 0 && d.name.size() <= 80
+        && d.categoryId is string && d.categoryId.size() > 0
+        && d.price is int && d.price >= 0
+        && d.sortOrder is int
+        && d.active is bool
+        && (!('description' in d.keys())
+            || (d.description is string && d.description.size() <= 300));
+    }
+
+    match /categories/{categoryId} {
+      allow read: if isActive();
+      allow create, update: if isAdmin() && validCategory();
+      allow delete: if isAdmin();
+    }
+
+    match /menuItems/{itemId} {
+      allow read: if isActive();
+      allow create, update: if isAdmin() && validMenuItem();
+      allow delete: if isAdmin();
+    }
+
+    // ---- Item cost (admin only) --------------------------------------------
+    // What the café pays for an item lives in its OWN collection, keyed by the same
+    // document id as the menu item, rather than as a field on menuItems.
+    //
+    // That is not a stylistic choice. Firestore rules grant or deny a whole document —
+    // there is no field-level read permission. Staff must read menuItems to serve
+    // customers, so any field on that document is readable by staff, and merely hiding a
+    // column in the UI would leave the cost one devtools tab away. Splitting the
+    // collection is what actually makes "staff cannot see cost" true.
+    //
+    // Profit is deliberately not computed or stored anywhere: that belongs to the
+    // reporting phase, which will also have to snapshot cost onto each order line,
+    // because today's cost cannot answer what last month's margin was.
+
+    function validItemCost() {
+      let d = request.resource.data;
+      return d.cost is int && d.cost >= 0;
+    }
+
+    // A cost must belong to a real menu item, so an orphan cannot be created in the
+    // first place.
+    //
+    // `existsAfter` rather than `exists` is load-bearing: the app writes a new item and
+    // its cost in one batch, and `exists` evaluates against the state *before* the batch
+    // commits, so it would refuse the item's own cost. `existsAfter` asks whether the
+    // item is there once the batch has landed, which is the question actually being asked.
+    //
+    // Note the limit of this guard: rules cannot require a companion write, so deleting a
+    // menu item is still not forced to delete its cost. Deletion is kept safe by funnelling
+    // it through deleteMenuItem(), which batches both.
+    function menuItemExistsAfter(itemId) {
+      return existsAfter(/databases/$(database)/documents/menuItems/$(itemId));
+    }
+
+    match /menuItemCosts/{itemId} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin() && validItemCost() && menuItemExistsAfter(itemId);
+      allow delete: if isAdmin();
+    }
+
     // ---- Default deny ------------------------------------------------------
     // Everything not matched above is refused. Later phases add explicit matches
     // rather than loosening this.
