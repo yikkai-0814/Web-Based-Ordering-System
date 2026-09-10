@@ -1,0 +1,35 @@
+import { LayoutDashboard, Settings, type LucideIcon } from 'lucide-react'
+
+import { ROLES, type Role } from '@/features/auth/types'
+
+export interface NavItem {
+  to: string
+  label: string
+  icon: LucideIcon
+  /** Which roles see this item at all. */
+  roles: readonly Role[]
+}
+
+/**
+ * Navigation is declared as data so that a later phase adds a line here plus a route,
+ * rather than editing the Sidebar component itself.
+ */
+export const NAV_ITEMS: readonly NavItem[] = [
+  {
+    to: '/dashboard',
+    label: 'Dashboard',
+    icon: LayoutDashboard,
+    roles: ROLES,
+  },
+  {
+    to: '/admin',
+    label: 'Admin',
+    icon: Settings,
+    roles: ['admin'],
+  },
+]
+
+export function navItemsForRole(role: Role | null): readonly NavItem[] {
+  if (!role) return []
+  return NAV_ITEMS.filter((item) => item.roles.includes(role))
+}

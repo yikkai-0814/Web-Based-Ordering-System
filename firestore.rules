@@ -1,0 +1,58 @@
+rules_version = '2';
+
+// In a client-only SPA the route guards in src/features/auth are user experience, not
+// security — anyone can open devtools and call Firestore directly. These rules are the
+// only real enforcement, so they deny by default and open up one collection at a time.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Helpers -----------------------------------------------------------
+    // Defined once here so every collection added in later phases reuses the same
+    // definition of "signed in", "admin" and "active".
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function profileExists() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isActive() {
+      return profileExists() && profile().active == true;
+    }
+
+    function isAdmin() {
+      return isActive() && profile().role == 'admin';
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ---- users -------------------------------------------------------------
+    // A staff member may read their own profile (the app subscribes to it live so a
+    // role change or a deactivation takes effect without a re-login). Only an admin
+    // may read anyone else's, and only an admin may write at all — which is what stops
+    // a staff account from promoting itself to admin or reactivating itself.
+
+    match /users/{uid} {
+      allow get: if isSelf(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ---- Default deny ------------------------------------------------------
+    // Everything not matched above is refused. Later phases add explicit matches
+    // rather than loosening this.
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
