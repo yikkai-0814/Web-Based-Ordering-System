@@ -9,10 +9,13 @@ protected routing, and a role-aware layout.
 **Phase 2** added the menu catalog: categories and priced items, managed by an admin and
 read by staff, with costs visible to admins only.
 
-**Phase 3** adds the till: a touch-operated terminal, a cart, cash or e-wallet payment,
+**Phase 3** added the till: a touch-operated terminal, a cart, cash or e-wallet payment,
 and an immutable order with a daily number and snapshotted line items.
 
-Still to come — no voids or refunds, no tax or discounts, no reports, no receipt printing.
+**Phase 4** adds voiding: an admin can cancel a completed sale with a stated reason,
+without altering the sale itself.
+
+Still to come — no partial refunds, no tax or discounts, no reports, no receipt printing.
 The dashboard and admin pages remain deliberate placeholders that prove access control
 works end to end.
 
@@ -202,6 +205,8 @@ orders/{orderId}     number, businessDate, lines[], total (sen), paymentMethod
                                                     ← IMMUTABLE once written
 counters/{businessDate}
                      lastNumber                     ← issues the daily order number
+orderVoids/{orderId} orderId, reason, amount (sen), voidedAt, voidedBy, voidedByName
+                                                    ← ADMIN-WRITE, append-only
 ```
 
 ### Orders are immutable
@@ -238,6 +243,31 @@ The enum lives in `src/features/pos/types.ts` and is mirrored in `firestore.rule
 orders are immutable, adding a method later is safe, but **renaming or removing one strands
 past orders** that still carry the old value — `parseOrder` will reject them and they will
 vanish from the list. Change the enum only while the data is disposable.
+
+### Voiding a sale
+
+A mistake is corrected by **voiding**, never by editing. An admin records a void with a
+required reason; the order document is not touched at all.
+
+The void is its own document at `orderVoids/{orderId}`, keyed by the order it cancels,
+because orders are immutable — marking one would mean granting update permission, which
+would reopen every field on every sale to whoever can void. Two properties fall out of that
+design for free:
+
+- **The same order cannot be voided twice.** The second write is an update to an existing
+  document, and updates are denied.
+- **A void cannot be edited or withdrawn.** There is no un-voiding; reversing a correction
+  would destroy the audit trail that is the point of recording it.
+
+Staff **read** voids but cannot create one. A till operator has to know a sale was
+cancelled, or the orders list would misrepresent the day to the person working it. Creating
+a void erases revenue, so that stays with admins. `amount` duplicates the order's total,
+which is safe because orders are immutable and the rules enforce the equality with a
+`get()` on the order.
+
+A voided sale **keeps its order number** and stays in the day's sequence. A gap in the
+numbering would look like a deleted record, which is exactly what a till audit is trying to
+rule out.
 
 ### Order numbering
 
@@ -313,7 +343,7 @@ src/
 ├─ features/
 │  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage
 │  ├─ menu/                    catalog: hooks, write API, list/form/categories pages
-│  └─ pos/                     till: pure cart logic, order transaction, receipt pages
+│  └─ pos/                     till: cart logic, order transaction, receipts, voids
 ├─ lib/                        firebase, env, auth-errors, money, utils
 └─ pages/                      Dashboard, Admin, 403, 404
 
@@ -331,8 +361,9 @@ plus a route — not an edit to the Sidebar.
 
 ## Not in scope
 
-Deliberately absent, and not to be scaffolded ahead of time: menu and pricing, the POS
-terminal, orders and payments, reports and analytics, **inventory in every form** (stock,
-recipes, ingredients, suppliers, purchasing), an in-app user-management screen, shift and
-cash-drawer handling, offline/PWA support, multi-outlet tenancy, audit logging, printer
-integration, and deployment/CI. Each arrives in the phase that calls for it.
+Deliberately absent, and not to be scaffolded ahead of time: partial and line-level
+refunds, tax, service charge and discounts, reports and analytics, held or parked orders,
+table service, customer accounts, **inventory in every form** (stock, recipes, ingredients,
+suppliers, purchasing), an in-app user-management screen, shift and cash-drawer handling,
+offline/PWA support, multi-outlet tenancy, general audit logging, receipt printing and
+printer integration, and deployment/CI. Each arrives in the phase that calls for it.

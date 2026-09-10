@@ -199,6 +199,37 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ---- Voids (admin only, final) -----------------------------------------
+    // Correcting a mis-rung sale. A void is its OWN document keyed by the order's id,
+    // never a flag on the order: orders are immutable, and marking one would mean granting
+    // update permission, which would reopen every field on every sale to whoever can void.
+    //
+    // Two properties fall out of keying by the order id and denying update:
+    //   * the same order cannot be voided twice — the second write is an update, refused;
+    //   * a void cannot be edited or withdrawn, so the audit trail cannot be rewritten.
+    //
+    // Staff READ voids but cannot create one. A till operator has to know a sale was
+    // cancelled; hiding it would make the orders list lie to them. Creating one erases
+    // revenue, which is the classic till-fraud vector, so that stays with admins.
+
+    function validVoid(orderId) {
+      let d = request.resource.data;
+      return d.orderId == orderId
+        && d.reason is string && d.reason.size() > 0 && d.reason.size() <= 200
+        && d.amount is int && d.amount >= 0
+        // Also proves the order exists: get() on a missing document fails the rule.
+        && d.amount == get(/databases/$(database)/documents/orders/$(orderId)).data.total
+        && d.voidedBy == request.auth.uid
+        && d.voidedByName is string
+        && d.voidedAt is timestamp;
+    }
+
+    match /orderVoids/{orderId} {
+      allow read: if isActive();
+      allow create: if isAdmin() && validVoid(orderId);
+      allow update, delete: if false;
+    }
+
     // ---- Default deny ------------------------------------------------------
     // Everything not matched above is refused. Later phases add explicit matches
     // rather than loosening this.

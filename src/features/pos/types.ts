@@ -130,6 +130,39 @@ export function parseOrder(id: string, data: Record<string, unknown>): Order | n
   }
 }
 
+/**
+ * A cancelled sale.
+ *
+ * Stored in `orderVoids/{orderId}` — its own document, keyed by the order it cancels,
+ * because orders are immutable and a void must not require update permission on them. See
+ * firestore.rules. `amount` is the order total being reversed, and the rules enforce that
+ * it matches the order.
+ */
+export interface OrderVoid {
+  orderId: string
+  reason: string
+  amount: number
+  voidedAt: Timestamp | null
+  voidedBy: string
+  voidedByName: string
+}
+
+export function parseOrderVoid(orderId: string, data: Record<string, unknown>): OrderVoid | null {
+  const { reason, amount, voidedAt, voidedBy, voidedByName } = data
+
+  if (typeof reason !== 'string' || reason.trim() === '') return null
+  if (typeof amount !== 'number' || !Number.isInteger(amount) || amount < 0) return null
+
+  return {
+    orderId,
+    reason,
+    amount,
+    voidedAt: (voidedAt as Timestamp | undefined) ?? null,
+    voidedBy: typeof voidedBy === 'string' ? voidedBy : '',
+    voidedByName: typeof voidedByName === 'string' ? voidedByName : 'Unknown',
+  }
+}
+
 /** Newest first — what a till operator wants to see at the top of the day's list. */
 export function byNumberDescending(a: Order, b: Order): number {
   if (a.businessDate !== b.businessDate) return b.businessDate.localeCompare(a.businessDate)

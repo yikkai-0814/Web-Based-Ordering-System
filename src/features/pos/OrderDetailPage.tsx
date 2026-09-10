@@ -1,11 +1,18 @@
+import { useState } from 'react'
 import { Link, useParams } from 'react-router'
+import { AlertCircle, Ban } from 'lucide-react'
 
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useAuth } from '@/features/auth/useAuth'
 import { lineTotal } from '@/features/pos/cart'
 import { PAYMENT_LABELS } from '@/features/pos/types'
 import { useOrders } from '@/features/pos/useOrders'
+import { useOrderVoids } from '@/features/pos/useOrderVoids'
+import { voidOrder } from '@/features/pos/void-api'
+import { VoidOrderDialog } from '@/features/pos/VoidOrderDialog'
 import { formatMoney } from '@/lib/money'
 
 /**
@@ -17,9 +24,12 @@ import { formatMoney } from '@/lib/money'
  */
 export function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>()
+  const { profile, role } = useAuth()
   const { orders, loading } = useOrders()
+  const { voids, loading: voidsLoading } = useOrderVoids()
+  const [error, setError] = useState<string | null>(null)
 
-  if (loading) {
+  if (loading || voidsLoading) {
     return <Skeleton className="h-96 w-full max-w-lg" />
   }
 
@@ -37,12 +47,54 @@ export function OrderDetailPage() {
     )
   }
 
+  const voided = voids.get(order.id) ?? null
+  const isAdmin = role === 'admin'
+
+  async function handleVoid(reason: string) {
+    if (!profile || !order) return
+    setError(null)
+    try {
+      await voidOrder(order.id, {
+        amount: order.total,
+        reason,
+        user: { uid: profile.uid, displayName: profile.displayName },
+      })
+    } catch {
+      setError('That sale could not be voided. Only administrators may void a sale.')
+      throw new Error('void refused')
+    }
+  }
+
   return (
     <div className="space-y-4">
+      {voided && (
+        <Alert variant="destructive" className="w-full max-w-lg" data-testid="voided-banner">
+          <Ban aria-hidden="true" />
+          <AlertDescription>
+            <span className="block font-medium">
+              This sale was voided — {formatMoney(voided.amount)} reversed.
+            </span>
+            <span className="block">Reason: {voided.reason}</span>
+            <span className="block text-xs">
+              Voided by {voided.voidedByName}
+              {voided.voidedAt ? ` on ${voided.voidedAt.toDate().toLocaleString()}` : ''}
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {error && (
+        <Alert variant="destructive" className="w-full max-w-lg">
+          <AlertCircle aria-hidden="true" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       <Card className="w-full max-w-lg">
         <CardHeader>
           <CardTitle className="text-xl" data-testid="receipt-number">
             Order #{order.number}
+            {voided && <span className="ml-2 text-base text-destructive">(Voided)</span>}
           </CardTitle>
           <CardDescription>
             {order.businessDate} · served by {order.createdByName}
@@ -102,9 +154,17 @@ export function OrderDetailPage() {
         </CardContent>
       </Card>
 
-      <Button asChild variant="outline" size="lg" className="h-touch text-base">
-        <Link to="/orders">Back to orders</Link>
-      </Button>
+      <div className="flex flex-wrap gap-3">
+        <Button asChild variant="outline" size="lg" className="h-touch text-base">
+          <Link to="/orders">Back to orders</Link>
+        </Button>
+
+        {/* Admin-only, and already voided sales cannot be voided again — the rules would
+            refuse it anyway, but offering the button would be a lie. */}
+        {isAdmin && !voided && (
+          <VoidOrderDialog orderNumber={order.number} amount={order.total} onConfirm={handleVoid} />
+        )}
+      </div>
     </div>
   )
 }
