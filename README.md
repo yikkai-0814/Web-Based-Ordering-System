@@ -6,11 +6,15 @@ A café / food-vendor point-of-sale and sales management system, built one phase
 suite, email/password authentication, Admin/Staff roles, Firestore security rules,
 protected routing, and a role-aware layout.
 
-**Phase 2** adds the menu catalog: categories and priced items, managed by an admin and
-read by staff.
+**Phase 2** added the menu catalog: categories and priced items, managed by an admin and
+read by staff, with costs visible to admins only.
 
-Still to come — no cart, no orders, no payments, no reports. The dashboard and admin pages
-remain deliberate placeholders that prove access control works end to end.
+**Phase 3** adds the till: a touch-operated terminal, a cart, cash or e-wallet payment,
+and an immutable order with a daily number and snapshotted line items.
+
+Still to come — no voids or refunds, no tax or discounts, no reports, no receipt printing.
+The dashboard and admin pages remain deliberate placeholders that prove access control
+works end to end.
 
 ---
 
@@ -135,7 +139,7 @@ npm run dev
 | `npm run format`     | Prettier, writing changes                                                |
 | `npm run emulators`  | Start the Firebase Emulator Suite                                        |
 | `npm test`           | Both suites: unit then rules                                             |
-| `npm run test:unit`  | Pure-logic tests (money handling). No emulator needed                    |
+| `npm run test:unit`  | Pure-logic tests (money and cart arithmetic). No emulator needed         |
 | `npm run test:rules` | Start the Firestore emulator and run the security-rules tests against it |
 
 ---
@@ -189,7 +193,74 @@ categories/{id}      name, sortOrder, active, createdAt, updatedAt
 menuItems/{id}       name, description, categoryId, price (sen), sortOrder, active,
                      createdAt, updatedAt
 menuItemCosts/{id}   cost (sen), updatedAt          ← ADMIN ONLY, same id as the item
+menuItemCostHistory/{autoId}
+                     itemId, cost (sen|null), effectiveFrom, recordedBy
+                                                    ← ADMIN ONLY, append-only journal
+orders/{orderId}     number, businessDate, lines[], total (sen), paymentMethod
+                     ('cash' | 'ewallet'),
+                     cashTendered, changeGiven, createdAt, createdBy, createdByName
+                                                    ← IMMUTABLE once written
+counters/{businessDate}
+                     lastNumber                     ← issues the daily order number
 ```
+
+### Orders are immutable
+
+`allow update, delete: if false` — for **everyone**, admins included. A sale is a financial
+record; correcting one is a new entry, not an edit. When voids arrive they will write a
+counter-entry rather than mutate the original.
+
+Order lines **snapshot** `name` and `unitPrice` at the time of sale and never reference the
+menu item. That is what makes renaming, repricing or deleting a menu item safe: a price
+change tomorrow cannot rewrite today's receipt. The cart follows the same rule — a line
+keeps the price the customer was quoted even if an admin edits it mid-order.
+
+**What the rules can and cannot check.** Firestore rules cannot iterate or sum a list, so
+they **cannot verify that `total` equals the sum of `lines`**. They do check every scalar:
+types and ranges, the payment-method enum, that the sale is attributed to the caller, and
+that `changeGiven` is exactly `cashTendered - total`. The cart arithmetic itself is guarded
+by the pure functions in `src/features/pos/cart.ts` and their unit tests. Closing that last
+gap would need a Cloud Function.
+
+### Payment methods
+
+Two, and only two: **Cash** and **E-Wallet**. The `ewallet` value covers every cashless
+method the vendor accepts — DuitNow QR and the various wallet apps are one thing at the
+counter, so they are one value rather than a distinction nobody makes.
+
+**E-Wallet is recorded, not integrated.** Choosing it labels the sale and nothing more —
+there is no payment gateway, and the system never learns whether the transfer actually
+succeeded. The person at the till confirms that on the customer's phone, exactly as they
+would without this system. Only cash has arithmetic behind it: amount tendered, and change
+due computed to the sen.
+
+The enum lives in `src/features/pos/types.ts` and is mirrored in `firestore.rules`. Because
+orders are immutable, adding a method later is safe, but **renaming or removing one strands
+past orders** that still carry the old value — `parseOrder` will reject them and they will
+vanish from the list. Change the enum only while the data is disposable.
+
+### Order numbering
+
+Each sale gets a per-day sequence number, assigned in the **same transaction** that writes
+the order: read `counters/{businessDate}`, advance it by one, stamp the order. The rules
+allow `lastNumber` to increase by exactly one and nothing else, so a number cannot be
+skipped, reused or rewound by a tampered client.
+
+One Firestore document sustains roughly one write per second, and every sale that day
+touches this single counter. Far above a café counter's rate, but it is the ceiling of this
+design and the thing to revisit for multiple simultaneous tills.
+
+### Resolving historical cost
+
+Costs change, so margin for a past sale needs the cost that was in force at the time.
+Orders deliberately carry **no** cost: staff ring up sales and staff cannot read costs, so
+they could not stamp one on even if asked. Instead every admin cost change appends a dated
+entry to `menuItemCostHistory`, in the same batch as the cost itself.
+
+To resolve the cost for an order, take the newest history entry for that item whose
+`effectiveFrom` precedes the order, and fall back to the current `menuItemCosts` value when
+an item has no history — an item never edited since keeps its current cost as its only
+value, which correctly applies to all time. No backfill is needed.
 
 ### Why cost lives in its own collection
 
@@ -241,7 +312,8 @@ src/
 │  └─ layout/                  AppShell, Sidebar, Topbar, UserMenu, nav-items
 ├─ features/
 │  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage
-│  └─ menu/                    catalog: hooks, write API, list/form/categories pages
+│  ├─ menu/                    catalog: hooks, write API, list/form/categories pages
+│  └─ pos/                     till: pure cart logic, order transaction, receipt pages
 ├─ lib/                        firebase, env, auth-errors, money, utils
 └─ pages/                      Dashboard, Admin, 403, 404
 

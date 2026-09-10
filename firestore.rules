@@ -126,6 +126,79 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ---- Cost history (admin only, append-only) ----------------------------
+    // Costs change over time, and margin for a past sale is unanswerable unless the cost
+    // in force at the time is recorded. Staff cannot read costs, so they cannot stamp one
+    // onto an order they ring up — instead an admin's cost edits are journalled here, and
+    // reporting later resolves an order's cost by date. Append-only: correcting history is
+    // not editing it.
+
+    function validCostHistory() {
+      let d = request.resource.data;
+      return d.itemId is string && d.itemId.size() > 0
+        && (d.cost == null || (d.cost is int && d.cost >= 0))
+        && d.effectiveFrom is timestamp
+        && d.recordedBy == request.auth.uid;
+    }
+
+    match /menuItemCostHistory/{entryId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && validCostHistory();
+      allow update, delete: if false;
+    }
+
+    // ---- Orders (immutable) ------------------------------------------------
+    // Any active user may ring up a sale and read the day's orders — staff work the till.
+    // Nobody may change or remove one afterwards, admins included: a sale is a financial
+    // record. When voids arrive they will write a counter-entry, never mutate the original.
+    //
+    // Note the boundary of what these checks can cover. Rules cannot iterate or sum a
+    // list, so `total` CANNOT be verified against `lines` here — that is guarded by the
+    // pure functions in src/features/pos/cart.ts and their unit tests. What rules can
+    // check, and do, is every scalar: types, ranges, the payment enum, that the sale is
+    // attributed to the caller, and that change given is exactly tendered minus total.
+
+    function validTender(d) {
+      return d.paymentMethod == 'cash'
+        ? (d.cashTendered is int
+           && d.cashTendered >= d.total
+           && d.changeGiven is int
+           && d.changeGiven == d.cashTendered - d.total)
+        : (d.cashTendered == null && d.changeGiven == null);
+    }
+
+    function validOrder() {
+      let d = request.resource.data;
+      return d.number is int && d.number > 0
+        && d.businessDate is string && d.businessDate.size() == 10
+        && d.lines is list && d.lines.size() > 0 && d.lines.size() <= 100
+        && d.total is int && d.total >= 0
+        && d.paymentMethod in ['cash', 'ewallet']
+        && d.createdBy == request.auth.uid
+        && d.createdByName is string
+        && d.createdAt is timestamp
+        && validTender(d);
+    }
+
+    match /orders/{orderId} {
+      allow read: if isActive();
+      allow create: if isActive() && validOrder();
+      allow update, delete: if false;
+    }
+
+    // ---- Daily order counter -----------------------------------------------
+    // Assigns the human-facing order number, in the same transaction that writes the
+    // order. The increment-by-exactly-one check is what stops a tampered client skipping,
+    // reusing or rewinding a number.
+
+    match /counters/{businessDate} {
+      allow read: if isActive();
+      allow create: if isActive() && request.resource.data.lastNumber == 1;
+      allow update: if isActive()
+        && request.resource.data.lastNumber == resource.data.lastNumber + 1;
+      allow delete: if false;
+    }
+
     // ---- Default deny ------------------------------------------------------
     // Everything not matched above is refused. Later phases add explicit matches
     // rather than loosening this.

@@ -170,8 +170,11 @@ function MenuItemForm({
         sortOrder: parsedSort,
         active,
       }
-      if (isEditing && itemId) await updateMenuItem(itemId, input, parsedCost)
-      else await createMenuItem(input, parsedCost)
+      if (isEditing && itemId) {
+        await updateMenuItem(itemId, input, { next: parsedCost, previous: existingCost })
+      } else {
+        await createMenuItem(input, parsedCost)
+      }
       void navigate('/menu')
     } catch {
       setError('That change was refused. Your account may not have permission to edit the menu.')

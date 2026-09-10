@@ -326,6 +326,6 @@ describe('menu rules: default deny still holds', () => {
   it('denies an admin writing to a collection no rule covers yet', async () => {
     await seed()
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
-    await assertFails(setDoc(doc(db, 'orders', 'order-1'), { total: 1250 }))
+    await assertFails(setDoc(doc(db, 'unmappedCollection', 'doc-1'), { anything: 1 }))
   })
 })

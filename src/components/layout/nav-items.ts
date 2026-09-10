@@ -1,4 +1,11 @@
-import { CupSoda, LayoutDashboard, Settings, type LucideIcon } from 'lucide-react'
+import {
+  CupSoda,
+  LayoutDashboard,
+  ReceiptText,
+  ScanBarcode,
+  Settings,
+  type LucideIcon,
+} from 'lucide-react'
 
 import { ROLES, type Role } from '@/features/auth/types'
 
@@ -19,6 +26,18 @@ export const NAV_ITEMS: readonly NavItem[] = [
     to: '/dashboard',
     label: 'Dashboard',
     icon: LayoutDashboard,
+    roles: ROLES,
+  },
+  {
+    to: '/pos',
+    label: 'Till',
+    icon: ScanBarcode,
+    roles: ROLES,
+  },
+  {
+    to: '/orders',
+    label: 'Orders',
+    icon: ReceiptText,
     roles: ROLES,
   },
   {

@@ -158,8 +158,11 @@ describe('firestore rules: default deny', () => {
   it('denies an admin writing to a collection no rule covers yet', async () => {
     await seedProfiles()
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
-    await assertFails(setDoc(doc(db, 'orders', 'order-1'), { total: 12.5 }))
-    await assertFails(getDoc(doc(db, 'orders', 'order-1')))
+    // Deliberately a name no phase will ever add a rule for. Using a real future
+    // collection here would make this test quietly stop testing default-deny the moment
+    // that phase landed — which is exactly what happened when it used `orders`.
+    await assertFails(setDoc(doc(db, 'unmappedCollection', 'doc-1'), { anything: 1 }))
+    await assertFails(getDoc(doc(db, 'unmappedCollection', 'doc-1')))
   })
 
   it('denies an unauthenticated write anywhere', async () => {

@@ -8,6 +8,9 @@ import { RequireRole } from '@/features/auth/RequireRole'
 import { CategoriesPage } from '@/features/menu/CategoriesPage'
 import { MenuItemFormPage } from '@/features/menu/MenuItemFormPage'
 import { MenuListPage } from '@/features/menu/MenuListPage'
+import { OrderDetailPage } from '@/features/pos/OrderDetailPage'
+import { OrdersListPage } from '@/features/pos/OrdersListPage'
+import { TerminalPage } from '@/features/pos/TerminalPage'
 import { AdminPage } from '@/pages/AdminPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { ForbiddenPage } from '@/pages/ForbiddenPage'
@@ -28,6 +31,11 @@ export function App() {
 
               {/* The catalog is readable by both roles — staff serve from it. */}
               <Route path="/menu" element={<MenuListPage />} />
+
+              {/* The till and the sales record: both roles, since staff work them. */}
+              <Route path="/pos" element={<TerminalPage />} />
+              <Route path="/orders" element={<OrdersListPage />} />
+              <Route path="/orders/:orderId" element={<OrderDetailPage />} />
 
               {/* Admin-only group. Later admin routes nest here rather than
                   repeating the guard. */}
