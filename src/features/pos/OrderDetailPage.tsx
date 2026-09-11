@@ -17,6 +17,7 @@ import {
   type FulfillmentStatus,
 } from '@/features/pos/fulfillment'
 import { setFulfillment } from '@/features/pos/fulfillment-api'
+import { ORDER_TYPE_LABELS } from '@/features/pos/order-type'
 import { recordPayment } from '@/features/pos/payment-api'
 import { canRecordPayment, resolvePaymentState } from '@/features/pos/payments'
 import {
@@ -221,6 +222,25 @@ export function OrderDetailPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* How the order is served. The table row is omitted entirely for a takeaway —
+              showing "Table —" would imply a table that was never involved. */}
+          <dl className="grid gap-1 text-sm" data-testid="service-summary">
+            <div className="flex gap-3">
+              <dt className="text-muted-foreground">Order type</dt>
+              <dd className="ml-auto" data-testid="receipt-order-type">
+                {order.orderType === null ? 'Not recorded' : ORDER_TYPE_LABELS[order.orderType]}
+              </dd>
+            </div>
+            {order.orderType === 'dine_in' && order.tableNumber !== null && (
+              <div className="flex gap-3">
+                <dt className="text-muted-foreground">Table</dt>
+                <dd className="ml-auto" data-testid="receipt-table">
+                  {order.tableNumber}
+                </dd>
+              </div>
+            )}
+          </dl>
+
           {/* Both axes spelled out, so nobody has to infer the state from a single word.
               The overall line is derived from the two above it, never stored. */}
           <dl className="grid gap-1 rounded-lg border p-3 text-sm" data-testid="status-summary">

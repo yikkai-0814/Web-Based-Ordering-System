@@ -13,6 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { overallStatusOf, resolveFulfillmentState } from '@/features/pos/fulfillment'
+import { orderTypeSummaryOf } from '@/features/pos/order-type'
 import { resolvePaymentState } from '@/features/pos/payments'
 import {
   FulfillmentStatusBadge,
@@ -43,9 +44,10 @@ export function OrdersListPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Orders</h1>
         <p className="text-muted-foreground">
-          Orders, newest first. Fulfilment and payment advance independently — an order is complete
-          only once it has been delivered <em>and</em> paid for. Orders cannot be edited or deleted;
-          a mistake is corrected by voiding, which leaves the original record intact.
+          Orders, newest first. Dine-in orders carry the table they belong to. Fulfilment and
+          payment advance independently — an order is complete only once it has been delivered{' '}
+          <em>and</em> paid for. Orders cannot be edited or deleted; a mistake is corrected by
+          voiding, which leaves the original record intact.
         </p>
       </div>
 
@@ -65,6 +67,7 @@ export function OrdersListPage() {
               <TableRow>
                 <TableHead className="w-24">Order</TableHead>
                 <TableHead className="w-32">Date</TableHead>
+                <TableHead className="w-36">Type</TableHead>
                 <TableHead className="w-20">Items</TableHead>
                 <TableHead className="w-28">Fulfilment</TableHead>
                 <TableHead className="w-32">Payment</TableHead>
@@ -98,6 +101,9 @@ export function OrdersListPage() {
                     <TableCell className="tabular-nums text-muted-foreground">
                       {order.businessDate === today ? 'Today' : order.businessDate}
                     </TableCell>
+                    {/* "Dine-in · Table 5", "Takeaway", or "Not recorded" for an order
+                        placed before order types existed. Never a table for a takeaway. */}
+                    <TableCell data-testid="order-service">{orderTypeSummaryOf(order)}</TableCell>
                     <TableCell className="tabular-nums">
                       {order.lines.reduce((count, line) => count + line.quantity, 0)}
                     </TableCell>

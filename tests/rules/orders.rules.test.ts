@@ -43,6 +43,10 @@ const placedOrder = (uid = STAFF_UID) => ({
     { menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 2 },
     { menuItemId: 'i2', name: 'Croissant', unitPrice: 690, quantity: 1 },
   ],
+  // Phase 7: every order records how it is served. Dine-in carries a table number;
+  // a takeaway must not carry the key at all.
+  orderType: 'dine_in',
+  tableNumber: '5',
   total: 3190,
   createdAt: new Date(),
   createdBy: uid,
@@ -186,6 +190,137 @@ describe('order rules: field validation', () => {
     await assertFails(
       setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), businessDate: '11/9/26' }),
     )
+  })
+})
+
+describe('order rules: order type and table number', () => {
+  /** The fixture minus the table number key — absent, not null. */
+  const withoutTable = (over: Record<string, unknown> = {}) => {
+    const { tableNumber: _table, ...rest } = { ...placedOrder(), ...over }
+    return rest
+  }
+
+  /** A valid takeaway: order type present, table number key absent entirely. */
+  const takeaway = () => withoutTable({ orderType: 'takeaway' })
+
+  it('accepts a dine-in order with a table number', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), placedOrder()))
+  })
+
+  it('accepts a takeaway that carries no table number at all', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), takeaway()))
+  })
+
+  it('accepts every shape of table label a café might use', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    for (const [index, tableNumber] of ['5', '12', 'A3', 'T12', '12B', 'AAAAAAAA'].entries()) {
+      await assertSucceeds(
+        setDoc(doc(db, 'orders', `ok-${index}`), { ...placedOrder(), tableNumber }),
+      )
+    }
+  })
+
+  // A table number is an identifier, not a resource. Nothing reserves or de-duplicates one.
+  it('lets several separate orders share the same table number', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertSucceeds(setDoc(doc(db, 'orders', 'a'), { ...placedOrder(), tableNumber: '5' }))
+    await assertSucceeds(
+      setDoc(doc(db, 'orders', 'b'), { ...placedOrder(), number: 2, tableNumber: '5' }),
+    )
+    await assertSucceeds(
+      setDoc(doc(db, 'orders', 'c'), { ...placedOrder(), number: 3, tableNumber: '5' }),
+    )
+  })
+
+  it('refuses a dine-in order with no table number key', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), withoutTable({ orderType: 'dine_in' })))
+  })
+
+  it('refuses a dine-in order whose table number is blank or whitespace', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    // The rules have no trim(), so this is enforced by the pattern rather than by length —
+    // a client that skipped the form must not be able to write "   ".
+    for (const tableNumber of ['', ' ', '   ', '\t']) {
+      await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), tableNumber }))
+    }
+  })
+
+  it('refuses a table number longer than eight characters', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), tableNumber: 'A'.repeat(9) }),
+    )
+  })
+
+  it('refuses a table number containing anything but letters and digits', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    for (const tableNumber of ['A-3', 'T 12', '5!', '#4', '5.0']) {
+      await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), tableNumber }))
+    }
+  })
+
+  it('refuses a table number that is not a string', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), tableNumber: 5 }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), tableNumber: true }))
+  })
+
+  // The load-bearing half of the invariant: a takeaway has no table, and null is presence.
+  it('refuses a takeaway that carries a table number', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), orderType: 'takeaway' }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...takeaway(), tableNumber: null }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...takeaway(), tableNumber: '' }))
+  })
+
+  it('refuses an order type the café does not offer', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    for (const orderType of ['delivery', 'dine-in', 'DINE_IN', 'eat_in', '', 5, null]) {
+      await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), orderType }))
+    }
+  })
+
+  // A new order may not be written in the pre-Phase-7 shape, even though existing ones in
+  // that shape must still read back — see tests/unit/order-type.test.ts.
+  it('refuses an order with no order type at all', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    const { orderType: _o, ...noType } = placedOrder()
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), noType))
+  })
+
+  it('refuses an admin doing any of it either', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(ADMIN_UID), orderType: 'delivery' }),
+    )
+    await assertFails(
+      setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(ADMIN_UID), tableNumber: '   ' }),
+    )
+  })
+
+  // Order type and table number are written once and never change, like everything else on
+  // an order. A mistyped table is corrected by voiding and ringing again.
+  it('refuses changing the order type or table number afterwards', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(updateDoc(doc(db, 'orders', 'existing'), { tableNumber: '9' }))
+    await assertFails(updateDoc(doc(db, 'orders', 'existing'), { orderType: 'takeaway' }))
   })
 })
 

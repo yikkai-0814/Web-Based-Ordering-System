@@ -1,6 +1,7 @@
 import type { Timestamp } from 'firebase/firestore'
 
 import { isFulfillmentStatus, type FulfillmentStatus } from '@/features/pos/fulfillment'
+import { isOrderType, type OrderType } from '@/features/pos/order-type'
 
 /**
  * The two ways the café takes money.
@@ -48,6 +49,19 @@ export interface Order {
   businessDate: string
   lines: OrderLine[]
   total: number
+  /**
+   * How the order is served, and the table it belongs to when it is eaten in.
+   *
+   * `tableNumber` is non-null only for `dine_in` — the rules refuse a takeaway that carries
+   * one at all. It is an identifier and nothing more: several orders may share a table, and
+   * nothing here tracks whether a table is occupied.
+   *
+   * Both are null on orders placed before order types existed. Orders are immutable, so
+   * those cannot be backfilled, and guessing a type would invent history that never
+   * happened — `orderTypeSummaryOf` renders them as "Not recorded".
+   */
+  orderType: OrderType | null
+  tableNumber: string | null
   /**
    * **Legacy only.** Sales rung up before payment could be recorded separately captured it
    * at creation and carry the method here; the rules now forbid a new order from carrying
@@ -110,6 +124,8 @@ export function parseOrder(id: string, data: Record<string, unknown>): Order | n
     businessDate,
     lines,
     total,
+    orderType,
+    tableNumber,
     paymentMethod,
     cashTendered,
     changeGiven,
@@ -143,6 +159,11 @@ export function parseOrder(id: string, data: Record<string, unknown>): Order | n
     businessDate,
     lines: parsedLines,
     total,
+    // Coerced, never fatal: an order placed before order types existed has neither field,
+    // and discarding it would hide every pre-Phase-7 sale from the list and the reports.
+    // An unrecognised value is treated the same as absent, exactly as paymentMethod is.
+    orderType: isOrderType(orderType) ? orderType : null,
+    tableNumber: typeof tableNumber === 'string' && tableNumber !== '' ? tableNumber : null,
     // Absent on every order written since payment became a separate step, and an
     // unrecognised value is treated the same as absent rather than discarding the sale.
     paymentMethod: isPaymentMethod(paymentMethod) ? paymentMethod : null,

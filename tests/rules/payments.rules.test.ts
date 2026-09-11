@@ -70,6 +70,10 @@ const order = (over: Record<string, unknown> = {}) => ({
   number: 1,
   businessDate: DATE,
   lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1595, quantity: 2 }],
+  // Phase 7: every order records how it is served. Dine-in carries a table number;
+  // a takeaway must not carry the key at all.
+  orderType: 'dine_in',
+  tableNumber: '5',
   total: TOTAL,
   createdAt: new Date(),
   createdBy: STAFF_UID,
@@ -78,6 +82,12 @@ const order = (over: Record<string, unknown> = {}) => ({
   staffName: 'Alice',
   ...over,
 })
+
+/** Drops the Phase 7 fields, for seeding a document as it would have existed before them. */
+function legacyShaped(document: Record<string, unknown>): Record<string, unknown> {
+  const { orderType: _orderType, tableNumber: _tableNumber, ...rest } = document
+  return rest
+}
 
 async function seed({ staffActive = true } = {}) {
   await testEnv.withSecurityRulesDisabled(async (context) => {
@@ -128,7 +138,11 @@ async function seed({ staffActive = true } = {}) {
     // Only creatable with the rules off, which is exactly how the real ones got there.
     await setDoc(
       doc(db, 'orders', LEGACY_ORDER_ID),
-      order({ number: 3, paymentMethod: 'cash', cashTendered: 5000, changeGiven: 1810 }),
+      // Genuinely pre-Phase-7: inline payment AND no order type, which is the shape real
+      // legacy documents have. Strips the fixture's defaults rather than adding to them.
+      legacyShaped(
+        order({ number: 3, paymentMethod: 'cash', cashTendered: 5000, changeGiven: 1810 }),
+      ),
     )
 
     await setDoc(doc(db, 'orderVoids', VOIDED_ORDER_ID), {

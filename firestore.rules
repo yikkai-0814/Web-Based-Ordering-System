@@ -194,6 +194,35 @@ service cloud.firestore {
         && !('changeGiven' in d.keys());
     }
 
+    // **Every new order is dine-in or takeaway, and exactly one of the two carries a table
+    // number.** A table number is an IDENTIFIER, not a resource: nothing here reserves,
+    // occupies or de-duplicates one, and several orders may legitimately share "5".
+    //
+    // Takeaway must not carry the key AT ALL — absent, not null — for the same reason
+    // carriesNoPayment refuses a null paymentMethod. Present-but-empty is a third state
+    // nothing could classify, and a stale client sending one should fail loudly rather than
+    // write an order whose type cannot be read back.
+    //
+    // Written as a ternary rather than one flat conjunction because on a takeaway order
+    // `d.tableNumber` does not exist, and reading a missing field is an evaluation ERROR,
+    // not null. The read must be reachable only on the branch where the field is guaranteed
+    // to be there. The enum check comes FIRST so a garbage orderType is rejected on its own
+    // terms rather than falling into the takeaway branch and passing by accident.
+    //
+    // `matches()` rather than a size check because rules have no trim(), so `size() > 0`
+    // would accept "   " from a client that skipped the form. The pattern mirrors
+    // TABLE_NUMBER_PATTERN in src/features/pos/order-type.ts; keep the two in step.
+    //
+    // Both fields are written once, with the order, and orders are immutable — so a mistyped
+    // table number is corrected the way any other mistake on a sale is: void and re-ring.
+
+    function validService(d) {
+      return d.orderType in ['dine_in', 'takeaway']
+        && (d.orderType == 'dine_in'
+            ? (d.tableNumber is string && d.tableNumber.matches('^[A-Za-z0-9]{1,8}$'))
+            : !('tableNumber' in d.keys()));
+    }
+
     // An order names the identity that operated the till. Two forms are valid.
     //
     // 1. The signed-in account itself. Every user always has this, which is what keeps a
@@ -238,6 +267,7 @@ service cloud.firestore {
         && d.businessDate is string && d.businessDate.size() == 10
         && d.lines is list && d.lines.size() > 0 && d.lines.size() <= 100
         && d.total is int && d.total >= 0
+        && validService(d)
         && carriesNoPayment(d)
         && d.createdBy == request.auth.uid
         && d.createdByName is string

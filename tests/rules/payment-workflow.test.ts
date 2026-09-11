@@ -120,6 +120,10 @@ const orderDoc = (over: Record<string, unknown> = {}) => ({
   number: 1,
   businessDate: DATE,
   lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: TOTAL, quantity: 1 }],
+  // Phase 7: every order records how it is served. Dine-in carries a table number;
+  // a takeaway must not carry the key at all.
+  orderType: 'dine_in',
+  tableNumber: '5',
   total: TOTAL,
   createdAt: new Date(),
   createdBy: STAFF_UID,

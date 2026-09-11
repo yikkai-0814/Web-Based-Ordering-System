@@ -18,6 +18,9 @@ without altering the sale itself.
 **Phase 5** added reports: an admin-only view of revenue, item performance, payment mix,
 voids, and estimated cost and profit resolved from the cost-history journal.
 
+**Phase 7** adds order types: every order is dine-in or takeaway, and a dine-in order carries
+the table it belongs to.
+
 **Phase 6** adds staff identities: named till operators without Firebase accounts, selected
 on the shared POS and recorded on every order; and two independent order statuses —
 fulfilment (pending → preparing → ready → delivered) and payment (unpaid → paid) — with an
@@ -207,7 +210,9 @@ menuItemCostHistory/{autoId}
                      itemId, cost (sen|null), effectiveFrom, recordedBy
                                                     ← ADMIN ONLY, append-only journal
 orders/{orderId}     number, businessDate, lines[], total (sen), createdAt,
-                     createdBy, createdByName, staffId, staffName
+                     createdBy, createdByName, staffId, staffName,
+                     orderType ('dine_in' | 'takeaway'),
+                     tableNumber                    ← dine-in ONLY; absent for takeaway
                                                     ← IMMUTABLE, and carries NO payment
 orderPayments/{orderId}
                      orderId, method ('cash' | 'ewallet'), amount (sen),
@@ -383,6 +388,53 @@ paid. `resolvePaymentState` in `src/features/pos/payments.ts` reads them as paid
 them `source: 'legacy'`, so old receipts still display correctly with **no data migration**
 and no backfill of immutable documents. Those orders cannot be paid again through the new
 flow — the rules refuse it.
+
+### Order type and table number
+
+Every order records how it is served:
+
+```
+orderType:    dine_in | takeaway
+tableNumber:  required for dine_in, ABSENT for takeaway
+```
+
+A table number is **only an identifier stamped on the order**. Several orders may carry the
+same one, and nothing in this system tracks which tables are occupied, free, or owe money.
+There are deliberately no table tabs, no grouping, no availability, no transfers, no merging,
+no floor plan and no reservations — a café writes "5" on a docket so the food reaches the
+right table, and that is the whole of it.
+
+`tableNumber` is short free text matching `^[A-Za-z0-9]{1,8}$`, so `5`, `12`, `A3`, `T12` and
+`12B` all work — a café labels its tables however it likes. It is stored **trimmed**.
+
+**The invariant is enforced at the database**, in `validService`:
+
+- `orderType` must be one of the two values;
+- `dine_in` must carry a `tableNumber` matching the pattern;
+- `takeaway` must **not carry the key at all** — absent, not null, for the same reason
+  `carriesNoPayment` refuses a null `paymentMethod`. Present-but-empty is a third state
+  nothing could classify.
+
+Two details in that rule are load-bearing. It is written as a ternary because reading a
+missing field in Firestore rules is an **evaluation error, not null**, so `d.tableNumber` must
+only be reachable on the branch where it is guaranteed to exist. And it uses `matches()`
+rather than a length check because rules have no `trim()` — `size() > 0` would happily accept
+`"   "` from a client that skipped the form. The pattern is mirrored in
+`src/features/pos/order-type.ts`; keep the two in step.
+
+Both fields are written once, with the order. Orders are immutable, so **a mistyped table
+number is corrected the way any other mistake on a sale is: void it and ring it again.**
+
+**The till defaults to dine-in** rather than takeaway, deliberately. A dine-in order cannot be
+placed until somebody types a table number, so a forgotten toggle _blocks_; defaulting to
+takeaway would let a mis-set order sail through and be silently mis-recorded. Both fields
+reset after every order for the same reason — carrying "Table 5" into the next customer's
+order would be invisible, because the field looks identical either way.
+
+**Orders placed before Phase 7** have neither field. `parseOrder` reads both as `null` exactly
+as it does `staffId`/`staffName`, and `orderTypeSummaryOf` renders them as **"Not recorded"**.
+No backfill, no migration, and no guessing: those orders genuinely did not capture this, and
+inventing a type would be inventing history.
 
 ### Fulfilment and payment are two separate things
 

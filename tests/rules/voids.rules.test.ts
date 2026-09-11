@@ -38,6 +38,10 @@ const order = () => ({
   businessDate: '2026-09-11',
   lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 2 }],
   total: ORDER_TOTAL,
+  // Phase 7: every order records how it is served. Dine-in carries a table number;
+  // a takeaway must not carry the key at all.
+  orderType: 'dine_in',
+  tableNumber: '5',
   // Placed unpaid; payment is a separate document, and the rules refuse an order that
   // carries any. Voiding is unaffected either way — see payments.rules.test.ts for the
   // interaction between the two.

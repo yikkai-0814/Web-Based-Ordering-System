@@ -1,11 +1,19 @@
 import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore'
 
 import { cartTotal, validateCart, type Cart } from '@/features/pos/cart'
+import { validatePlacement, type OrderType } from '@/features/pos/order-type'
 import { businessDateOf } from '@/features/pos/types'
 import { db } from '@/lib/firebase'
 
 export interface CreateOrderParams {
   cart: Cart
+  /**
+   * How the order is served, raw as the till holds it. Validated here rather than trusted,
+   * so `createOrder` stays the single place an order's shape is decided.
+   *
+   * `tableNumber` is the text typed into the field; it is ignored entirely for a takeaway.
+   */
+  placement: { orderType: OrderType; tableNumber: string }
   /** The signed-in Firebase account. Rules require createdBy to equal this uid. */
   user: { uid: string; displayName: string }
   /**
@@ -37,9 +45,19 @@ export interface CreatedOrder {
  * Firestore sustains at roughly one write per second. That is far above a café counter's
  * rate, but it is the ceiling of this design.
  */
-export async function createOrder({ cart, user, staff }: CreateOrderParams): Promise<CreatedOrder> {
+export async function createOrder({
+  cart,
+  placement,
+  user,
+  staff,
+}: CreateOrderParams): Promise<CreatedOrder> {
   const validation = validateCart(cart)
   if (!validation.ok) throw new Error(validation.error)
+
+  // A dine-in order without a usable table number never reaches Firestore. The rules check
+  // it again, independently — this is the message the counter sees, not the enforcement.
+  const service = validatePlacement(placement.orderType, placement.tableNumber)
+  if (!service.ok) throw new Error(service.error)
 
   const total = cartTotal(cart)
 
@@ -69,6 +87,11 @@ export async function createOrder({ cart, user, staff }: CreateOrderParams): Pro
         quantity: line.quantity,
       })),
       total,
+      orderType: service.orderType,
+      // Conditional spread, never `tableNumber: null` or `undefined`. The rules refuse the
+      // KEY on a takeaway order, and Firestore rejects an undefined field value outright
+      // rather than omitting it — so this is what makes "absent" actually absent.
+      ...(service.orderType === 'dine_in' ? { tableNumber: service.tableNumber } : {}),
       // No payment fields, by design — see the note above. An order is unpaid until an
       // orderPayments document says otherwise.
       createdAt: serverTimestamp(),

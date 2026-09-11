@@ -181,6 +181,8 @@ describe('parseOrder with payment removed from the order', () => {
     businessDate: '2026-09-11',
     lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 1 }],
     total: 1250,
+    orderType: 'dine_in',
+    tableNumber: '5',
     createdBy: 'staff-uid',
     createdByName: 'Sam Staff',
     staffId: 'alice',

@@ -49,6 +49,10 @@ beforeAll(async () => {
       active: true,
       createdAt: new Date(),
     })
+    // Deliberately left in the ORIGINAL shape: inline payment, no staff attribution, and
+    // no order type or table number. Seeded with the rules disabled, exactly as a real
+    // pre-Phase-7 document came to exist — so this doubles as the proof that a legacy order
+    // stays readable, listable and range-queryable after the create rules tightened.
     await setDoc(doc(db, 'orders', 'o1'), {
       number: 1,
       businessDate: '2026-09-10',
