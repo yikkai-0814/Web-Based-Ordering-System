@@ -28,7 +28,14 @@ export interface ReportOrder {
   createdAt: Date | null
   lines: ReportOrderLine[]
   total: number
-  paymentMethod: PaymentMethod
+  /**
+   * Whether the money has actually been received, resolved by `resolvePaymentState` before
+   * it reaches here. An order exists from the moment it is rung up; being paid is a later,
+   * separate event, so this is never inferred from the order's existence.
+   */
+  paid: boolean
+  /** The method money was received by. Null while an order is still unpaid. */
+  paymentMethod: PaymentMethod | null
 }
 
 export interface ReportVoidInfo {
@@ -142,13 +149,29 @@ export interface VoidedOrderRow {
 }
 
 export interface Report {
+  /**
+   * Every non-voided order in range, paid or not.
+   *
+   * A sale is counted when it is rung up, not when it is settled — so revenue, cost, profit
+   * and margin all mean the same thing they meant before payment became a separate step,
+   * and an unpaid order does not quietly vanish from the day's trading figures. What has
+   * actually been *collected* is reported separately below; the two are different questions
+   * and conflating them is how a report ends up unable to answer either.
+   */
   revenue: number
   orderCount: number
+  /** Of `orderCount`, how many have had payment recorded. */
+  paidOrderCount: number
+  unpaidOrderCount: number
+  /** Revenue from orders that have been paid — money in the drawer. */
+  collectedRevenue: number
+  /** Revenue from orders not yet paid — money still owed. Sums with collected to revenue. */
+  outstandingRevenue: number
   /** Rounded to the nearest sen; a display figure, never re-used in arithmetic. */
   averageOrderValue: number
   estimatedCost: number
   estimatedProfit: number
-  /** 0–100, or null when revenue is zero — never NaN. */
+  /** 0–100; null when revenue is zero or no cost at all is known — never NaN. */
   marginPercent: number | null
   coverage: CostCoverage
   payments: PaymentBreakdownRow[]
@@ -168,6 +191,20 @@ export interface BuildReportInput {
 function percentOf(part: number, whole: number): number | null {
   if (whole === 0) return null
   return (part / whole) * 100
+}
+
+/**
+ * Margin, suppressed when **no** cost at all is known for the scope.
+ *
+ * With zero known cost, `revenue - 0` makes the margin exactly 100% every time — a number
+ * that looks like a performance figure but carries no information, and the most flattering
+ * one possible. Partial coverage still returns a value, because that is a genuine upper
+ * bound the warning already explains; total absence of cost data returns null so the UI
+ * shows an em dash instead.
+ */
+function marginOf(profit: number, revenue: number, knownRevenue: number): number | null {
+  if (knownRevenue === 0) return null
+  return percentOf(profit, revenue)
 }
 
 function coverageOf(knownRevenue: number, totalRevenue: number): CostCoverage {
@@ -212,6 +249,8 @@ export function buildReport({ orders, voids, history, currentCosts }: BuildRepor
   let revenue = 0
   let estimatedCost = 0
   let knownRevenue = 0
+  let paidOrderCount = 0
+  let collectedRevenue = 0
 
   const paymentTotals = new Map<PaymentMethod, PaymentBreakdownRow>()
   const itemTotals = new Map<
@@ -230,16 +269,23 @@ export function buildReport({ orders, voids, history, currentCosts }: BuildRepor
   for (const order of live) {
     revenue += order.total
 
-    const payment = paymentTotals.get(order.paymentMethod)
-    if (payment) {
-      payment.count += 1
-      payment.amount += order.total
-    } else {
-      paymentTotals.set(order.paymentMethod, {
-        method: order.paymentMethod,
-        count: 1,
-        amount: order.total,
-      })
+    if (order.paid) {
+      paidOrderCount += 1
+      collectedRevenue += order.total
+    }
+
+    // The breakdown answers "how was money taken", so only orders where money was actually
+    // taken belong in it. An unpaid order has no method to attribute, and inventing a
+    // bucket for it would put money that has not arrived alongside money that has.
+    if (order.paid && order.paymentMethod !== null) {
+      const method = order.paymentMethod
+      const payment = paymentTotals.get(method)
+      if (payment) {
+        payment.count += 1
+        payment.amount += order.total
+      } else {
+        paymentTotals.set(method, { method, count: 1, amount: order.total })
+      }
     }
 
     const orderTime = order.createdAt ? order.createdAt.getTime() : 0
@@ -286,7 +332,7 @@ export function buildReport({ orders, voids, history, currentCosts }: BuildRepor
         revenue: totals.revenue,
         estimatedCost: totals.estimatedCost,
         estimatedProfit: profit,
-        marginPercent: percentOf(profit, totals.revenue),
+        marginPercent: marginOf(profit, totals.revenue, totals.knownRevenue),
         coverage: coverageOf(totals.knownRevenue, totals.revenue),
       }
     })
@@ -297,10 +343,14 @@ export function buildReport({ orders, voids, history, currentCosts }: BuildRepor
   return {
     revenue,
     orderCount: live.length,
+    paidOrderCount,
+    unpaidOrderCount: live.length - paidOrderCount,
+    collectedRevenue,
+    outstandingRevenue: revenue - collectedRevenue,
     averageOrderValue: live.length === 0 ? 0 : Math.round(revenue / live.length),
     estimatedCost,
     estimatedProfit,
-    marginPercent: percentOf(estimatedProfit, revenue),
+    marginPercent: marginOf(estimatedProfit, revenue, knownRevenue),
     coverage: coverageOf(knownRevenue, revenue),
     payments: [...paymentTotals.values()].sort((a, b) => b.amount - a.amount),
     items,

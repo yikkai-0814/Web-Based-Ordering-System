@@ -20,9 +20,17 @@ const order = (over: Partial<ReportOrder> = {}): ReportOrder => ({
   createdAt: at('2026-09-10T10:00:00'),
   lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 1 }],
   total: 1250,
+  // Paid by default so every pre-existing expectation below still describes the same
+  // scenario it did before payment became a separate step: a settled cash sale. Tests that
+  // care about the unpaid case pass `paid: false` explicitly.
+  paid: true,
   paymentMethod: 'cash',
   ...over,
 })
+
+/** An order that has been placed but not yet paid: no method, and nothing collected. */
+const unpaidOrder = (over: Partial<ReportOrder> = {}): ReportOrder =>
+  order({ paid: false, paymentMethod: null, ...over })
 
 const history = (...entries: CostHistoryEntry[]) => indexCostHistory(entries)
 const noVoids = new Map<string, ReportVoidInfo>()
@@ -93,6 +101,43 @@ describe('resolveCostAtTime', () => {
     const index = history({ itemId: 'i1', cost: 400, effectiveFrom: at('2026-09-01T00:00:00') })
     expect(resolveCostAtTime('i1', at('2026-09-10T00:00:00'), index, noCosts)).toBe(400)
     expect(resolveCostAtTime('i2', at('2026-09-10T00:00:00'), index, noCosts)).toBeNull()
+  })
+})
+
+describe('resolveCostAtTime: a backfilled opening entry keeps old sales resolvable', () => {
+  it('an edit WITHOUT an opening entry loses the old sale (the bug being fixed)', () => {
+    // Only the new value is journalled, dated at the edit. The earlier sale now has
+    // history that starts after it, so it resolves unknown even though 200 was known.
+    const index = history({ itemId: 'i1', cost: 300, effectiveFrom: at('2026-09-11T13:00:00') })
+    const current = new Map([['i1', 300]])
+    expect(resolveCostAtTime('i1', at('2026-09-11T11:00:00'), index, current)).toBeNull()
+  })
+
+  it('with the opening entry backfilled, the old sale resolves to the OLD cost', () => {
+    const index = history(
+      { itemId: 'i1', cost: 200, effectiveFrom: at('2026-09-11T10:00:00') }, // backfilled
+      { itemId: 'i1', cost: 300, effectiveFrom: at('2026-09-11T13:00:00') },
+    )
+    const current = new Map([['i1', 300]])
+    expect(resolveCostAtTime('i1', at('2026-09-11T11:00:00'), index, current)).toBe(200)
+    expect(resolveCostAtTime('i1', at('2026-09-11T14:00:00'), index, current)).toBe(300)
+  })
+
+  it('walks the full set / change / clear timeline from the spec', () => {
+    const index = history(
+      { itemId: 'i1', cost: 200, effectiveFrom: at('2026-09-11T10:00:00') },
+      { itemId: 'i1', cost: 300, effectiveFrom: at('2026-09-11T13:00:00') },
+      { itemId: 'i1', cost: null, effectiveFrom: at('2026-09-11T16:00:00') },
+    )
+    const current = new Map<string, number>() // cleared, so no current cost
+    expect(resolveCostAtTime('i1', at('2026-09-11T11:00:00'), index, current)).toBe(200) // Sale A
+    expect(resolveCostAtTime('i1', at('2026-09-11T14:00:00'), index, current)).toBe(300) // Sale B
+    expect(resolveCostAtTime('i1', at('2026-09-11T17:00:00'), index, current)).toBeNull() // Sale C
+  })
+
+  it('leaves the legacy no-history fallback untouched', () => {
+    const current = new Map([['i1', 250]])
+    expect(resolveCostAtTime('i1', at('2026-09-11T11:00:00'), history(), current)).toBe(250)
   })
 })
 
@@ -263,6 +308,68 @@ describe('buildReport: cost, profit, margin and coverage', () => {
     expect(report.estimatedCost).toBe(506)
     expect(report.estimatedProfit).toBe(4589)
     expect(Number.isInteger(report.estimatedCost)).toBe(true)
+  })
+})
+
+describe('buildReport: margin is suppressed when no cost is known', () => {
+  it('reports margin as null, not 100%, for an item with no recorded cost', () => {
+    // revenue - 0 is always exactly 100% margin: a flattering number carrying no
+    // information. It must not be presented as a performance figure.
+    const report = buildReport({
+      orders: [
+        order({
+          total: 500,
+          lines: [{ menuItemId: 'nocost', name: 'Muffin', unitPrice: 500, quantity: 1 }],
+        }),
+      ],
+      voids: noVoids,
+      history: history(),
+      currentCosts: noCosts,
+    })
+    expect(report.items[0]?.marginPercent).toBeNull()
+    expect(report.marginPercent).toBeNull()
+    // The money figures are untouched: profit is still the documented upper bound.
+    expect(report.revenue).toBe(500)
+    expect(report.estimatedCost).toBe(0)
+    expect(report.estimatedProfit).toBe(500)
+    expect(report.coverage.percent).toBe(0)
+    expect(report.coverage.complete).toBe(false)
+  })
+
+  it('still reports a margin under PARTIAL coverage, which is a real upper bound', () => {
+    const report = buildReport({
+      orders: [
+        order({
+          total: 2000,
+          lines: [
+            { menuItemId: 'known', name: 'Known', unitPrice: 1000, quantity: 1 },
+            { menuItemId: 'nocost', name: 'Unknown', unitPrice: 1000, quantity: 1 },
+          ],
+        }),
+      ],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['known', 400]]),
+    })
+    expect(report.marginPercent).toBeCloseTo(80, 5)
+    expect(report.items.find((r) => r.menuItemId === 'known')?.marginPercent).toBeCloseTo(60, 5)
+    expect(report.items.find((r) => r.menuItemId === 'nocost')?.marginPercent).toBeNull()
+  })
+
+  it('still reports margin normally when every cost is known', () => {
+    const report = buildReport({
+      orders: [
+        order({
+          total: 1000,
+          lines: [{ menuItemId: 'k', name: 'K', unitPrice: 1000, quantity: 1 }],
+        }),
+      ],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['k', 250]]),
+    })
+    expect(report.marginPercent).toBeCloseTo(75, 5)
+    expect(report.coverage.complete).toBe(true)
   })
 })
 
@@ -456,5 +563,126 @@ describe('csv', () => {
   it('survives a hostile item name without shifting columns', () => {
     const csv = toCsv([['a,b', 'c"d', 'plain']])
     expect(csv).toBe('"a,b","c""d",plain')
+  })
+})
+
+describe('buildReport and payment status', () => {
+  const build = (orders: ReportOrder[]) =>
+    buildReport({ orders, voids: noVoids, history: history(), currentCosts: noCosts })
+
+  it('counts an unpaid order as revenue, exactly as a paid one', () => {
+    // The decision this whole feature rests on: a sale is counted when it is rung up, not
+    // when it is settled. Changing this would silently restate every past report.
+    const paid = build([order({ id: 'a', total: 1000 })])
+    const unpaid = build([unpaidOrder({ id: 'a', total: 1000 })])
+
+    expect(unpaid.revenue).toBe(paid.revenue)
+    expect(unpaid.orderCount).toBe(paid.orderCount)
+    expect(unpaid.averageOrderValue).toBe(paid.averageOrderValue)
+    expect(unpaid.estimatedCost).toBe(paid.estimatedCost)
+    expect(unpaid.estimatedProfit).toBe(paid.estimatedProfit)
+    expect(unpaid.marginPercent).toBe(paid.marginPercent)
+  })
+
+  it('separates what was collected from what is still owed', () => {
+    const report = build([
+      order({ id: 'a', total: 1000 }),
+      order({ id: 'b', number: 2, total: 2000 }),
+      unpaidOrder({ id: 'c', number: 3, total: 500 }),
+    ])
+
+    expect(report.revenue).toBe(3500)
+    expect(report.orderCount).toBe(3)
+    expect(report.paidOrderCount).toBe(2)
+    expect(report.unpaidOrderCount).toBe(1)
+    expect(report.collectedRevenue).toBe(3000)
+    expect(report.outstandingRevenue).toBe(500)
+  })
+
+  it('always splits revenue exactly between collected and outstanding', () => {
+    const report = build([
+      order({ id: 'a', total: 1234 }),
+      unpaidOrder({ id: 'b', number: 2, total: 4321 }),
+      unpaidOrder({ id: 'c', number: 3, total: 7 }),
+    ])
+
+    expect(report.collectedRevenue + report.outstandingRevenue).toBe(report.revenue)
+    expect(report.paidOrderCount + report.unpaidOrderCount).toBe(report.orderCount)
+  })
+
+  it('reports nothing collected when no order has been paid', () => {
+    const report = build([
+      unpaidOrder({ id: 'a', total: 1000 }),
+      unpaidOrder({ id: 'b', number: 2, total: 2000 }),
+    ])
+
+    expect(report.collectedRevenue).toBe(0)
+    expect(report.outstandingRevenue).toBe(3000)
+    expect(report.paidOrderCount).toBe(0)
+    expect(report.payments).toEqual([])
+  })
+
+  it('leaves unpaid orders out of the payment-method breakdown', () => {
+    const report = build([
+      order({ id: 'a', total: 1000, paymentMethod: 'cash' }),
+      order({ id: 'b', number: 2, total: 2000, paymentMethod: 'ewallet' }),
+      unpaidOrder({ id: 'c', number: 3, total: 9999 }),
+    ])
+
+    // The breakdown answers "how was money taken", so the unpaid RM 99.99 has no place in
+    // it — and above all must not inflate either method's figure.
+    expect(report.payments).toEqual([
+      { method: 'ewallet', count: 1, amount: 2000 },
+      { method: 'cash', count: 1, amount: 1000 },
+    ])
+    expect(report.payments.reduce((sum, row) => sum + row.amount, 0)).toBe(report.collectedRevenue)
+  })
+
+  it('never counts a voided order, paid or unpaid', () => {
+    const voids = new Map<string, ReportVoidInfo>([
+      ['b', { amount: 2000, reason: 'Wrong item', voidedByName: 'Ada Admin' }],
+      ['c', { amount: 500, reason: 'Walked out', voidedByName: 'Ada Admin' }],
+    ])
+    const report = buildReport({
+      orders: [
+        order({ id: 'a', total: 1000 }),
+        order({ id: 'b', number: 2, total: 2000 }),
+        unpaidOrder({ id: 'c', number: 3, total: 500 }),
+      ],
+      voids,
+      history: history(),
+      currentCosts: noCosts,
+    })
+
+    // A voided unpaid order is not outstanding money: nobody owes it any more.
+    expect(report.revenue).toBe(1000)
+    expect(report.collectedRevenue).toBe(1000)
+    expect(report.outstandingRevenue).toBe(0)
+    expect(report.unpaidOrderCount).toBe(0)
+    expect(report.voidedAmount).toBe(2500)
+  })
+
+  it('reports zeroes for an empty range without dividing by zero', () => {
+    const report = build([])
+
+    expect(report.paidOrderCount).toBe(0)
+    expect(report.unpaidOrderCount).toBe(0)
+    expect(report.collectedRevenue).toBe(0)
+    expect(report.outstandingRevenue).toBe(0)
+  })
+
+  it('still resolves cost and margin for an unpaid order', () => {
+    // Cost is a property of what was sold, not of whether it was paid for.
+    const report = buildReport({
+      orders: [unpaidOrder({ id: 'a', total: 1250 })],
+      voids: noVoids,
+      history: history({ itemId: 'i1', cost: 500, effectiveFrom: at('2026-09-01T00:00:00') }),
+      currentCosts: noCosts,
+    })
+
+    expect(report.estimatedCost).toBe(500)
+    expect(report.estimatedProfit).toBe(750)
+    expect(report.marginPercent).toBeCloseTo(60)
+    expect(report.coverage.complete).toBe(true)
   })
 })

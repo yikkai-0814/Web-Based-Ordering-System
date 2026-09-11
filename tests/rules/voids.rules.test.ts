@@ -38,12 +38,14 @@ const order = () => ({
   businessDate: '2026-09-11',
   lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 2 }],
   total: ORDER_TOTAL,
-  paymentMethod: 'cash',
-  cashTendered: 5000,
-  changeGiven: 1810,
+  // Placed unpaid; payment is a separate document, and the rules refuse an order that
+  // carries any. Voiding is unaffected either way — see payments.rules.test.ts for the
+  // interaction between the two.
   createdAt: new Date(),
   createdBy: STAFF_UID,
   createdByName: 'Sam Staff',
+  staffId: 'alice',
+  staffName: 'Alice',
 })
 
 /** A well-formed void. Tests spread it and break one field on purpose. */
@@ -74,6 +76,12 @@ async function seed({ adminActive = true, staffActive = true } = {}) {
       role: 'staff',
       active: staffActive,
       createdAt: new Date(),
+    })
+    await setDoc(doc(db, 'staffMembers', 'alice'), {
+      name: 'Alice',
+      active: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     })
     await setDoc(doc(db, 'orders', ORDER_ID), order())
   })

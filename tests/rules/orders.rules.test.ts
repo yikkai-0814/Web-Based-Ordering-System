@@ -32,8 +32,11 @@ afterEach(async () => {
   await testEnv.clearFirestore()
 })
 
-/** A well-formed cash order rung up by staff. Tests spread it and break one field. */
-const cashOrder = (uid = STAFF_UID) => ({
+/**
+ * A well-formed order as the till now writes one: placed, and carrying nothing about
+ * payment. Tests spread it and break one field.
+ */
+const placedOrder = (uid = STAFF_UID) => ({
   number: 1,
   businessDate: DATE,
   lines: [
@@ -41,20 +44,24 @@ const cashOrder = (uid = STAFF_UID) => ({
     { menuItemId: 'i2', name: 'Croissant', unitPrice: 690, quantity: 1 },
   ],
   total: 3190,
-  paymentMethod: 'cash',
-  cashTendered: 5000,
-  changeGiven: 1810,
   createdAt: new Date(),
   createdBy: uid,
   createdByName: 'Sam Staff',
+  // Phase 6: every order names the staff identity that operated the till.
+  staffId: 'alice',
+  staffName: 'Alice',
 })
 
-/** The non-cash method. Recorded only — no gateway confirms the money moved. */
-const ewalletOrder = (uid = STAFF_UID) => ({
-  ...cashOrder(uid),
-  paymentMethod: 'ewallet',
-  cashTendered: null,
-  changeGiven: null,
+/**
+ * An order in the shape written before payment became a separate step. No client may create
+ * one of these any more, so it is only ever seeded with the rules disabled — which is
+ * exactly how it got there in a real database, too.
+ */
+const legacyPaidOrder = (uid = STAFF_UID) => ({
+  ...placedOrder(uid),
+  paymentMethod: 'cash',
+  cashTendered: 5000,
+  changeGiven: 1810,
 })
 
 async function seed({ adminActive = true, staffActive = true } = {}) {
@@ -83,7 +90,13 @@ async function seed({ adminActive = true, staffActive = true } = {}) {
       sortOrder: 1,
       active: true,
     })
-    await setDoc(doc(db, 'orders', 'existing'), cashOrder())
+    await setDoc(doc(db, 'staffMembers', 'alice'), {
+      name: 'Alice',
+      active: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    await setDoc(doc(db, 'orders', 'existing'), placedOrder())
   })
 }
 
@@ -91,13 +104,13 @@ describe('order rules: who may ring up and read', () => {
   it('lets active staff create an order', async () => {
     await seed()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), cashOrder()))
+    await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), placedOrder()))
   })
 
   it('lets an admin create an order too', async () => {
     await seed()
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
-    await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), cashOrder(ADMIN_UID)))
+    await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), placedOrder(ADMIN_UID)))
   })
 
   it('lets active staff read the day’s orders', async () => {
@@ -112,20 +125,20 @@ describe('order rules: who may ring up and read', () => {
     await seed()
     const db = testEnv.unauthenticatedContext().firestore()
     await assertFails(getDoc(doc(db, 'orders', 'existing')))
-    await assertFails(setDoc(doc(db, 'orders', 'o1'), cashOrder()))
+    await assertFails(setDoc(doc(db, 'orders', 'o1'), placedOrder()))
   })
 
   it('denies a deactivated staff account', async () => {
     await seed({ staffActive: false })
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
     await assertFails(getDoc(doc(db, 'orders', 'existing')))
-    await assertFails(setDoc(doc(db, 'orders', 'o1'), cashOrder()))
+    await assertFails(setDoc(doc(db, 'orders', 'o1'), placedOrder()))
   })
 
   it('denies attributing a sale to somebody else', async () => {
     await seed()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertFails(setDoc(doc(db, 'orders', 'o1'), cashOrder(OTHER_UID)))
+    await assertFails(setDoc(doc(db, 'orders', 'o1'), placedOrder(OTHER_UID)))
   })
 })
 
@@ -148,7 +161,7 @@ describe('order rules: orders are immutable', () => {
   it('denies overwriting an existing order via set', async () => {
     await seed()
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
-    await assertFails(setDoc(doc(db, 'orders', 'existing'), cashOrder(ADMIN_UID)))
+    await assertFails(setDoc(doc(db, 'orders', 'existing'), placedOrder(ADMIN_UID)))
   })
 })
 
@@ -156,89 +169,66 @@ describe('order rules: field validation', () => {
   it('rejects a float or negative total', async () => {
     await seed()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), total: 31.9 }))
-    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), total: -1 }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), total: 31.9 }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), total: -1 }))
   })
 
   it('rejects an empty lines array', async () => {
     await seed()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), lines: [] }))
-  })
-
-  it('rejects an unknown payment method', async () => {
-    await seed()
-    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), paymentMethod: 'crypto' }))
-    // 'card' and 'duitnow' are not in the enum; both must be refused like any other
-    // unknown value, so a stale client cannot keep writing them.
-    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), paymentMethod: 'card' }))
-    await assertFails(
-      setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), paymentMethod: 'duitnow' }),
-    )
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), lines: [] }))
   })
 
   it('rejects a non-positive order number and a malformed business date', async () => {
     await seed()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), number: 0 }))
-    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), businessDate: '11/9/26' }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), number: 0 }))
+    await assertFails(
+      setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), businessDate: '11/9/26' }),
+    )
   })
 })
 
-describe('order rules: cash tender must add up', () => {
-  it('rejects cash tendered below the total', async () => {
+describe('order rules: an order may not declare itself paid', () => {
+  // The load-bearing guard of the whole pay-later design. If a client could write payment
+  // onto the order it creates, it could mint a sale that is paid on arrival — never
+  // appearing as outstanding, and never leaving the orderPayments audit trail.
+  it('rejects an order carrying a payment method', async () => {
     await seed()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), paymentMethod: 'cash' }))
     await assertFails(
-      setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), cashTendered: 3000, changeGiven: -190 }),
+      setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), paymentMethod: 'ewallet' }),
     )
   })
 
-  it('rejects change that is not exactly tendered minus total', async () => {
-    // Rules cannot sum the lines, but they can and do check this arithmetic.
+  it('rejects an order carrying cash tendered or change', async () => {
     await seed()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), changeGiven: 1800 }))
-    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...cashOrder(), changeGiven: 0 }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), cashTendered: 5000 }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), changeGiven: 0 }))
   })
 
-  it('accepts exact tender with zero change', async () => {
+  it('rejects the full legacy shape, even null payment fields', async () => {
     await seed()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertSucceeds(
-      setDoc(doc(db, 'orders', 'o1'), { ...cashOrder(), cashTendered: 3190, changeGiven: 0 }),
-    )
-  })
-
-  it('accepts an e-wallet order with null tender fields', async () => {
-    await seed()
-    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), ewalletOrder()))
-  })
-
-  it('rejects an e-wallet order that carries cash fields', async () => {
-    await seed()
-    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), legacyPaidOrder()))
+    // Null is still the field being present, and present is what is refused. A stale client
+    // sending nulls must fail loudly rather than write an order nothing can classify.
     await assertFails(
       setDoc(doc(db, 'orders', 'bad'), {
-        ...ewalletOrder(),
-        cashTendered: 5000,
-        changeGiven: 1810,
-      }),
-    )
-  })
-
-  it('rejects a cash order with null tender fields', async () => {
-    await seed()
-    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertFails(
-      setDoc(doc(db, 'orders', 'bad'), {
-        ...cashOrder(),
+        ...placedOrder(),
+        paymentMethod: null,
         cashTendered: null,
         changeGiven: null,
       }),
     )
+  })
+
+  it('accepts an order with no payment fields at all', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), placedOrder()))
   })
 })
 

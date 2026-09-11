@@ -65,7 +65,8 @@ export function ReportsPage() {
         <p className="text-muted-foreground">
           Sales for {appliedRange.from}
           {appliedRange.to !== appliedRange.from ? ` to ${appliedRange.to}` : ''}. Voided sales are
-          excluded from every figure below.
+          excluded from every figure below. Revenue counts every order placed, paid or not; what has
+          actually been received is shown as Collected.
         </p>
       </div>
 
@@ -155,6 +156,10 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
         ['To', range.to],
         ['Revenue (sen)', report.revenue],
         ['Orders', report.orderCount],
+        ['Paid orders', report.paidOrderCount],
+        ['Unpaid orders', report.unpaidOrderCount],
+        ['Collected (sen)', report.collectedRevenue],
+        ['Outstanding (sen)', report.outstandingRevenue],
         ['Average order value (sen)', report.averageOrderValue],
         ['Estimated cost (sen)', report.estimatedCost],
         ['Estimated profit (sen)', report.estimatedProfit],
@@ -230,6 +235,23 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
           hint="Excluded from every figure"
         />
         <Tile
+          label="Collected"
+          value={formatMoney(report.collectedRevenue)}
+          testId="tile-collected"
+          hint={`${report.paidOrderCount} of ${report.orderCount} orders paid`}
+        />
+        <Tile
+          label="Outstanding"
+          value={formatMoney(report.outstandingRevenue)}
+          testId="tile-outstanding"
+          warn={report.outstandingRevenue > 0}
+          hint={
+            report.unpaidOrderCount === 0
+              ? 'Everything has been paid'
+              : `${report.unpaidOrderCount} order${report.unpaidOrderCount === 1 ? '' : 's'} not yet paid`
+          }
+        />
+        <Tile
           label={incomplete ? 'Estimated cost (incomplete)' : 'Estimated cost'}
           value={formatMoney(report.estimatedCost)}
           testId="tile-cost"
@@ -282,8 +304,13 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
 
       <section className="space-y-2">
         <h2 className="text-lg font-medium">Payment methods</h2>
+        {/* Paid orders only — an unpaid order has no method to attribute. */}
         {report.payments.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No sales in this range.</p>
+          <p className="text-sm text-muted-foreground">
+            {report.orderCount === 0
+              ? 'No sales in this range.'
+              : 'No payments recorded in this range.'}
+          </p>
         ) : (
           <div className="overflow-x-auto rounded-lg border">
             <Table>

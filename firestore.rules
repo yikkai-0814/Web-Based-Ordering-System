@@ -147,24 +147,89 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ---- Orders (immutable) ------------------------------------------------
+    // ---- Staff identities --------------------------------------------------
+    // Named people who operate the till, WITHOUT a Firebase account each. A stall shares
+    // one device and one login across a shift; these records answer "who rang this up".
+    //
+    // They carry no permissions of their own — the signed-in Firebase role is still the
+    // only authorisation boundary. Any active user reads the list, because the till's
+    // picker needs it; only an admin writes it.
+    //
+    // There is NO delete. A record that past orders point at should not be removable by
+    // accident, so `active` is the only way to retire someone.
+
+    function validStaffMember() {
+      let d = request.resource.data;
+      return d.name is string && d.name.size() > 0 && d.name.size() <= 60
+        && d.active is bool;
+    }
+
+    match /staffMembers/{staffId} {
+      allow read: if isActive();
+      allow create, update: if isAdmin() && validStaffMember();
+      allow delete: if false;
+    }
+
+    // ---- Orders (immutable, and created UNPAID) ----------------------------
     // Any active user may ring up a sale and read the day's orders — staff work the till.
     // Nobody may change or remove one afterwards, admins included: a sale is a financial
-    // record. When voids arrive they will write a counter-entry, never mutate the original.
+    // record. A void writes a counter-entry, and a payment writes its own document; neither
+    // ever mutates the original.
     //
     // Note the boundary of what these checks can cover. Rules cannot iterate or sum a
     // list, so `total` CANNOT be verified against `lines` here — that is guarded by the
     // pure functions in src/features/pos/cart.ts and their unit tests. What rules can
-    // check, and do, is every scalar: types, ranges, the payment enum, that the sale is
-    // attributed to the caller, and that change given is exactly tendered minus total.
+    // check, and do, is every scalar: types, ranges, that the sale is attributed to the
+    // caller, and that it claims nothing about having been paid.
+    //
+    // **An order may not carry payment at all.** Taking money is a separate, later step
+    // recorded in orderPayments/{orderId}. Orders written before that step existed do carry
+    // these fields and are read as paid, which is deliberate — see payments.ts. Refusing
+    // them on a *new* order is what stops a client minting an order that claims to be
+    // already paid and so never appears in the outstanding list.
 
-    function validTender(d) {
-      return d.paymentMethod == 'cash'
-        ? (d.cashTendered is int
-           && d.cashTendered >= d.total
-           && d.changeGiven is int
-           && d.changeGiven == d.cashTendered - d.total)
-        : (d.cashTendered == null && d.changeGiven == null);
+    function carriesNoPayment(d) {
+      return !('paymentMethod' in d.keys())
+        && !('cashTendered' in d.keys())
+        && !('changeGiven' in d.keys());
+    }
+
+    // An order names the identity that operated the till. Two forms are valid.
+    //
+    // 1. The signed-in account itself. Every user always has this, which is what keeps a
+    //    till able to sell: a staff-role user cannot create staff identities, so if the
+    //    roster were the only source of operators, an empty one would stop the stall
+    //    trading with no way for the person at the counter to fix it. This is exactly the
+    //    attribution orders carried before staff identities existed.
+    //
+    // 2. A named staff member, who must exist, be active, and whose CURRENT name must
+    //    match the name stored on the order.
+    //
+    // Together with order immutability, form 2 gives both halves of what history needs:
+    // the snapshot was provably accurate when taken, and a later rename cannot rewrite it.
+    // It also stops a sale being pinned on a colleague by sending someone else's name.
+    //
+    // Guarded by the staffId/staffName string checks in validOrder, which short-circuit
+    // before this is reached, so no path is built from a missing field.
+
+    // Takes the id and name as arguments rather than reading fixed field names, because an
+    // order and its payment both name an operator and must be judged by the SAME rule — an
+    // order stores it as staffId/staffName, a payment as paidByStaffId/paidByStaffName. Two
+    // copies of this logic would be two things to keep in step, and the copy nobody updated
+    // would be the one that let a spoofed name through.
+    function isSelfOperator(staffId, staffName) {
+      return staffId == request.auth.uid && staffName == profile().displayName;
+    }
+
+    function isNamedOperator(staffId, staffName) {
+      let path = /databases/$(database)/documents/staffMembers/$(staffId);
+      return exists(path)
+        && get(path).data.active == true
+        && get(path).data.name == staffName;
+    }
+
+    function validOperator(staffId, staffName) {
+      return isSelfOperator(staffId, staffName) || isNamedOperator(staffId, staffName);
     }
 
     function validOrder() {
@@ -173,11 +238,13 @@ service cloud.firestore {
         && d.businessDate is string && d.businessDate.size() == 10
         && d.lines is list && d.lines.size() > 0 && d.lines.size() <= 100
         && d.total is int && d.total >= 0
-        && d.paymentMethod in ['cash', 'ewallet']
+        && carriesNoPayment(d)
         && d.createdBy == request.auth.uid
         && d.createdByName is string
         && d.createdAt is timestamp
-        && validTender(d);
+        && d.staffId is string && d.staffId.size() > 0
+        && d.staffName is string && d.staffName.size() > 0 && d.staffName.size() <= 60
+        && validOperator(d.staffId, d.staffName);
     }
 
     match /orders/{orderId} {
@@ -197,6 +264,198 @@ service cloud.firestore {
       allow update: if isActive()
         && request.resource.data.lastNumber == resource.data.lastNumber + 1;
       allow delete: if false;
+    }
+
+    // ---- Payments (any active user, final) ---------------------------------
+    // Money received for an order, recorded after the fact. Its OWN document keyed by the
+    // order's id, for the same reasons a void is: orders are immutable, and marking one
+    // paid would mean granting update permission, which would reopen every field on every
+    // sale to whoever works the till.
+    //
+    // Three properties fall out of keying by the order id and denying update:
+    //   * an order cannot be paid twice — the second write is an update, refused;
+    //   * a payment cannot be edited or withdrawn, so the record of money taken cannot be
+    //     quietly rewritten;
+    //   * payment status is never "set", only recorded, so there is no field for a
+    //     tampered client to flip.
+    //
+    // Staff CREATE these, unlike voids. Taking payment is the job; voiding erases revenue
+    // and stays with admins. A staff account gains nothing else from this rule.
+    //
+    // Every payment names TWO identities, the same pair an order does: the Firebase account
+    // that was signed in (paidBy / paidByName) and the POS operator who took the money
+    // (paidByStaffId / paidByStaffName). One shared login serves the whole shift, so the
+    // account alone cannot say who was at the counter — which is the entire reason operator
+    // identities exist, and accountability for money would be the worst place to drop it.
+    //
+    // No gateway is involved for e-wallet. The rules cannot and do not confirm that money
+    // actually moved — the person at the counter does that on the customer's phone. What
+    // the rules do enforce is that the figures recorded are internally consistent and match
+    // the order they settle.
+
+    function validCashPayment(d) {
+      return d.method == 'cash'
+        ? (d.cashTendered is int
+           && d.cashTendered >= d.amount
+           && d.changeGiven is int
+           && d.changeGiven == d.cashTendered - d.amount)
+        : (d.cashTendered == null && d.changeGiven == null);
+    }
+
+    function validPayment(orderId) {
+      let d = request.resource.data;
+      // Also proves the order exists: get() on a missing document fails the rule.
+      let order = get(/databases/$(database)/documents/orders/$(orderId)).data;
+      return d.orderId == orderId
+        && d.method in ['cash', 'ewallet']
+        && d.amount is int && d.amount >= 0
+        // The amount settled must be the order's own total — no paying RM 1 for an RM 50
+        // order, and no inflating the takings either.
+        && d.amount == order.total
+        && validCashPayment(d)
+        && d.paidBy == request.auth.uid
+        && d.paidByName is string
+        && d.paidAt is timestamp
+        // Who was at the counter, verified exactly as an order's operator is: either the
+        // signed-in account itself (always available, which is what lets an admin settle an
+        // order without picking anyone), or a named identity that exists, is active, and
+        // whose CURRENT name matches what is being stored. Payments are immutable, so that
+        // snapshot is provably accurate when taken and cannot be rewritten by a later
+        // rename — and a payment cannot be pinned on a colleague by sending their name.
+        && d.paidByStaffId is string && d.paidByStaffId.size() > 0
+        && d.paidByStaffName is string && d.paidByStaffName.size() > 0
+        && d.paidByStaffName.size() <= 60
+        && validOperator(d.paidByStaffId, d.paidByStaffName)
+        // A voided sale is cancelled; money must not be recorded against it.
+        && !exists(/databases/$(database)/documents/orderVoids/$(orderId))
+        // An order that carries inline payment was rung up before payment became a separate
+        // step and is ALREADY paid. Without this, such an order could be paid a second time
+        // — the create/update trick above only guards orders paid the new way.
+        && !('paymentMethod' in order.keys());
+    }
+
+    match /orderPayments/{orderId} {
+      allow read: if isActive();
+      allow create: if isActive() && validPayment(orderId);
+      allow update, delete: if false;
+    }
+
+    // ---- Fulfilment (any active user, forward-only) ------------------------
+    // How far an order has got through being made and handed over: pending -> preparing ->
+    // ready -> delivered. Its OWN document keyed by the order's id, for the same reason a
+    // void and a payment are: orders are immutable, and putting a status on one would mean
+    // granting update permission, which would reopen every field on every sale to whoever
+    // works the kitchen.
+    //
+    // This is the FIRST sidecar that may be updated, because fulfilment is the one thing
+    // about an order that legitimately progresses. What keeps that safe is that the rules
+    // validate the TRANSITION, not merely the value:
+    //
+    //   * `pending` is the ABSENCE of this document, so a newly placed order needs no write
+    //     and cannot be born part-way through the workflow;
+    //   * create is legal only into `preparing` — the single step out of pending;
+    //   * update may move exactly ONE place forward. Skipping is refused, so no client can
+    //     jump an order to `delivered`, and backward is refused outright for staff;
+    //   * an admin may step exactly one place BACK, to correct a mis-tap. Without that the
+    //     forward path is a one-way door and a fat-fingered "delivered" is unfixable. It
+    //     stays with admins for the same reason voiding does: the person undoing the
+    //     mistake should not be the person who made it.
+    //
+    // Fulfilment says NOTHING about payment, and these rules deliberately never consult the
+    // payment document. "Completed" is not stored anywhere — it is derived from both axes at
+    // read time (see fulfillment.ts), so there is no third piece of state to fall out of step.
+
+    // Position on the progression. Mirrors FULFILLMENT_STATUSES in fulfillment.ts; an
+    // unknown value scores -1, which fails every comparison below rather than passing one by
+    // accident. Expressing the status as a number is what makes "exactly one step" sayable.
+    function fulfillmentIndex(status) {
+      return status == 'pending' ? 0
+        : status == 'preparing' ? 1
+        : status == 'ready' ? 2
+        : status == 'delivered' ? 3
+        : -1;
+    }
+
+    // Who made the move, verified exactly as an order's and a payment's operator is: either
+    // the signed-in account itself (always available, which is what lets an admin work
+    // without picking anyone), or a named identity that exists, is active, and whose CURRENT
+    // name matches what is being stored. Shared with orders and payments via validOperator,
+    // so all three are judged by one definition and cannot drift apart.
+    function validMover(d) {
+      return d.updatedBy == request.auth.uid
+        && d.updatedByName is string
+        && d.updatedByStaffId is string && d.updatedByStaffId.size() > 0
+        && d.updatedByStaffName is string && d.updatedByStaffName.size() > 0
+        && d.updatedByStaffName.size() <= 60
+        && validOperator(d.updatedByStaffId, d.updatedByStaffName);
+    }
+
+    function validFulfillmentFields(orderId) {
+      let d = request.resource.data;
+      return d.orderId == orderId
+        && d.status is string
+        && fulfillmentIndex(d.status) >= 0
+        && d.updatedAt is timestamp
+        && validMover(d)
+        && exists(/databases/$(database)/documents/orders/$(orderId))
+        // A voided sale is cancelled; it must not continue through the kitchen.
+        && !exists(/databases/$(database)/documents/orderVoids/$(orderId));
+    }
+
+    // The only legal first move: out of the implicit `pending` and into `preparing`.
+    function validFulfillmentStart() {
+      return request.resource.data.status == 'preparing';
+    }
+
+    function fulfillmentStepChange() {
+      return fulfillmentIndex(request.resource.data.status)
+        - fulfillmentIndex(resource.data.status);
+    }
+
+    match /orderFulfillment/{orderId} {
+      allow read: if isActive();
+      allow create: if isActive() && validFulfillmentFields(orderId) && validFulfillmentStart();
+      allow update: if isActive()
+        && validFulfillmentFields(orderId)
+        && (fulfillmentStepChange() == 1 || (isAdmin() && fulfillmentStepChange() == -1));
+      // A record of how an order progressed is not something to erase.
+      allow delete: if false;
+
+      // ---- Transition journal (append-only) --------------------------------
+      // The parent document holds only the CURRENT status and whoever moved it last, so on
+      // its own it cannot answer "who started preparing this" once somebody else has marked
+      // it ready — the later mover overwrites the earlier one. That is precisely the
+      // question named operators exist to answer, so each step is also written here, and
+      // this collection is never updated or deleted.
+      //
+      // The same shape as menuItemCosts (current value) alongside menuItemCostHistory
+      // (append-only journal), and written in the SAME batch as the parent by
+      // fulfillment-api.ts.
+      //
+      // `getAfter` rather than `get` is load-bearing, exactly as it is for menu item costs:
+      // the parent and this entry land in one batch, so `get` would read the state BEFORE
+      // the batch commits and could not see the status this entry claims to have produced.
+      // Tying `to` to the parent's resulting status is what stops the journal describing a
+      // move that did not happen.
+
+      function validTransition(orderId) {
+        let d = request.resource.data;
+        return d.orderId == orderId
+          && fulfillmentIndex(d.from) >= 0
+          && fulfillmentIndex(d.to) >= 0
+          && d.from != d.to
+          && d.at is timestamp
+          && validMover(d)
+          && getAfter(/databases/$(database)/documents/orderFulfillment/$(orderId)).data.status
+             == d.to;
+      }
+
+      match /transitions/{transitionId} {
+        allow read: if isActive();
+        allow create: if isActive() && validTransition(orderId);
+        // Append-only: a trail that could be rewritten would not be a trail.
+        allow update, delete: if false;
+      }
     }
 
     // ---- Voids (admin only, final) -----------------------------------------

@@ -9,14 +9,19 @@ protected routing, and a role-aware layout.
 **Phase 2** added the menu catalog: categories and priced items, managed by an admin and
 read by staff, with costs visible to admins only.
 
-**Phase 3** added the till: a touch-operated terminal, a cart, cash or e-wallet payment,
-and an immutable order with a daily number and snapshotted line items.
+**Phase 3** added the till: a touch-operated terminal, a cart, and an immutable order with
+a daily number and snapshotted line items.
 
 **Phase 4** added voiding: an admin can cancel a completed sale with a stated reason,
 without altering the sale itself.
 
-**Phase 5** adds reports: an admin-only view of revenue, item performance, payment mix,
+**Phase 5** added reports: an admin-only view of revenue, item performance, payment mix,
 voids, and estimated cost and profit resolved from the cost-history journal.
+
+**Phase 6** adds staff identities: named till operators without Firebase accounts, selected
+on the shared POS and recorded on every order; and two independent order statuses —
+fulfilment (pending → preparing → ready → delivered) and payment (unpaid → paid) — with an
+order counting as complete only once both are finished.
 
 Still to come — no partial refunds, no tax or discounts, no receipt printing. The dashboard
 and admin page remain deliberate placeholders that prove access control works end to end.
@@ -201,15 +206,91 @@ menuItemCosts/{id}   cost (sen), updatedAt          ← ADMIN ONLY, same id as t
 menuItemCostHistory/{autoId}
                      itemId, cost (sen|null), effectiveFrom, recordedBy
                                                     ← ADMIN ONLY, append-only journal
-orders/{orderId}     number, businessDate, lines[], total (sen), paymentMethod
-                     ('cash' | 'ewallet'),
-                     cashTendered, changeGiven, createdAt, createdBy, createdByName
-                                                    ← IMMUTABLE once written
+orders/{orderId}     number, businessDate, lines[], total (sen), createdAt,
+                     createdBy, createdByName, staffId, staffName
+                                                    ← IMMUTABLE, and carries NO payment
+orderPayments/{orderId}
+                     orderId, method ('cash' | 'ewallet'), amount (sen),
+                     cashTendered, changeGiven, paidAt,
+                     paidBy, paidByName, paidByStaffId, paidByStaffName
+                                                    ← append-only, one per order
+orderFulfillment/{orderId}
+                     orderId, status ('pending' | 'preparing' | 'ready' |
+                     'delivered'), updatedAt, updatedBy, updatedByName,
+                     updatedByStaffId, updatedByStaffName
+                                                    ← forward-only; ABSENT means pending
+orderFulfillment/{orderId}/transitions/{autoId}
+                     orderId, from, to, at, updatedBy, updatedByName,
+                     updatedByStaffId, updatedByStaffName
+                                                    ← append-only journal, one per step
 counters/{businessDate}
                      lastNumber                     ← issues the daily order number
 orderVoids/{orderId} orderId, reason, amount (sen), voidedAt, voidedBy, voidedByName
                                                     ← ADMIN-WRITE, append-only
+staffMembers/{id}    name, active, createdAt, updatedAt
+                                                    ← ADMIN-WRITE, NO DELETE
 ```
+
+### Staff identities and who took an order
+
+A food stall shares one device and one login across a shift, so the Firebase account cannot
+say who rang a sale up. Two separate things are therefore recorded on every order:
+
+| Field                         | Meaning                                                                                                              |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `createdBy` / `createdByName` | the **signed-in Firebase account** — which credential was used. Still `== request.auth.uid`, unchanged since Phase 3 |
+| `staffId` / `staffName`       | the **person operating the till**, and their name snapshotted at the moment of sale                                  |
+
+`staffMembers` are **not** login accounts and carry no permissions. The signed-in Firebase
+role remains the only authorisation boundary: selecting an operator grants nothing. Henry
+needs no second account — his admin login is the credential, and he selects a staff identity
+named "Henry" when he takes orders.
+
+The till shows a picker before anything can be added to a cart, and the current operator sits
+in the topbar with one-tap switching — no Firebase login or logout involved.
+
+**The signed-in account is always an available operator**, listed first and marked "This
+account". Named identities are an _addition_, not a prerequisite: a staff-role user cannot
+create staff identities, so if the roster were the only source of operators, an empty or
+fully-deactivated one would leave the counter unable to sell with no way to recover. Selling
+is the one capability the till must never lose. An order attributed this way carries the
+account's own uid and display name — exactly the attribution orders had before staff
+identities existed.
+
+**The rules verify attribution at write time.** An order's operator must be either the
+signed-in account itself (`staffId == request.auth.uid` and `staffName` equal to that
+account's display name) or a named staff member who exists, is `active`, and whose
+**current** name equals `staffName`. Self-attribution is verified too — it is not a hole to
+write an arbitrary name through. Combined with order
+immutability, that gives both halves of what history needs — the snapshot was provably
+accurate when taken, and a later rename cannot rewrite it. Renaming Alice to Alicia leaves
+yesterday's orders reading Alice.
+
+**There is no deletion.** Retiring someone is deactivation: they drop out of the picker while
+every order they rang up keeps their name. A record that history points at should not be
+removable by accident.
+
+Orders written before Phase 6 have no `staffId`. They are not backfilled — orders are
+immutable — so `operatorNameOf()` falls back to the account name. That fallback is permanent,
+not transitional.
+
+### Why there is no PIN
+
+We evaluated one and deliberately left it out.
+
+Firestore rules _can_ check a secret without exposing it, since rules `get()` ignores the
+caller's read permission — so no plaintext and no readable hash. Two things still defeat it:
+
+1. **Rules cannot rate-limit.** A lockout counter is itself attacker-writable and racy, so a
+   4-digit PIN's 10,000 candidates fall in minutes.
+2. **It could not be an authorisation boundary anyway.** Every operator authenticates as the
+   _same shared account_, so the rules genuinely cannot tell one person's browser from
+   another's. A PIN would gate a screen, not a permission.
+
+A gate that does not gate is the security theatre this project rejects, and worse, someone
+might rely on it in a dispute about takings. Real PIN security needs a server to hold the
+secret and throttle attempts — Cloud Functions on Blaze, or per-worker accounts. What is
+available instead is attribution that is **visible and permanent**, which is what is built.
 
 ### Orders are immutable
 
@@ -224,10 +305,11 @@ keeps the price the customer was quoted even if an admin edits it mid-order.
 
 **What the rules can and cannot check.** Firestore rules cannot iterate or sum a list, so
 they **cannot verify that `total` equals the sum of `lines`**. They do check every scalar:
-types and ranges, the payment-method enum, that the sale is attributed to the caller, and
-that `changeGiven` is exactly `cashTendered - total`. The cart arithmetic itself is guarded
-by the pure functions in `src/features/pos/cart.ts` and their unit tests. Closing that last
-gap would need a Cloud Function.
+types and ranges, that the sale is attributed to the caller, that the order claims nothing
+about having been paid, and — on a payment — the method enum, that `amount` equals the
+order's own total, and that `changeGiven` is exactly `cashTendered - amount`. The cart
+arithmetic itself is guarded by the pure functions in `src/features/pos/cart.ts` and their
+unit tests. Closing that last gap would need a Cloud Function.
 
 ### Payment methods
 
@@ -241,10 +323,154 @@ succeeded. The person at the till confirms that on the customer's phone, exactly
 would without this system. Only cash has arithmetic behind it: amount tendered, and change
 due computed to the sen.
 
-The enum lives in `src/features/pos/types.ts` and is mirrored in `firestore.rules`. Because
-orders are immutable, adding a method later is safe, but **renaming or removing one strands
-past orders** that still carry the old value — `parseOrder` will reject them and they will
-vanish from the list. Change the enum only while the data is disposable.
+The enum lives in `src/features/pos/types.ts` and is mirrored in `firestore.rules`. Adding a
+method later is safe. Renaming or removing one strands past payments that still carry the old
+value: `parseOrderPayment` rejects them, and the order reverts to reading as unpaid. Change
+the enum only while the data is disposable.
+
+### Paying an order
+
+Placing an order and paying for it are **two separate actions**, because at a stall they are
+two separate moments — the customer orders, the drink is made, and they pay when they
+collect. An order is therefore created `UNPAID`, and stays that way until somebody records
+payment against it from the order's own page.
+
+Payment is **not a field on the order**. It is its own document, `orderPayments/{orderId}`,
+for the same reason a void is:
+
+- Orders are immutable. Marking one paid would mean granting update permission, which would
+  reopen every field on every sale to whoever works the till.
+- Keying by the order id makes paying twice impossible — the second write is an update, and
+  updates are denied. That property is bought by the data model, not by a check someone
+  remembered to write.
+- A payment cannot be edited or withdrawn, so the record of money taken cannot be quietly
+  rewritten.
+
+The rules refuse a payment when the order does not exist, has been voided, is already paid,
+uses a method the café does not take, or carries figures that do not add up. They also refuse
+any _order_ that arrives carrying `paymentMethod`, `cashTendered` or `changeGiven` — which is
+what stops a client minting a sale that is paid on arrival and never appears as outstanding.
+
+**A paid order can still be voided**, and voiding is unchanged: no refund is issued or
+recorded anywhere, because there is no payment gateway to refund through. The void is the
+counter-entry, and the payment record survives it as a statement of what happened.
+
+Only cash has arithmetic: `changeDue` in `src/features/pos/cart.ts` computes change in whole
+sen and refuses an under-payment, and the rules recompute it independently.
+
+**A payment names two identities, exactly as an order does.** One shared login serves the
+whole shift, so the account alone cannot say who was at the counter — and accountability for
+money is the last place to drop that distinction:
+
+| Field                               | Meaning                                           |
+| ----------------------------------- | ------------------------------------------------- |
+| `paidBy` / `paidByName`             | the signed-in Firebase account — which credential |
+| `paidByStaffId` / `paidByStaffName` | the POS operator who took the money               |
+
+The rules validate the payment's operator with `validOperator`, **the same function order
+creation uses** — the identity must either be the signed-in account itself, or a roster
+member who exists, is active, and whose _current_ name matches what is being stored. A
+deactivated member is refused, and a payment cannot be pinned on a colleague by sending their
+name. Because payments are immutable, that snapshot cannot be rewritten by a later rename.
+
+The self-operator form is always available to everybody, which is what lets an **admin settle
+an order without selecting an operator first** — payment never waits on a roster step. The
+same order may be placed by one operator and paid by another; both are recorded, and neither
+overwrites the other.
+
+**Orders written before this existed** carry `paymentMethod` inline and have always meant
+paid. `resolvePaymentState` in `src/features/pos/payments.ts` reads them as paid and marks
+them `source: 'legacy'`, so old receipts still display correctly with **no data migration**
+and no backfill of immutable documents. Those orders cannot be paid again through the new
+flow — the rules refuse it.
+
+### Fulfilment and payment are two separate things
+
+An order has **two independent statuses**, and there is deliberately no single `status` field
+anywhere in the system:
+
+```
+fulfilment:  pending → preparing → ready → delivered
+payment:     unpaid  → paid
+```
+
+They move independently because at a stall they genuinely do. A customer may pay while the
+drink is still being made, or take the food and pay on the way out. Collapsing the two into
+one field would make half of the real states unrepresentable — and the state this design
+exists to expose, _delivered but unpaid_, is precisely the one that a single field tends to
+lose.
+
+**"Completed" is derived, never stored:**
+
+| Fulfilment | Payment | Overall             |
+| ---------- | ------- | ------------------- |
+| Pending    | Unpaid  | Pending             |
+| Preparing  | Unpaid  | Preparing           |
+| Ready      | Unpaid  | Ready               |
+| Delivered  | Unpaid  | Payment outstanding |
+| Preparing  | Paid    | Preparing           |
+| Ready      | Paid    | Ready               |
+| Delivered  | Paid    | **Completed**       |
+
+Fulfilment leads until it is finished, because a paid order that is still being made is, to
+everyone involved, still being made. A voided order reports as Voided whatever the two axes
+say. `overallStatusOf` in `src/features/pos/fulfillment.ts` is the only place this is
+decided; storing it would be a third piece of state that could contradict the two it comes
+from.
+
+`delivered` is the single final state for both dine-in and takeaway. There is no separate
+`collected` status: the system does not record how an order is served, so a second terminal
+state would be a distinction nothing could set.
+
+#### How fulfilment moves without making orders mutable
+
+Fulfilment lives in `orderFulfillment/{orderId}` — its own document, like a void and a
+payment, so `orders` keeps `allow update, delete: if false` untouched. It is the first
+sidecar that may be **updated**, because fulfilment is the one thing about an order that
+legitimately progresses. The rules make that safe by validating the _transition_ rather than
+the value:
+
+- **`pending` is the absence of the document.** A newly placed order needs no write at all,
+  and cannot be born part-way through the workflow.
+- **Create is legal only into `preparing`** — the single step out of pending.
+- **Update may move exactly one place forward.** Skipping is refused, so no client can jump an
+  order to `delivered`; backward is refused outright for staff.
+- **An admin may step exactly one place back**, to correct a mis-tap. Without it the forward
+  path is a one-way door and a fat-fingered "Mark delivered" is unfixable. It stays with
+  admins for the same reason voiding does: the person undoing the mistake should not be the
+  person who made it.
+- **A voided order stops.** Neither role may start or continue it through the kitchen.
+
+The fulfilment rules never consult the payment document, and the payment rules never consult
+fulfilment. The two axes are genuinely independent all the way down to the database.
+
+#### Who moved it
+
+Every fulfilment step names **two identities**, exactly as an order and a payment do —
+`updatedBy` / `updatedByName` for the signed-in Firebase account, and `updatedByStaffId` /
+`updatedByStaffName` for the POS operator who made the move. The rules validate the operator
+with `validOperator`, **the same function order creation and payment use**, so all three are
+judged by one definition and cannot drift apart.
+
+The parent document holds only the _current_ status and whoever moved it last, so on its own
+it cannot answer "who started preparing this" once somebody else has marked it ready. Each
+step is therefore also appended to `orderFulfillment/{orderId}/transitions`, which is never
+updated or deleted — the same shape as `menuItemCosts` (current value) alongside
+`menuItemCostHistory` (append-only journal), and written in the **same batch** by
+`fulfillment-api.ts` so the two cannot disagree. An admin rollback is journalled like any
+other step rather than quietly rewinding.
+
+`getAfter` in the journal's rule ties each entry's `to` to the status the parent actually
+ends up at, which is what stops the trail describing a move that did not happen. As with menu
+item costs, rules cannot _require_ a companion write, so the pairing is enforced by funnelling
+every transition through `fulfillment-api.ts`; the journal being append-only means a missing
+entry can never be disguised, only noticed.
+
+**Legacy orders** carry inline payment and have no fulfilment record.
+`resolveFulfillmentState` reads them as `delivered`: they were rung up and handed over in one
+motion, so reading them as `pending` would be false and would leave every historical sale
+sitting in a queue of work nobody is going to do. As with payment, there is no migration and
+no backfill.
 
 ### Voiding a sale
 
@@ -345,11 +571,26 @@ calling the reporting code directly. `tests/rules/reporting.rules.test.ts` pins 
 
 ### How the figures are computed
 
-**Revenue** is the sum of `total` over non-voided orders in range. There is no tax, service
-charge or discount, so an order's total _is_ its revenue.
+**Revenue** is the sum of `total` over non-voided orders in range, **paid or not**, and
+regardless of how far through the kitchen they are. There is no tax, service charge or
+discount, so an order's total _is_ its revenue.
+
+Reporting deliberately ignores fulfilment entirely: a sale is counted when it is rung up, and
+whether the drink has been handed over is an operational question, not an accounting one.
+
+That an order is counted when it is rung up rather than when it is settled is deliberate, and
+it is why introducing pay-later did not restate a single past figure: revenue, cost, profit
+and margin all mean exactly what they meant before. What has actually been received is a
+different question, answered separately by **Collected** and **Outstanding**, which always
+sum to revenue. An order is never treated as paid merely because it exists.
+
+The **payment-method breakdown counts paid orders only** — an unpaid order has no method to
+attribute, and putting money that has not arrived beside money that has would make the table
+answer neither question.
 
 **Voided orders are removed once**, before anything is counted, so they are absent from
-revenue, order count, average order value, payment mix and item performance alike. They
+revenue, order count, average order value, payment mix, outstanding money and item
+performance alike — a voided unpaid order is not owed by anyone. They
 appear only in the Voids section. Filtering in one place is what stops a cancelled sale
 leaking into a total somebody forgot to guard.
 
@@ -412,6 +653,7 @@ src/
 │  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage
 │  ├─ menu/                    catalog: hooks, write API, list/form/categories pages
 │  ├─ pos/                     till: cart logic, order transaction, receipts, voids
+│  ├─ staff/                   till operators: roster, session, picker
 │  └─ reports/                 admin-only: aggregation, cost resolution, CSV export
 ├─ lib/                        firebase, env, auth-errors, money, utils
 └─ pages/                      Dashboard, Admin, 403, 404
@@ -431,7 +673,9 @@ plus a route — not an edit to the Sidebar.
 ## Not in scope
 
 Deliberately absent, and not to be scaffolded ahead of time: partial and line-level
-refunds, tax, service charge and discounts, charts and any charting library, Excel and PDF
+refunds, PINs and any client-side secret verification, payroll, attendance, shifts and
+clock-in/out, per-staff sales reports, tax, service charge and discounts, charts and any
+charting library, Excel and PDF
 export, scheduled or emailed reports, pre-aggregated rollups, per-staff performance
 reports, held or parked orders, table service, customer accounts, **inventory in every
 form** (stock, recipes, ingredients, suppliers, purchasing), an in-app user-management

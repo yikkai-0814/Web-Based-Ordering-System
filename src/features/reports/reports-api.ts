@@ -1,6 +1,7 @@
 import { Timestamp, collection, getDocs, orderBy, query, where } from 'firebase/firestore'
 
-import { parseOrder, parseOrderVoid } from '@/features/pos/types'
+import { resolvePaymentState } from '@/features/pos/payments'
+import { parseOrder, parseOrderPayment, parseOrderVoid } from '@/features/pos/types'
 import {
   indexCostHistory,
   type CostHistoryEntry,
@@ -22,11 +23,12 @@ import { db } from '@/lib/firebase'
  * Reads are bounded by the date range for orders, which is the collection that grows
  * without limit. The other three are small by nature:
  *   * `orderVoids`  — a handful per hundred sales
+ *   * `orderPayments` — at most one per order, and only for orders that have been paid
  *   * `menuItemCosts` — one document per menu item
  *   * `menuItemCostHistory` — one entry per cost change
  *
- * Voids are fetched whole rather than filtered by date because the void record carries no
- * `businessDate`, and adding one would mean changing the void model.
+ * Voids and payments are fetched whole rather than filtered by date because neither record
+ * carries a `businessDate`, and adding one would mean changing those models.
  *
  * All four collections are read with the caller's own permissions. The two cost
  * collections are admin-only at the rules layer, which is what actually keeps cost away
@@ -70,18 +72,29 @@ export async function fetchReportData(range: DateRange): Promise<ReportData> {
     orderBy('businessDate'),
   )
 
-  const [orderDocs, voidDocs, historyDocs, costDocs] = await Promise.all([
+  const [orderDocs, voidDocs, paymentDocs, historyDocs, costDocs] = await Promise.all([
     getDocs(ordersQuery),
     getDocs(collection(db, 'orderVoids')),
+    getDocs(collection(db, 'orderPayments')),
     getDocs(collection(db, 'menuItemCostHistory')),
     getDocs(collection(db, 'menuItemCosts')),
   ])
+
+  // Built before the orders loop so each order can be asked whether it was paid. The same
+  // `resolvePaymentState` the till and the receipt use, so a report can never disagree with
+  // what the counter sees — including on legacy orders that carry payment inline.
+  const paymentsByOrderId = new Map<string, ReturnType<typeof parseOrderPayment>>()
+  for (const document of paymentDocs.docs) {
+    const parsed = parseOrderPayment(document.id, document.data())
+    if (parsed) paymentsByOrderId.set(parsed.orderId, parsed)
+  }
 
   const orders: ReportOrder[] = []
   for (const document of orderDocs.docs) {
     const parsed = parseOrder(document.id, document.data())
     // Malformed documents are skipped rather than reported as zeroes.
     if (!parsed) continue
+    const state = resolvePaymentState(parsed, paymentsByOrderId.get(parsed.id) ?? null)
     orders.push({
       id: parsed.id,
       number: parsed.number,
@@ -89,7 +102,8 @@ export async function fetchReportData(range: DateRange): Promise<ReportData> {
       createdAt: parsed.createdAt ? parsed.createdAt.toDate() : null,
       lines: parsed.lines,
       total: parsed.total,
-      paymentMethod: parsed.paymentMethod,
+      paid: state.status === 'paid',
+      paymentMethod: state.status === 'paid' ? state.method : null,
     })
   }
 

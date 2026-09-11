@@ -3,12 +3,19 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
+  getDocs,
+  limit,
+  query,
   serverTimestamp,
+  Timestamp,
   updateDoc,
+  where,
   writeBatch,
   type WriteBatch,
 } from 'firebase/firestore'
 
+import { openingEntryFrom, type OpeningEntry } from '@/features/menu/cost-history'
 import { auth, db } from '@/lib/firebase'
 
 /**
@@ -69,7 +76,12 @@ export interface CostUpdate {
  * at the time of the sale. Unchanged costs append nothing — a journal should record events
  * that happened.
  */
-function writeCost(batch: WriteBatch, itemId: string, cost: CostUpdate): void {
+function writeCost(
+  batch: WriteBatch,
+  itemId: string,
+  cost: CostUpdate,
+  opening: OpeningEntry | null = null,
+): void {
   const reference = doc(db, 'menuItemCosts', itemId)
   if (cost.next === null) {
     // Deleting an absent document is a no-op, so this is safe when none was recorded.
@@ -83,12 +95,47 @@ function writeCost(batch: WriteBatch, itemId: string, cost: CostUpdate): void {
   const recordedBy = auth.currentUser?.uid
   if (!recordedBy) throw new Error('You must be signed in to change a cost.')
 
+  // Backfill the outgoing value for an item that had a cost but no journal, so this edit
+  // does not erase what earlier sales already resolved to. See cost-history.ts. It goes in
+  // the SAME batch as the new entry, so the journal can never gain one without the other.
+  if (opening) {
+    batch.set(doc(collection(db, 'menuItemCostHistory')), {
+      itemId,
+      cost: opening.cost,
+      effectiveFrom: opening.effectiveFrom,
+      recordedBy,
+    })
+  }
+
   batch.set(doc(collection(db, 'menuItemCostHistory')), {
     itemId,
     cost: cost.next,
     effectiveFrom: serverTimestamp(),
     recordedBy,
   })
+}
+
+/**
+ * Looks up what the journal needs before the batch is built.
+ *
+ * Two reads, only on a genuine cost change: does this item have any history at all, and
+ * when was its current cost recorded. Both are cheap and happen rarely — a cost edit is an
+ * admin action, not a per-sale one.
+ */
+async function resolveOpeningEntry(itemId: string, cost: CostUpdate): Promise<OpeningEntry | null> {
+  if (cost.next === cost.previous || cost.previous === null) return null
+
+  const existing = await getDocs(
+    query(collection(db, 'menuItemCostHistory'), where('itemId', '==', itemId), limit(1)),
+  )
+  const costDocument = await getDoc(doc(db, 'menuItemCosts', itemId))
+  const recordedAt = costDocument.exists() ? costDocument.data().updatedAt : null
+
+  return openingEntryFrom(
+    cost.previous,
+    !existing.empty,
+    recordedAt instanceof Timestamp ? recordedAt.toDate() : null,
+  )
 }
 
 export async function createCategory(input: CategoryInput): Promise<string> {
@@ -140,12 +187,16 @@ export async function updateMenuItem(
   input: MenuItemInput,
   cost: CostUpdate,
 ): Promise<void> {
+  // Read before the batch: a batch cannot read, and the journal needs to know whether this
+  // item has any history yet.
+  const opening = await resolveOpeningEntry(id, cost)
+
   const batch = writeBatch(db)
   batch.update(doc(db, 'menuItems', id), {
     ...input,
     updatedAt: serverTimestamp(),
   })
-  writeCost(batch, id, cost)
+  writeCost(batch, id, cost, opening)
   await batch.commit()
 }
 

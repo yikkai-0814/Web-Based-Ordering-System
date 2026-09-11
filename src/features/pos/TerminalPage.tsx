@@ -4,11 +4,13 @@ import { AlertCircle, CheckCircle2 } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/features/auth/useAuth'
+import { StaffPicker } from '@/features/staff/StaffPicker'
+import { useStaffSession } from '@/features/staff/useStaffSession'
 import { useCategories } from '@/features/menu/useCategories'
 import { useMenuItems } from '@/features/menu/useMenuItems'
 import { bySortOrderThenName, type MenuItem } from '@/features/menu/types'
 import { CartPanel } from '@/features/pos/CartPanel'
-import { PaymentPanel } from '@/features/pos/PaymentPanel'
+import { Button } from '@/components/ui/button'
 import {
   addToCart,
   cartTotal,
@@ -21,11 +23,11 @@ import {
   type Cart,
 } from '@/features/pos/cart'
 import { createOrder } from '@/features/pos/pos-api'
-import type { PaymentMethod } from '@/features/pos/types'
 import { formatMoney } from '@/lib/money'
 
 export function TerminalPage() {
   const { profile } = useAuth()
+  const { operator, loading: staffLoading } = useStaffSession()
   const { categories, loading: categoriesLoading } = useCategories()
   const { items, loading: itemsLoading, error: itemsError } = useMenuItems()
 
@@ -49,7 +51,7 @@ export function TerminalPage() {
   }, [categories, items])
 
   const total = cartTotal(cart)
-  const canPay = validateCart(cart).ok
+  const canPlace = validateCart(cart).ok
 
   function addItem(item: MenuItem) {
     setLastOrder(null)
@@ -63,16 +65,19 @@ export function TerminalPage() {
     )
   }
 
-  async function takePayment(method: PaymentMethod, cashTendered: number | null) {
-    if (!profile) return
+  /**
+   * Places the order **unpaid**. The customer is not asked to pay here — they pay when they
+   * collect, and whoever is on the till records it from the order's page then.
+   */
+  async function placeOrder() {
+    if (!profile || !operator) return
     setPending(true)
     setError(null)
     try {
       const created = await createOrder({
         cart,
-        paymentMethod: method,
-        cashTendered,
         user: { uid: profile.uid, displayName: profile.displayName },
+        staff: { id: operator.id, name: operator.name },
       })
       // Straight back to an empty cart — the next customer is already waiting.
       setCart(clearCart())
@@ -81,15 +86,21 @@ export function TerminalPage() {
       setError(
         caught instanceof Error && caught.message
           ? caught.message
-          : 'That sale could not be saved. Please try again.',
+          : 'That order could not be saved. Please try again.',
       )
     } finally {
       setPending(false)
     }
   }
 
-  if (categoriesLoading || itemsLoading) {
+  if (categoriesLoading || itemsLoading || staffLoading) {
     return <Skeleton className="h-[70vh] w-full" />
+  }
+
+  // Nothing can be rung up until somebody says who is on the till. The same check the
+  // rules enforce server-side, surfaced here so the failure never reaches the counter.
+  if (!operator) {
+    return <StaffPicker />
   }
 
   return (
@@ -144,7 +155,9 @@ export function TerminalPage() {
           <Alert className="m-4 mb-0" data-testid="order-confirmation">
             <CheckCircle2 aria-hidden="true" />
             <AlertDescription>
-              Order #{lastOrder.number} saved · {formatMoney(lastOrder.total)}
+              Order #{lastOrder.number} placed · {formatMoney(lastOrder.total)} ·{' '}
+              <span className="font-semibold">unpaid</span>. Record payment from the Orders page
+              once the customer has paid.
             </AlertDescription>
           </Alert>
         )}
@@ -165,12 +178,23 @@ export function TerminalPage() {
           </Alert>
         )}
 
-        <PaymentPanel
-          total={total}
-          disabled={!canPay}
-          pending={pending}
-          onTakePayment={(method, tendered) => void takePayment(method, tendered)}
-        />
+        {/* Placing the order is the only action here. Payment is a separate step, taken on
+            the order's own page after the customer has collected and paid. */}
+        <div className="space-y-2 border-t p-4">
+          <Button
+            type="button"
+            size="lg"
+            className="h-touch-lg w-full text-lg"
+            data-testid="place-order"
+            disabled={!canPlace || pending}
+            onClick={() => void placeOrder()}
+          >
+            {pending ? 'Saving…' : `Place order · ${formatMoney(total)}`}
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">
+            The order is created unpaid. Payment is recorded separately.
+          </p>
+        </div>
       </aside>
     </div>
   )

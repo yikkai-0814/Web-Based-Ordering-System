@@ -1,6 +1,7 @@
 import {
   ChartColumn,
   CupSoda,
+  IdCard,
   LayoutDashboard,
   ReceiptText,
   ScanBarcode,
@@ -52,6 +53,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     label: 'Reports',
     icon: ChartColumn,
     // Admin only: the page shows cost, estimated profit and margin.
+    roles: ['admin'],
+  },
+  {
+    to: '/staff',
+    label: 'Staff',
+    icon: IdCard,
+    // Admin only: creating and retiring till operators is a management function.
     roles: ['admin'],
   },
   {
