@@ -1,7 +1,8 @@
 import { Timestamp, collection, getDocs, orderBy, query, where } from 'firebase/firestore'
 
+import { chunkOrderIds, type ChunkableOrder } from '@/features/pos/order-sidecars'
 import { resolvePaymentState } from '@/features/pos/payments'
-import { parseOrder, parseOrderPayment, parseOrderVoid } from '@/features/pos/types'
+import { parseOrder, parseOrderPayment, parseOrderVoid, type Order } from '@/features/pos/types'
 import {
   indexCostHistory,
   type CostHistoryEntry,
@@ -20,19 +21,35 @@ import { db } from '@/lib/firebase'
  * listener open across thousands of order documents costs memory and reads for no benefit,
  * and refetching when the filter changes is the natural model.
  *
- * Reads are bounded by the date range for orders, which is the collection that grows
- * without limit. The other three are small by nature:
- *   * `orderVoids`  — a handful per hundred sales
- *   * `orderPayments` — at most one per order, and only for orders that have been paid
- *   * `menuItemCosts` — one document per menu item
- *   * `menuItemCostHistory` — one entry per cost change
+ * **Every read is bounded by something that does not grow with trading history.**
  *
- * Voids and payments are fetched whole rather than filtered by date because neither record
- * carries a `businessDate`, and adding one would mean changing those models.
+ *   * `orders` — the date range, served by the automatic single-field index on
+ *     `businessDate`.
+ *   * `orderPayments` and `orderVoids` — the ids of the orders just loaded (see below).
+ *   * `menuItemCosts` and `menuItemCostHistory` — read whole, and legitimately so: both are
+ *     bounded by the size of the menu and the number of times a price or a cost has been
+ *     edited, neither of which grows with how much the café sells.
  *
- * All four collections are read with the caller's own permissions. The two cost
- * collections are admin-only at the rules layer, which is what actually keeps cost away
- * from staff — this module simply never runs for them, because /reports is admin-only.
+ * **Why the sidecars are fetched by order id.** They were previously read whole, on the
+ * reasoning that they are small. That is true of voids and false of payments: there is one
+ * payment document per paid order, so `orderPayments` grows exactly as fast as `orders`, and
+ * a report on a single day was reading every payment the café had ever taken. The cost only
+ * ever increased.
+ *
+ * The fix is the one the orders workspace already uses, not a new idea:
+ * `src/features/pos/order-sidecars.ts` explains at length why a payment carries no
+ * `businessDate` of its own — the day it belongs to is already on the order it points at,
+ * duplicating it would create a fact that can disagree with itself, and it could never be
+ * backfilled onto records that are immutable by design. So the sidecars are fetched with
+ * `where('orderId', 'in', [...])` over the ids already in hand, in chunks of 30, and
+ * `chunkOrderIds` is reused rather than reimplemented. `in` on a single field is served by
+ * the automatic index, so there is still no composite index to deploy.
+ *
+ * The cost is one extra round trip: the ids are not known until the orders come back, so
+ * the sidecars can no longer be fetched in the same wave.
+ *
+ * All five collections are read with the caller's own permissions. The two cost collections
+ * are admin-only at the rules layer, which is what actually keeps cost away from staff.
  */
 
 export interface ReportData {
@@ -62,6 +79,69 @@ function parseCostHistoryEntry(data: Record<string, unknown>): CostHistoryEntry 
   return { itemId, cost: cost as number | null, effectiveFrom: when }
 }
 
+/**
+ * How many chunk queries may be in flight at once.
+ *
+ * A range is capped at 366 days, which at a busy 150 orders a day is some 1,800 chunks per
+ * sidecar collection. Handing all of those to `Promise.all` would open thousands of
+ * simultaneous requests and is a good way to be throttled; running them one at a time would
+ * make a month's report crawl. A small window is the middle, and the total number of
+ * documents read is the same either way.
+ */
+const MAX_CONCURRENT_CHUNK_QUERIES = 12
+
+/**
+ * Runs `task` over every item with at most `limit` outstanding at once, preserving nothing
+ * about order — every caller here merges into a map, so order is irrelevant.
+ *
+ * A shared cursor consumed by `limit` workers, rather than fixed slices: chunk queries do
+ * not all take the same time, and slicing would leave the slowest worker finishing alone.
+ */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  task: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let cursor = 0
+
+  async function worker(): Promise<void> {
+    while (cursor < items.length) {
+      const index = cursor++
+      const item = items[index]
+      // Only reachable if `items` were mutated mid-flight, which no caller does. Guarded
+      // rather than asserted so the type stays honest under noUncheckedIndexedAccess.
+      if (item === undefined) continue
+      results[index] = await task(item)
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
+
+/**
+ * Every document of a sidecar collection belonging to the given orders, and nothing else.
+ *
+ * Returns an empty list for no orders rather than issuing a query — an `in` filter with no
+ * values is an error, and "no orders" already has an answer.
+ */
+async function fetchSidecars(
+  path: string,
+  orders: readonly ChunkableOrder[],
+): Promise<{ id: string; data: Record<string, unknown> }[]> {
+  const chunks = chunkOrderIds(orders)
+  if (chunks.length === 0) return []
+
+  const snapshots = await mapWithConcurrency(chunks, MAX_CONCURRENT_CHUNK_QUERIES, (ids) =>
+    getDocs(query(collection(db, path), where('orderId', 'in', ids))),
+  )
+
+  return snapshots.flatMap((snapshot) =>
+    snapshot.docs.map((document) => ({ id: document.id, data: document.data() })),
+  )
+}
+
 export async function fetchReportData(range: DateRange): Promise<ReportData> {
   // `businessDate` is YYYY-MM-DD, so lexicographic order is chronological order and this
   // range needs only the automatic single-field index — no composite index to deploy.
@@ -72,30 +152,42 @@ export async function fetchReportData(range: DateRange): Promise<ReportData> {
     orderBy('businessDate'),
   )
 
-  const [orderDocs, voidDocs, paymentDocs, historyDocs, costDocs] = await Promise.all([
+  // The cost collections do not depend on which orders come back, so they ride along in the
+  // first wave rather than waiting for it.
+  const [orderDocs, historyDocs, costDocs] = await Promise.all([
     getDocs(ordersQuery),
-    getDocs(collection(db, 'orderVoids')),
-    getDocs(collection(db, 'orderPayments')),
     getDocs(collection(db, 'menuItemCostHistory')),
     getDocs(collection(db, 'menuItemCosts')),
   ])
 
+  // Parsed before the sidecars are fetched, because it is the parsed orders that say which
+  // ids to ask for. Malformed documents are skipped rather than reported as zeroes — and
+  // skipping them here also keeps them out of the sidecar queries, which is right: an order
+  // that cannot be read cannot be reported on either way.
+  const parsedOrders: Order[] = []
+  for (const document of orderDocs.docs) {
+    const parsed = parseOrder(document.id, document.data())
+    if (parsed) parsedOrders.push(parsed)
+  }
+
+  const [paymentRows, voidRows] = await Promise.all([
+    fetchSidecars('orderPayments', parsedOrders),
+    fetchSidecars('orderVoids', parsedOrders),
+  ])
+
   // Built before the orders loop so each order can be asked whether it was paid. The same
   // `resolvePaymentState` the till and the receipt use, so a report can never disagree with
-  // what the counter sees — including on legacy orders that carry payment inline.
-  const paymentsByOrderId = new Map<string, ReturnType<typeof parseOrderPayment>>()
-  for (const document of paymentDocs.docs) {
-    const parsed = parseOrderPayment(document.id, document.data())
+  // what the counter sees — including on legacy orders that carry payment inline, which have
+  // no payment document at all and so are simply absent from this map.
+  const paymentsByOrderId = new Map<string, NonNullable<ReturnType<typeof parseOrderPayment>>>()
+  for (const row of paymentRows) {
+    const parsed = parseOrderPayment(row.id, row.data)
     if (parsed) paymentsByOrderId.set(parsed.orderId, parsed)
   }
 
-  const orders: ReportOrder[] = []
-  for (const document of orderDocs.docs) {
-    const parsed = parseOrder(document.id, document.data())
-    // Malformed documents are skipped rather than reported as zeroes.
-    if (!parsed) continue
+  const orders: ReportOrder[] = parsedOrders.map((parsed) => {
     const state = resolvePaymentState(parsed, paymentsByOrderId.get(parsed.id) ?? null)
-    orders.push({
+    return {
       id: parsed.id,
       number: parsed.number,
       businessDate: parsed.businessDate,
@@ -104,12 +196,12 @@ export async function fetchReportData(range: DateRange): Promise<ReportData> {
       total: parsed.total,
       paid: state.status === 'paid',
       paymentMethod: state.status === 'paid' ? state.method : null,
-    })
-  }
+    }
+  })
 
   const voids = new Map<string, ReportVoidInfo>()
-  for (const document of voidDocs.docs) {
-    const parsed = parseOrderVoid(document.id, document.data())
+  for (const row of voidRows) {
+    const parsed = parseOrderVoid(row.id, row.data)
     if (!parsed) continue
     voids.set(parsed.orderId, {
       amount: parsed.amount,

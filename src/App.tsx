@@ -5,6 +5,7 @@ import { AuthProvider } from '@/features/auth/AuthProvider'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { RequireAuth } from '@/features/auth/RequireAuth'
 import { RequireRole } from '@/features/auth/RequireRole'
+import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { CategoriesPage } from '@/features/menu/CategoriesPage'
 import { MenuItemFormPage } from '@/features/menu/MenuItemFormPage'
 import { MenuListPage } from '@/features/menu/MenuListPage'
@@ -16,7 +17,6 @@ import { OrdersListPage } from '@/features/pos/OrdersListPage'
 import { QueuePage } from '@/features/pos/QueuePage'
 import { TerminalPage } from '@/features/pos/TerminalPage'
 import { AdminPage } from '@/pages/AdminPage'
-import { DashboardPage } from '@/pages/DashboardPage'
 import { ForbiddenPage } from '@/pages/ForbiddenPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
@@ -30,22 +30,18 @@ export function App() {
           <Routes>
             {/* There is no /signup route anywhere, by design. */}
             <Route path="/login" element={<LoginPage />} />
-
             <Route element={<RequireAuth />}>
               <Route element={<AppShell />}>
                 <Route index element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
-
                 {/* The catalog is readable by both roles — staff serve from it. */}
                 <Route path="/menu" element={<MenuListPage />} />
-
                 {/* The till and the sales record: both roles, since staff work them. */}
                 <Route path="/pos" element={<TerminalPage />} />
                 <Route path="/orders" element={<OrdersListPage />} />
                 {/* The kitchen board. Both roles: whoever is making the food moves it. */}
                 <Route path="/queue" element={<QueuePage />} />
                 <Route path="/orders/:orderId" element={<OrderDetailPage />} />
-
                 {/* Admin-only group. Later admin routes nest here rather than
                   repeating the guard. */}
                 <Route element={<RequireRole allow={['admin']} />}>
@@ -56,7 +52,6 @@ export function App() {
                   <Route path="/menu/new" element={<MenuItemFormPage />} />
                   <Route path="/menu/:itemId/edit" element={<MenuItemFormPage />} />
                 </Route>
-
                 <Route path="/403" element={<ForbiddenPage />} />
                 <Route path="*" element={<NotFoundPage />} />
               </Route>

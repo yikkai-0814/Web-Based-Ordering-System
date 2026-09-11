@@ -89,6 +89,39 @@ describe('chunkOrderIds', () => {
     expect(flattened).toHaveLength(orders.length)
     expect(new Set(flattened).size).toBe(orders.length)
   })
+
+  /**
+   * Reports fetch their sidecars the same way the workspace does, but over a date RANGE,
+   * and order numbers restart at 1 each business date. So the same number arrives many
+   * times, which puts far more than 30 orders in one number bucket.
+   *
+   * The stability guarantee does not survive that, and does not need to: it exists to keep
+   * live listeners attached, and reports use one-shot reads. What must survive is the hard
+   * limit, because a chunk of 31 is a query Firestore refuses outright.
+   */
+  const range = (days: number, perDay: number): ChunkableOrder[] =>
+    Array.from({ length: days }, (_, dayIndex) =>
+      day(perDay).map((order) => ({ ...order, id: `d${dayIndex}-${order.id}` })),
+    ).flat()
+
+  it('keeps every chunk inside the limit when order numbers repeat across days', () => {
+    const orders = range(14, 40)
+    const chunks = chunkOrderIds(orders)
+
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(SIDECAR_QUERY_LIMIT)
+      expect(chunk.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('still loses nothing across a multi-day range', () => {
+    const orders = range(14, 40)
+    const flattened = chunkOrderIds(orders).flat()
+
+    expect(flattened).toHaveLength(orders.length)
+    expect(new Set(flattened).size).toBe(orders.length)
+    expect(new Set(flattened)).toEqual(new Set(orders.map((order) => order.id)))
+  })
 })
 
 describe('shiftBusinessDate', () => {

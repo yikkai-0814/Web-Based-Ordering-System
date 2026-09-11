@@ -18,21 +18,27 @@ without altering the sale itself.
 **Phase 5** added reports: an admin-only view of revenue, item performance, payment mix,
 voids, and estimated cost and profit resolved from the cost-history journal.
 
-**Phase 7** adds order types: every order is dine-in or takeaway, and a dine-in order carries
-the table it belongs to.
-
-**Phase 6** adds staff identities: named till operators without Firebase accounts, selected
+**Phase 6** added staff identities: named till operators without Firebase accounts, selected
 on the shared POS and recorded on every order; and two independent order statuses —
 fulfilment (pending → preparing → ready → delivered) and payment (unpaid → paid) — with an
 order counting as complete only once both are finished.
 
-**Phase 8** turns the orders list into a workspace and gives the kitchen a board: one
+**Phase 7** added order types: every order is dine-in or takeaway, and a dine-in order carries
+the table it belongs to.
+
+**Phase 8** turned the orders list into a workspace and gave the kitchen a board: one
 business date at a time rather than the whole sales history, filters for the questions a
 counter actually asks, search within the loaded day, and a live fulfilment queue where an
 order is moved along one step at a time.
 
-Still to come — no partial refunds, no tax or discounts, no receipt printing. The dashboard
-and admin page remain deliberate placeholders that prove access control works end to end.
+**Phase 9** makes the landing page answer for itself: a live "today at a glance" dashboard —
+orders taken, money still to collect, and how deep the kitchen queue is, with revenue and
+estimated profit for an admin only. It stores nothing new; every figure is derived from the
+same rows the Orders list and the Queue board already show. The same phase bounded the
+report's reads, which had been downloading every payment and void ever recorded on each load.
+
+Still to come — no partial refunds, no tax or discounts, no receipt printing. The admin page
+remains a deliberate placeholder that proves access control works end to end.
 
 ---
 
@@ -790,13 +796,61 @@ costs reads for no benefit.
 
 Orders are fetched with a `businessDate` range filter. That field is `YYYY-MM-DD`, so
 lexicographic order is chronological order and the automatic single-field index serves it —
-**`firestore.indexes.json` stays empty**. Voids, current costs and cost history are small
-collections read whole; voids cannot be date-filtered because the void record carries no
-business date, and adding one would mean changing the void model.
+**`firestore.indexes.json` stays empty**.
 
-Reads scale with the range: a month at 150 orders/day is roughly 4,500 documents per load.
-Custom ranges are capped at 366 days. If that ever becomes expensive, pre-aggregated daily
-rollups are the answer — deliberately not built now.
+**Payments and voids are fetched by order id, not read whole.** They used to be read whole,
+on the reasoning that both are small. That is true of voids and was false of payments: there
+is one `orderPayments` document per paid order, so the collection grows exactly as fast as
+`orders`, and a report on a single day was downloading every payment the café had ever
+taken — a cost that only ever increased. Neither record carries a `businessDate`, and adding
+one is the wrong fix: the day a payment belongs to is already on the order it points at,
+duplicating it would create a fact that can disagree with itself, and it could never be
+backfilled onto records that are immutable by design.
+
+So reports reuse what the orders workspace already does. The orders come back first, and
+their ids are then chunked thirty at a time into `where('orderId', 'in', [...])` queries via
+the same `chunkOrderIds` helper — see `src/features/pos/order-sidecars.ts` for the full
+reasoning. `in` on a single field is served by the automatic index, so there is still no
+composite index to deploy, and no document shape or security rule changed. The cost is one
+extra round trip, because the ids are not known until the orders arrive.
+
+Current costs and cost history are still read whole, and legitimately: both are bounded by
+the size of the menu, not by how much the café sells.
+
+Reads now scale with the range and nothing else: a month at 150 orders/day is roughly 4,500
+orders plus at most that many payments. A large range does issue many small chunk queries —
+a year is some 1,800 per sidecar collection — so they run through a bounded-concurrency
+window rather than all at once. Custom ranges are capped at 366 days. If that ever becomes
+expensive, pre-aggregated daily rollups are the answer — deliberately not built now.
+
+---
+
+## The dashboard
+
+The landing page for both roles, and the only screen that is fixed to **today**: the date
+comes from `businessDateOf(new Date())`, the same helper the till files orders under. Looking
+at another day is what the Orders and Queue screens are for.
+
+**It stores nothing and computes nothing twice.** The rows come from `useOrdersWorkspace` —
+the same live subscription set the Orders list and the Queue board use — and
+`buildDashboard` in `src/features/dashboard/summary.ts` reads the figures off fields those
+rows have already resolved. Queue depth goes through the board's own `isQueued` and
+`QUEUE_COLUMNS`. There is deliberately no persisted aggregate and no stored dashboard
+status: a third copy of a fact is a third thing that can fall out of step with the two it
+came from. A voided sale is excluded from every figure, exactly as it is on the Orders list.
+
+**Role awareness is in what it fetches, not only in what it shows.** `buildDashboard`
+returns `finance: null` for a staff member — the money section is absent from the data, not
+hidden in the markup, so no component can render it by accident and a test can assert its
+absence directly.
+
+Be precise about what that is, though. Orders carry `total` and staff can read orders; the
+till shows totals all day. Keeping revenue to admins is a presentation decision matching
+Reports being admin-only, **not** a security boundary. The real boundary is cost, which lives
+in admin-only collections — so the estimated cost and profit card is a separate component
+mounted only for an admin, and a staff session never issues that read at all. It reuses
+`useReport` for the `today` preset rather than recomputing anything, and says plainly that it
+is a snapshot taken on load while the tiles above it are live.
 
 ---
 
@@ -812,13 +866,14 @@ src/
 │  └─ layout/                  AppShell, Sidebar, Topbar, UserMenu, nav-items
 ├─ features/
 │  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage
+│  ├─ dashboard/               today at a glance: pure summariser + the landing page
 │  ├─ menu/                    catalog: hooks, write API, list/form/categories pages
 │  ├─ pos/                     till: cart, order transaction, receipts, voids,
 │  │                          date-scoped workspace, filters, fulfilment queue
 │  ├─ staff/                   till operators: roster, session, picker
 │  └─ reports/                 admin-only: aggregation, cost resolution, CSV export
 ├─ lib/                        firebase, env, auth-errors, money, utils
-└─ pages/                      Dashboard, Admin, 403, 404
+└─ pages/                      Admin, 403, 404 — the screens that are not a feature
 
 tests/unit/                    pure logic; no emulator
 tests/rules/                   Firestore security-rules tests

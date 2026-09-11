@@ -73,6 +73,38 @@ beforeAll(async () => {
       voidedBy: ADMIN_UID,
       voidedByName: 'Ada Admin',
     })
+    // Two more orders, each settled the modern way, so the id-scoped sidecar fetch has
+    // something to include AND something to leave out. `o3` is in a different month, which
+    // is exactly the case the old whole-collection read could not avoid loading.
+    for (const [id, businessDate] of [
+      ['o2', '2026-09-11'],
+      ['o3', '2026-10-05'],
+    ] as const) {
+      await setDoc(doc(db, 'orders', id), {
+        number: 1,
+        businessDate,
+        lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 1 }],
+        total: 1250,
+        orderType: 'takeaway',
+        createdAt: new Date(),
+        createdBy: STAFF_UID,
+        createdByName: 'Sam Staff',
+        staffId: STAFF_UID,
+        staffName: 'Sam Staff',
+      })
+      await setDoc(doc(db, 'orderPayments', id), {
+        orderId: id,
+        method: 'cash',
+        amount: 1250,
+        cashTendered: 1250,
+        changeGiven: 0,
+        paidAt: new Date(),
+        paidBy: STAFF_UID,
+        paidByName: 'Sam Staff',
+        paidByStaffId: STAFF_UID,
+        paidByStaffName: 'Sam Staff',
+      })
+    }
     await setDoc(doc(db, 'menuItemCosts', 'i1'), { cost: 400, updatedAt: new Date() })
     await setDoc(doc(db, 'menuItemCostHistory', 'h1'), {
       itemId: 'i1',
@@ -105,7 +137,67 @@ describe('reporting boundary: what an admin may read', () => {
       where('businessDate', '<=', '2026-09-30'),
     )
     const snapshot = await assertSucceeds(getDocs(ranged))
-    expect(snapshot.size).toBe(1)
+    // o1 and o2 are in September; o3 is in October and must not be returned.
+    expect(snapshot.docs.map((document) => document.id).sort()).toEqual(['o1', 'o2'])
+  })
+})
+
+/**
+ * A report used to read `orderPayments` and `orderVoids` whole. `orderPayments` holds one
+ * document per paid order, so it grows exactly as fast as `orders` and a one-day report was
+ * loading every payment the café had ever taken.
+ *
+ * It now fetches them by the ids of the orders in range, with the same chunked
+ * `where('orderId', 'in', [...])` the orders workspace uses. No document shape changed and
+ * no rule changed — these tests pin that the query is permitted and that it is exact.
+ */
+describe('reporting read scope: sidecars fetched by order id', () => {
+  it('permits the chunked `in` query on both sidecar collections', async () => {
+    // Also proves no composite index is needed: `in` on a single field is served by the
+    // automatic index, and an unindexed query would fail here rather than pass.
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    for (const path of ['orderPayments', 'orderVoids']) {
+      await assertSucceeds(
+        getDocs(query(collection(db, path), where('orderId', 'in', ['o1', 'o2']))),
+      )
+    }
+  })
+
+  it('returns only the sidecars of the orders asked for', async () => {
+    // The whole point of the change: a payment belonging to an order outside the range is
+    // never downloaded, so it can never reach buildReport.
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    const snapshot = await assertSucceeds(
+      getDocs(query(collection(db, 'orderPayments'), where('orderId', 'in', ['o1', 'o2']))),
+    )
+
+    expect(snapshot.docs.map((document) => document.id)).toEqual(['o2'])
+  })
+
+  it('finds no payment for a legacy order, which is what makes it read as paid inline', async () => {
+    // `o1` carries paymentMethod on the order itself and has no payment document at all.
+    // resolvePaymentState reads that as paid; the scoped fetch simply returns nothing for
+    // it, exactly as the whole-collection read did.
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    const snapshot = await assertSucceeds(
+      getDocs(query(collection(db, 'orderPayments'), where('orderId', 'in', ['o1']))),
+    )
+
+    expect(snapshot.empty).toBe(true)
+  })
+
+  it('lets staff run the same scoped query, which the orders workspace depends on', async () => {
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertSucceeds(
+      getDocs(query(collection(db, 'orderPayments'), where('orderId', 'in', ['o1', 'o2']))),
+    )
+  })
+
+  it('denies an anonymous reader the scoped query', async () => {
+    const db = testEnv.unauthenticatedContext().firestore()
+    await assertFails(
+      getDocs(query(collection(db, 'orderPayments'), where('orderId', 'in', ['o1', 'o2']))),
+    )
   })
 })
 
