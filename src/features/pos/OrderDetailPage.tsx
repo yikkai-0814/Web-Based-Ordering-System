@@ -12,14 +12,12 @@ import { lineTotal } from '@/features/pos/cart'
 import {
   canAdvanceFulfillment,
   FULFILLMENT_ACTIONS,
-  overallStatusOf,
-  resolveFulfillmentState,
   type FulfillmentStatus,
 } from '@/features/pos/fulfillment'
 import { setFulfillment } from '@/features/pos/fulfillment-api'
 import { ORDER_TYPE_LABELS } from '@/features/pos/order-type'
 import { recordPayment } from '@/features/pos/payment-api'
-import { canRecordPayment, resolvePaymentState } from '@/features/pos/payments'
+import { canRecordPayment } from '@/features/pos/payments'
 import {
   FulfillmentStatusBadge,
   OverallStatusBadge,
@@ -33,10 +31,7 @@ import {
   PAYMENT_LABELS,
   type PaymentMethod,
 } from '@/features/pos/types'
-import { useOrders } from '@/features/pos/useOrders'
-import { useOrderFulfillments } from '@/features/pos/useOrderFulfillments'
-import { useOrderPayments } from '@/features/pos/useOrderPayments'
-import { useOrderVoids } from '@/features/pos/useOrderVoids'
+import { useOrderDetail } from '@/features/pos/useOrderDetail'
 import { voidOrder } from '@/features/pos/void-api'
 import { VoidOrderDialog } from '@/features/pos/VoidOrderDialog'
 import { formatMoney } from '@/lib/money'
@@ -52,20 +47,17 @@ export function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>()
   const { profile, role } = useAuth()
   const { operator } = useStaffSession()
-  const { orders, loading } = useOrders()
-  const { voids, loading: voidsLoading } = useOrderVoids()
-  const { payments, loading: paymentsLoading } = useOrderPayments()
-  const { fulfillments, loading: fulfillmentsLoading } = useOrderFulfillments()
+  // One order and its three sidecars, by id — never the whole collection. A receipt is
+  // about exactly one sale, and this page used to load every order ever written to find it.
+  const { view, loading } = useOrderDetail(orderId)
   const [advancing, setAdvancing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  if (loading || voidsLoading || paymentsLoading || fulfillmentsLoading) {
+  if (loading) {
     return <Skeleton className="h-96 w-full max-w-lg" />
   }
 
-  const order = orders.find((candidate) => candidate.id === orderId)
-
-  if (!order) {
+  if (!view) {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-semibold tracking-tight">Order not found</h1>
@@ -77,17 +69,21 @@ export function OrderDetailPage() {
     )
   }
 
-  const voided = voids.get(order.id) ?? null
+  // The two axes and the line derived from both, resolved by the very same helpers the
+  // orders list and the queue use — so a receipt can never disagree with the row that led
+  // here. Nothing among them is stored.
+  const {
+    order,
+    fulfillment,
+    fulfillmentRecord,
+    payment: paymentState,
+    paymentRecord: payment,
+    voided,
+    overall,
+  } = view
+
   const isAdmin = role === 'admin'
-
-  const payment = payments.get(order.id) ?? null
-  const paymentState = resolvePaymentState(order, payment)
   const eligibility = canRecordPayment({ state: paymentState, voided: voided !== null })
-
-  // The two axes, and the one line derived from both. Nothing here is stored.
-  const fulfillmentRecord = fulfillments.get(order.id) ?? null
-  const fulfillment = resolveFulfillmentState(order, fulfillmentRecord)
-  const overall = overallStatusOf({ fulfillment, payment: paymentState, voided: voided !== null })
   const advance = canAdvanceFulfillment({ current: fulfillment, voided: voided !== null })
 
   /**

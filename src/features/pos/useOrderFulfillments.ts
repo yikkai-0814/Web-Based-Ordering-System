@@ -1,7 +1,4 @@
-import { useMemo } from 'react'
-
-import { useCollectionDocs } from '@/features/menu/use-collection'
-import { indexFulfillmentsByOrderId } from '@/features/pos/fulfillment'
+import { useSidecarDocs } from '@/features/pos/useOrderSidecars'
 import { parseOrderFulfillment, type OrderFulfillment } from '@/features/pos/types'
 
 /**
@@ -14,15 +11,20 @@ import { parseOrderFulfillment, type OrderFulfillment } from '@/features/pos/typ
  *
  * Orders with no record are simply absent from this map, which is exactly how `pending` is
  * represented — see `resolveFulfillmentState`.
+ *
+ * Scoped to the orders the workspace has loaded — see `chunkOrderIds`.
  */
-export function useOrderFulfillments(): {
+export function useOrderFulfillments(chunks: readonly (readonly string[])[]): {
   fulfillments: Map<string, OrderFulfillment>
   loading: boolean
   error: string | null
 } {
-  const state = useCollectionDocs<OrderFulfillment>('orderFulfillment', parseOrderFulfillment)
+  const state = useSidecarDocs<OrderFulfillment>(
+    'orderFulfillment',
+    parseOrderFulfillment,
+    chunks,
+    'Could not load fulfilment for this date.',
+  )
 
-  const fulfillments = useMemo(() => indexFulfillmentsByOrderId(state.data), [state.data])
-
-  return { fulfillments, loading: state.loading, error: state.error }
+  return { fulfillments: state.records, loading: state.loading, error: state.error }
 }

@@ -26,6 +26,11 @@ on the shared POS and recorded on every order; and two independent order statuse
 fulfilment (pending → preparing → ready → delivered) and payment (unpaid → paid) — with an
 order counting as complete only once both are finished.
 
+**Phase 8** turns the orders list into a workspace and gives the kitchen a board: one
+business date at a time rather than the whole sales history, filters for the questions a
+counter actually asks, search within the loaded day, and a live fulfilment queue where an
+order is moved along one step at a time.
+
 Still to come — no partial refunds, no tax or discounts, no receipt printing. The dashboard
 and admin page remain deliberate placeholders that prove access control works end to end.
 
@@ -610,6 +615,110 @@ stops being true.
 
 ---
 
+## The orders workspace
+
+Two screens read the same day through the same subscriptions: **Orders**, the record, and
+**Queue**, the board. Neither can show a different answer for the same order, because both
+resolve their rows with `buildOrderViews` from one shared hook, `useOrdersWorkspace`.
+
+### One business date at a time
+
+The date is the **query**, not a filter applied after the fact:
+
+```ts
+query(collection(db, 'orders'), where('businessDate', '==', businessDate))
+```
+
+Orders are the one collection here that grows without limit, and both screens only ever show
+a single day. Before Phase 8 the list subscribed to the whole collection and the receipt page
+loaded every order ever written in order to find one — which got slower with every sale the
+café made. A receipt is now four single-document listeners (`useOrderDetail`), and the
+workspace is one day.
+
+`businessDate` is `YYYY-MM-DD` and compared for equality, which the automatic single-field
+index serves. Sorting is done in memory rather than with `orderBy('number')`, because an
+equality filter plus a sort on a different field is exactly what would demand a composite
+index — and a day's orders are few enough that sorting them costs nothing. **No index was
+added; `firestore.indexes.json` stays empty.**
+
+### How the sidecars are scoped
+
+`orderPayments`, `orderFulfillment` and `orderVoids` are keyed by the order id and carry no
+business date of their own. That is deliberate: a payment answers "was this order settled",
+not "which day's takings does it belong to", and the day is already on the order it points
+at. Adding a date to them would duplicate a fact that can disagree with itself — and could
+not be applied to what already exists, since payments and voids are immutable and can never
+be backfilled.
+
+So the sidecars are fetched **by the ids of the orders already loaded**:
+
+```ts
+query(collection(db, path), where('orderId', 'in', chunk))
+```
+
+Firestore caps a disjunction at 30 values, so the ids are split into chunks and one listener
+is opened per chunk. The chunks are cut on the **order number** (1–30, 31–60, …), not by
+sorting and slicing the ids: numbers are assigned in sequence within a day and never change,
+so each chunk freezes the moment it fills. A new sale only ever joins the last one, and every
+earlier listener survives untouched — which matters, because the alternative resubscribes
+every listener on the busiest screen in the café each time somebody rings something up. See
+`src/features/pos/order-sidecars.ts`.
+
+Reads scale with the day, not the history: roughly one order document per sale, plus at most
+one payment, one fulfilment record and one void each.
+
+### Filters
+
+Ten of them — All, Unpaid, Paid, Pending, Preparing, Ready, Delivered, Completed, Dine-in,
+Takeaway — all evaluated against the **derived** state by `resolvePaymentState`,
+`resolveFulfillmentState` and `overallStatusOf`. There is still no stored overall status
+anywhere in this system, and Phase 8 did not add one; a filter therefore cannot disagree with
+the badge on the row it selected.
+
+Two rules are worth stating outright:
+
+- **A voided sale appears under All and nowhere else.** It is cancelled — not waiting to be
+  paid, not queued in the kitchen, not completed. Listing one under "Unpaid" would send
+  somebody chasing money for a sale that no longer exists.
+- **An order placed before order types existed matches neither Dine-in nor Takeaway.** It
+  genuinely did not record one, and guessing would invent history. All still shows it.
+
+Legacy orders that carry payment inline are read as delivered and paid throughout, exactly as
+the receipt reads them, so they sit under Paid, Delivered and Completed rather than clogging
+the pending filter.
+
+### Search
+
+Client-side, over the **loaded business date only**, matching the order number (a leading `#`
+is ignored), the table number, and any item name on the order. Deliberately local: Firestore
+cannot search substrings, and a global search would mean loading the whole history or bolting
+on a search service — neither of which "which one was the flat white for table 5" needs.
+
+### The fulfilment queue
+
+`/queue` shows Pending, Preparing and Ready as three columns, **oldest first** within each —
+the opposite of the Orders list, because a kitchen works in the order the orders arrived
+while a record is read from the top. Each card carries the order number, how it is served and
+the table where there is one, the items and their quantities, the total, both status badges,
+and who took the order and who moved it last.
+
+The button on a card comes from `queueActionFor`, which is `canAdvanceFulfillment` plus
+`FULFILLMENT_ACTIONS`, and the write goes through the same `setFulfillment` the receipt calls
+— parent document and journal entry in one batch, as always. **There is no second workflow
+here, only a second arrangement of the first.** An invalid step is refused three times over:
+the button never renders, `setFulfillment` throws before writing, and the security rules
+refuse the write regardless of what the client believes.
+
+Delivered and voided orders leave the board — a queue that accumulated every finished order
+all day would bury the three that still need doing — and remain in the Orders workspace under
+All, Delivered and Completed.
+
+Payment is shown on a card but never taken there. An unpaid order is the one thing on the
+board somebody has to act on, so hiding it would be wrong; taking the money is the counter's
+job on the receipt, not the kitchen's.
+
+---
+
 ## Reports
 
 `/reports` is **admin only**, at the route, in the navigation, and — the part that matters
@@ -704,12 +813,14 @@ src/
 ├─ features/
 │  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage
 │  ├─ menu/                    catalog: hooks, write API, list/form/categories pages
-│  ├─ pos/                     till: cart logic, order transaction, receipts, voids
+│  ├─ pos/                     till: cart, order transaction, receipts, voids,
+│  │                          date-scoped workspace, filters, fulfilment queue
 │  ├─ staff/                   till operators: roster, session, picker
 │  └─ reports/                 admin-only: aggregation, cost resolution, CSV export
 ├─ lib/                        firebase, env, auth-errors, money, utils
 └─ pages/                      Dashboard, Admin, 403, 404
 
+tests/unit/                    pure logic; no emulator
 tests/rules/                   Firestore security-rules tests
 firestore.rules                The authorization boundary
 ```

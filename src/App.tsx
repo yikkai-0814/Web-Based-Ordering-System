@@ -13,6 +13,7 @@ import { StaffListPage } from '@/features/staff/StaffListPage'
 import { StaffSessionProvider } from '@/features/staff/StaffSessionProvider'
 import { OrderDetailPage } from '@/features/pos/OrderDetailPage'
 import { OrdersListPage } from '@/features/pos/OrdersListPage'
+import { QueuePage } from '@/features/pos/QueuePage'
 import { TerminalPage } from '@/features/pos/TerminalPage'
 import { AdminPage } from '@/pages/AdminPage'
 import { DashboardPage } from '@/pages/DashboardPage'
@@ -41,6 +42,8 @@ export function App() {
                 {/* The till and the sales record: both roles, since staff work them. */}
                 <Route path="/pos" element={<TerminalPage />} />
                 <Route path="/orders" element={<OrdersListPage />} />
+                {/* The kitchen board. Both roles: whoever is making the food moves it. */}
+                <Route path="/queue" element={<QueuePage />} />
                 <Route path="/orders/:orderId" element={<OrderDetailPage />} />
 
                 {/* Admin-only group. Later admin routes nest here rather than

@@ -103,6 +103,35 @@ export function businessDateOf(when: Date): string {
   return `${year}-${month}-${day}`
 }
 
+/**
+ * The business date `days` away from another one, as `YYYY-MM-DD`.
+ *
+ * The parts are parsed by hand and rebuilt through a **local** `Date`, never by handing the
+ * string to `new Date()` — which reads a bare `YYYY-MM-DD` as UTC midnight and would land on
+ * the wrong day for anyone west of Greenwich. That is the same trap `businessDateOf` avoids
+ * by not using `toISOString()`, and the two must agree or the workspace could step onto a
+ * date the till would never file a sale under.
+ *
+ * Going through `Date` rather than adding to the day number is what makes month ends and
+ * leap years come out right. An unparseable input is returned unchanged rather than throwing
+ * — a date picker is not worth crashing a till over.
+ */
+export function shiftBusinessDate(businessDate: string, days: number): string {
+  const parts = businessDate.split('-').map(Number)
+  const [year, month, day] = parts
+  if (parts.length !== 3 || year === undefined || month === undefined || day === undefined) {
+    return businessDate
+  }
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return businessDate
+  }
+
+  const shifted = new Date(year, month - 1, day)
+  if (Number.isNaN(shifted.getTime())) return businessDate
+  shifted.setDate(shifted.getDate() + days)
+  return businessDateOf(shifted)
+}
+
 function parseLine(value: unknown): OrderLine | null {
   if (typeof value !== 'object' || value === null) return null
   const { menuItemId, name, unitPrice, quantity } = value as Record<string, unknown>

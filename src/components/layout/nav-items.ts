@@ -1,5 +1,6 @@
 import {
   ChartColumn,
+  ChefHat,
   CupSoda,
   IdCard,
   LayoutDashboard,
@@ -34,6 +35,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     to: '/pos',
     label: 'Till',
     icon: ScanBarcode,
+    roles: ROLES,
+  },
+  {
+    to: '/queue',
+    label: 'Queue',
+    icon: ChefHat,
+    // Both roles: the kitchen board is worked by whoever is making the food.
     roles: ROLES,
   },
   {
