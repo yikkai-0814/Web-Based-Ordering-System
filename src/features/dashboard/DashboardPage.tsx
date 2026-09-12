@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'react-router'
 import { AlertCircle, TriangleAlert } from 'lucide-react'
 
@@ -9,9 +9,9 @@ import { ROLE_LABELS } from '@/features/auth/types'
 import { useAuth } from '@/features/auth/useAuth'
 import { buildDashboard } from '@/features/dashboard/summary'
 import { QUEUE_COLUMN_LABELS, QUEUE_COLUMNS } from '@/features/pos/queue'
-import { businessDateOf } from '@/features/pos/types'
+import { useBusinessToday } from '@/features/pos/useBusinessToday'
 import { useOrdersWorkspace } from '@/features/pos/useOrdersWorkspace'
-import { rangeFor } from '@/features/reports/ranges'
+import type { DateRange } from '@/features/reports/ranges'
 import { useReport } from '@/features/reports/useReport'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -34,7 +34,10 @@ import { cn } from '@/lib/utils'
  */
 export function DashboardPage() {
   const { profile } = useAuth()
-  const [businessDate] = useState(() => businessDateOf(new Date()))
+  // Follows the clock rather than freezing at mount. This page has no date bar by design —
+  // it answers for "today" and nothing else — so if today moved on without it, a till left
+  // running overnight would show yesterday with no way to correct it short of a reload.
+  const businessDate = useBusinessToday()
   const { views, loading, error } = useOrdersWorkspace(businessDate)
 
   const role = profile?.role ?? 'staff'
@@ -139,7 +142,7 @@ export function DashboardPage() {
 
       {/* Mounted only for an admin, so the admin-only cost read is never issued by a staff
           session. The guard is the mount, not a hidden element. */}
-      {profile?.role === 'admin' && <TodayCostCard />}
+      {profile?.role === 'admin' && <TodayCostCard businessDate={businessDate} />}
     </div>
   )
 }
@@ -157,8 +160,13 @@ export function DashboardPage() {
  * disagree by whatever was rung up in between. The Refresh button is how it is brought back
  * into line.
  */
-function TodayCostCard() {
-  const range = useMemo(() => rangeFor('today', new Date()), [])
+function TodayCostCard({ businessDate }: { businessDate: string }) {
+  // Built from the day the page is showing rather than from the clock, which is what makes
+  // the snapshot follow a rollover: `rangeFor('today', …)` would answer for whenever it
+  // happened to be called, and the card would keep reporting yesterday's profit under
+  // today's heading. One day, so both ends are that day — the same shape rangeFor returns
+  // for its own `today` preset.
+  const range = useMemo<DateRange>(() => ({ from: businessDate, to: businessDate }), [businessDate])
   const { report, loading, error, refresh } = useReport(range)
 
   const incomplete = report !== null && !report.coverage.complete

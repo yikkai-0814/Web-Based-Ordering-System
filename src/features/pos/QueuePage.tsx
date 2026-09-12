@@ -20,12 +20,8 @@ import {
   queueActionFor,
   type QueueColumn,
 } from '@/features/pos/queue'
-import {
-  businessDateOf,
-  fulfillmentOperatorNameOf,
-  operatorNameOf,
-  PAYMENT_LABELS,
-} from '@/features/pos/types'
+import { fulfillmentOperatorNameOf, operatorNameOf, PAYMENT_LABELS } from '@/features/pos/types'
+import { useShownBusinessDate } from '@/features/pos/useBusinessToday'
 import { useOrdersWorkspace } from '@/features/pos/useOrdersWorkspace'
 import { formatMoney } from '@/lib/money'
 
@@ -48,7 +44,8 @@ import { formatMoney } from '@/lib/money'
  * the counter's job on the receipt, not the kitchen's.
  */
 export function QueuePage() {
-  const [businessDate, setBusinessDate] = useState(() => businessDateOf(new Date()))
+  // Follows today on its own, unless somebody has navigated to another day — see the hook.
+  const { businessDate, showDate } = useShownBusinessDate()
   const { views, loading, error } = useOrdersWorkspace(businessDate)
   const { profile } = useAuth()
   const { operator } = useStaffSession()
@@ -106,7 +103,7 @@ export function QueuePage() {
         </p>
       </div>
 
-      <BusinessDateBar businessDate={businessDate} onChange={setBusinessDate} />
+      <BusinessDateBar businessDate={businessDate} onChange={showDate} />
 
       {(error ?? moveError) && (
         <Alert variant="destructive">

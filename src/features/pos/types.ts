@@ -132,6 +132,27 @@ export function shiftBusinessDate(businessDate: string, days: number): string {
   return businessDateOf(shifted)
 }
 
+/**
+ * How long until `businessDateOf` would answer differently — that is, until the next local
+ * midnight.
+ *
+ * Built from local calendar parts and handed to `Date` for normalisation, the same way
+ * `shiftBusinessDate` is, and for the same reasons. Two of them matter especially here:
+ *
+ *   * **a day is not always 24 hours.** Where the clocks change, one is 23 and another 25,
+ *     so adding a fixed span would drift an hour off the boundary twice a year. Asking for
+ *     "day + 1 at 00:00" and subtracting gets it right in both directions.
+ *   * **where midnight itself is skipped** by a spring-forward, `Date` normalises to the
+ *     first instant that does exist, which is exactly the moment the date changes.
+ *
+ * Always positive: at one millisecond past midnight it returns nearly a full day, and at one
+ * millisecond before it returns 1.
+ */
+export function msUntilNextBusinessDate(now: Date): number {
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0)
+  return nextMidnight.getTime() - now.getTime()
+}
+
 function parseLine(value: unknown): OrderLine | null {
   if (typeof value !== 'object' || value === null) return null
   const { menuItemId, name, unitPrice, quantity } = value as Record<string, unknown>

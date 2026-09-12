@@ -28,7 +28,8 @@ import {
   OverallStatusBadge,
   PaymentStatusBadge,
 } from '@/features/pos/PaymentStatusBadge'
-import { businessDateOf, operatorNameOf, PAYMENT_LABELS } from '@/features/pos/types'
+import { operatorNameOf, PAYMENT_LABELS } from '@/features/pos/types'
+import { useShownBusinessDate } from '@/features/pos/useBusinessToday'
 import { useOrdersWorkspace } from '@/features/pos/useOrdersWorkspace'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -42,7 +43,8 @@ import { cn } from '@/lib/utils'
  * day rather than pretending to reach the whole history.
  */
 export function OrdersListPage() {
-  const [businessDate, setBusinessDate] = useState(() => businessDateOf(new Date()))
+  // Follows today on its own, unless somebody has navigated to another day — see the hook.
+  const { businessDate, showDate } = useShownBusinessDate()
   const [filter, setFilter] = useState<OrderFilter>('all')
   const [search, setSearch] = useState('')
 
@@ -62,7 +64,7 @@ export function OrdersListPage() {
         </p>
       </div>
 
-      <BusinessDateBar businessDate={businessDate} onChange={setBusinessDate}>
+      <BusinessDateBar businessDate={businessDate} onChange={showDate}>
         <div className="grid gap-1.5">
           <Label htmlFor="order-search">Search this date</Label>
           <div className="relative">

@@ -62,6 +62,10 @@ kept the previous person's identity after a different account signed in, so one 
 could be recorded against another — permanently. The operator selection is now scoped to the
 account that made it.
 
+**Phase 14** taught the app to notice midnight. Every screen that shows "today" had decided
+what today was when it mounted and never looked again, which left a counter trading past
+midnight with a kitchen board silently stuck on the previous day.
+
 Still to come — no partial refunds, no tax or discounts. The admin page remains a deliberate
 placeholder that proves access control works end to end.
 
@@ -836,6 +840,26 @@ index serves. Sorting is done in memory rather than with `orderBy('number')`, be
 equality filter plus a sort on a different field is exactly what would demand a composite
 index — and a day's orders are few enough that sorting them costs nothing. **No index was
 added; `firestore.indexes.json` stays empty.**
+
+**Which day that is, is a live value.** A till is not a page somebody visits; it is left
+running on a counter for days. Until Phase 14 every screen showing "today" decided what today
+was at mount and never revisited it, so after midnight the kitchen board went on displaying
+yesterday while the till — which stamps each sale with the date at the moment it writes —
+filed new orders under the new day. The sales were recorded correctly and became invisible to
+the people who had to cook them. A stall closing before midnight never noticed; one trading
+past it hit this nightly.
+
+`useBusinessToday` now re-reads the clock on a timer armed for the next local midnight, and
+again whenever the tab becomes visible or regains focus — the second half matters because a
+tablet asleep on a counter may never fire that timer. `msUntilNextBusinessDate` computes the
+gap from local calendar parts rather than by adding 24 hours, so the two days a year that are
+23 or 25 hours long still land on the boundary.
+
+`useShownBusinessDate` adds the distinction the dated screens need: **following** today is a
+state of its own, separate from _being_ on today's date. The Orders list and the Queue follow
+until somebody navigates, and then stay exactly where they were put — reading last Tuesday's
+takings at 23:59 must not become reading Wednesday at 00:01. The **Today** button returns to
+following. The dashboard has no date bar and simply follows.
 
 ### How the sidecars are scoped
 

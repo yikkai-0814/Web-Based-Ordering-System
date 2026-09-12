@@ -5,7 +5,7 @@ import {
   SIDECAR_QUERY_LIMIT,
   type ChunkableOrder,
 } from '@/features/pos/order-sidecars'
-import { businessDateOf, shiftBusinessDate } from '@/features/pos/types'
+import { businessDateOf, msUntilNextBusinessDate, shiftBusinessDate } from '@/features/pos/types'
 
 const day = (count: number, from = 1): ChunkableOrder[] =>
   Array.from({ length: count }, (_, index) => ({
@@ -154,5 +154,91 @@ describe('shiftBusinessDate', () => {
     for (const value of ['', 'today', '2026-09', 'x-y-z']) {
       expect(shiftBusinessDate(value, 1)).toBe(value)
     }
+  })
+})
+
+/**
+ * Phase 14. How long until `businessDateOf` answers differently.
+ *
+ * The screens that show "today" arm a timer with this, so being wrong here means a till
+ * that misses the rollover — the kitchen board showing yesterday while the counter files
+ * sales under the new day.
+ *
+ * Local time throughout, deliberately: the whole point is when the LOCAL date changes, and
+ * these assertions therefore hold in any timezone the machine happens to be set to.
+ */
+describe('msUntilNextBusinessDate', () => {
+  const HOUR = 60 * 60 * 1000
+  const DAY = 24 * HOUR
+
+  /** Local midnight at the start of the given day. */
+  const midnight = (year: number, month: number, day: number) =>
+    new Date(year, month - 1, day, 0, 0, 0, 0)
+
+  it('is a whole day at the very start of one', () => {
+    // Except where the clocks change, which the next test covers.
+    expect(msUntilNextBusinessDate(midnight(2026, 9, 12))).toBeLessThanOrEqual(25 * HOUR)
+    expect(msUntilNextBusinessDate(midnight(2026, 9, 12))).toBeGreaterThanOrEqual(23 * HOUR)
+  })
+
+  it('is one millisecond at one millisecond before midnight', () => {
+    const almost = new Date(2026, 8, 12, 23, 59, 59, 999)
+    expect(msUntilNextBusinessDate(almost)).toBe(1)
+  })
+
+  it('counts down across the day', () => {
+    const morning = new Date(2026, 8, 12, 9, 0, 0, 0)
+    const evening = new Date(2026, 8, 12, 21, 0, 0, 0)
+    expect(msUntilNextBusinessDate(morning)).toBeGreaterThan(msUntilNextBusinessDate(evening))
+  })
+
+  it('always lands exactly on a date change, never before or after', () => {
+    // The contract the timer depends on: wait this long, and businessDateOf has moved on —
+    // wait a millisecond less, and it has not.
+    for (const at of [
+      new Date(2026, 8, 12, 0, 0, 0, 0),
+      new Date(2026, 8, 12, 13, 37, 42, 123),
+      new Date(2026, 8, 12, 23, 59, 59, 999),
+      new Date(2026, 11, 31, 22, 0, 0, 0),
+      new Date(2028, 1, 28, 18, 30, 0, 0),
+    ]) {
+      const today = businessDateOf(at)
+      const atBoundary = new Date(at.getTime() + msUntilNextBusinessDate(at))
+      const justBefore = new Date(atBoundary.getTime() - 1)
+
+      expect(businessDateOf(atBoundary)).not.toBe(today)
+      expect(businessDateOf(justBefore)).toBe(today)
+    }
+  })
+
+  it('steps onto the next calendar day across a month end, a year end and a leap day', () => {
+    const cases: [Date, string][] = [
+      [new Date(2026, 8, 30, 23, 0, 0, 0), '2026-10-01'],
+      [new Date(2026, 11, 31, 23, 0, 0, 0), '2027-01-01'],
+      [new Date(2028, 1, 28, 23, 0, 0, 0), '2028-02-29'],
+      [new Date(2028, 1, 29, 23, 0, 0, 0), '2028-03-01'],
+    ]
+    for (const [at, expected] of cases) {
+      const next = new Date(at.getTime() + msUntilNextBusinessDate(at))
+      expect(businessDateOf(next)).toBe(expected)
+    }
+  })
+
+  it('is never zero, negative, or long enough to sleep through a day', () => {
+    // A non-positive answer would spin the timer; more than 25 hours would sleep past a
+    // rollover. 25 rather than 24 because a clocks-back day really is 25 hours long.
+    for (let hour = 0; hour < 24; hour += 1) {
+      for (const minute of [0, 30, 59]) {
+        const gap = msUntilNextBusinessDate(new Date(2026, 8, 12, hour, minute, 0, 0))
+        expect(gap).toBeGreaterThan(0)
+        expect(gap).toBeLessThanOrEqual(25 * HOUR)
+      }
+    }
+  })
+
+  it('never exceeds a day plus the widest clock change', () => {
+    expect(msUntilNextBusinessDate(new Date(2026, 8, 12, 0, 0, 0, 0))).toBeLessThanOrEqual(
+      DAY + HOUR,
+    )
   })
 })
