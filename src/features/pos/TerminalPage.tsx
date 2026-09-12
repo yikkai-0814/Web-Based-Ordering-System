@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { AlertCircle, CheckCircle2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, CupSoda } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { EmptyState } from '@/components/data/EmptyState'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/features/auth/useAuth'
 import { StaffPicker } from '@/features/staff/StaffPicker'
@@ -186,11 +187,13 @@ export function TerminalPage() {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_26rem]">
-      <section className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">New Order</h1>
-          <p className="text-muted-foreground">Tap an item to add it to the order.</p>
+    <div className="mx-auto grid w-full max-w-7xl gap-4 lg:grid-cols-[1fr_24rem] xl:grid-cols-[1fr_26rem]">
+      <section className="min-w-0 space-y-5">
+        <div className="space-y-1">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
+            New Order
+          </h1>
+          <p className="text-sm text-muted-foreground">Tap an item to add it to the order.</p>
         </div>
 
         {itemsError && (
@@ -201,16 +204,19 @@ export function TerminalPage() {
         )}
 
         {groups.length === 0 && (
-          <p className="text-muted-foreground">
-            Nothing is available for sale. An administrator needs to add menu items, or make
-            existing ones available.
-          </p>
+          <EmptyState
+            title="Nothing is available for sale"
+            description="An administrator needs to add menu items, or make existing ones available."
+            icon={<CupSoda className="size-6" aria-hidden="true" />}
+          />
         )}
 
         {groups.map(({ category, items: groupItems }) => (
           <div key={category.id} className="space-y-2">
-            <h2 className="text-lg font-medium">{category.name}</h2>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+            <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
+              {category.name}
+            </h2>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {groupItems.map((item) => (
                 <button
                   key={item.id}
@@ -219,10 +225,10 @@ export function TerminalPage() {
                   data-item-name={item.name}
                   onClick={() => addItem(item)}
                   disabled={pending}
-                  className="flex h-touch-lg flex-col justify-center rounded-lg border bg-card px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50"
+                  className="flex h-touch-lg flex-col justify-center gap-0.5 rounded-xl border bg-card px-3 py-2 text-left shadow-xs transition-[box-shadow,border-color,background-color,transform] duration-100 hover:border-primary/40 hover:bg-primary/[0.04] hover:shadow-sm focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.98] active:bg-primary/[0.08] disabled:opacity-50"
                 >
-                  <span className="line-clamp-2 text-sm font-medium">{item.name}</span>
-                  <span className="text-sm text-muted-foreground tabular-nums">
+                  <span className="line-clamp-2 text-sm leading-snug font-medium">{item.name}</span>
+                  <span className="text-sm font-semibold tabular-nums text-muted-foreground">
                     {formatMoney(item.price)}
                   </span>
                 </button>
@@ -232,7 +238,9 @@ export function TerminalPage() {
         ))}
       </section>
 
-      <aside className="flex min-h-[24rem] flex-col rounded-lg border bg-card lg:sticky lg:top-4 lg:h-[calc(100svh-6rem)]">
+      {/* On a phone this sits below the menu in ordinary flow; from lg it becomes its own
+          column and stays put while the menu scrolls. */}
+      <aside className="flex min-h-96 min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:sticky lg:top-4 lg:h-[calc(100svh-6rem)]">
         <CartPanel
           cart={cart}
           disabled={pending}
@@ -271,11 +279,23 @@ export function TerminalPage() {
 
         {/* Placing the order is the only action here. Payment is a separate step, taken on
             the order's own page after the customer has collected and paid. */}
-        <div className="space-y-2 border-t p-4">
+        {/*
+         * Sticky below `lg`, so the total and the one action are reachable without scrolling
+         * to the end of a long cart — and offset by the mobile nav's own height so the two
+         * bottom-anchored things can never sit on top of each other. It is `sticky`, not
+         * `fixed`: it stays inside this panel, cannot cover the menu or a dialog, and the
+         * cart above it scrolls freely behind an opaque surface rather than being hidden by
+         * it.
+         */}
+        <div className="sticky bottom-mobile-nav z-20 space-y-2 border-t bg-card p-4 lg:static">
+          <div className="flex items-baseline justify-between gap-3 lg:hidden">
+            <span className="text-sm text-muted-foreground">Total</span>
+            <span className="text-xl font-semibold tabular-nums">{formatMoney(total)}</span>
+          </div>
           <Button
             type="button"
             size="lg"
-            className="h-touch-lg w-full text-lg"
+            className="h-touch-lg w-full text-lg font-semibold shadow-xs transition-[box-shadow,transform] duration-100 hover:shadow-sm active:scale-[0.99] disabled:shadow-none"
             data-testid="place-order"
             disabled={!canPlace || pending}
             onClick={() => void placeOrder()}

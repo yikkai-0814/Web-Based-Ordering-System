@@ -1,4 +1,4 @@
-import { Minus, Plus, Trash2 } from 'lucide-react'
+import { Minus, Plus, ShoppingBasket, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cartItemCount, cartTotal, lineTotal, type Cart } from '@/features/pos/cart'
@@ -23,9 +23,12 @@ export function CartPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b px-4 py-3">
-        <h2 className="font-medium">Current order</h2>
-        <span className="text-sm text-muted-foreground" data-testid="cart-count">
+      <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-3">
+        <h2 className="font-heading font-medium">Current order</h2>
+        <span
+          className="rounded-full bg-background px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground"
+          data-testid="cart-count"
+        >
           {count === 1 ? '1 item' : `${count} items`}
         </span>
         {cart.length > 0 && (
@@ -43,7 +46,11 @@ export function CartPanel({
 
       <div className="flex-1 overflow-y-auto">
         {cart.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">No items yet. Tap an item to add it.</p>
+          <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
+            <ShoppingBasket className="size-6 text-muted-foreground/70" aria-hidden="true" />
+            <p className="text-sm font-medium">No items yet</p>
+            <p className="text-sm text-muted-foreground">Tap an item on the left to add it.</p>
+          </div>
         ) : (
           <ul className="divide-y">
             {cart.map((line) => (
@@ -107,9 +114,12 @@ export function CartPanel({
         )}
       </div>
 
-      <div className="flex items-baseline gap-3 border-t px-4 py-3">
+      <div className="flex items-baseline gap-3 border-t bg-muted/40 px-4 py-3">
         <span className="text-base font-medium">Total</span>
-        <span className="ml-auto text-2xl font-semibold tabular-nums" data-testid="cart-total">
+        <span
+          className="ml-auto text-2xl font-semibold tabular-nums sm:text-3xl"
+          data-testid="cart-total"
+        >
           {formatMoney(cartTotal(cart))}
         </span>
       </div>

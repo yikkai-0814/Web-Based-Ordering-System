@@ -53,7 +53,8 @@ describe('CartPanel: what it shows', () => {
 
   it('invites the first tap when empty, and offers nothing to clear', () => {
     setup([])
-    expect(screen.getByText('No items yet. Tap an item to add it.')).not.toBeNull()
+    expect(screen.getByText('No items yet')).not.toBeNull()
+    expect(screen.getByText('Tap an item on the left to add it.')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull()
     expect(screen.getByTestId('cart-total').textContent).toBe('RM 0.00')
   })

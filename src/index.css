@@ -8,19 +8,27 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  color-scheme: light;
+
   --radius: 0.625rem;
 
-  /* Neutral surfaces */
-  --background: oklch(1 0 0);
+  /* Neutral surfaces.
+
+     The page is a hair off white and very slightly warm; cards stay pure white. That
+     difference is small on purpose — it is what makes a card read as a surface sitting on a
+     page rather than as a hairline box drawn on the same sheet, which is what every screen
+     looked like when both were oklch(1 0 0). The warmth follows the amber brand hue so the
+     neutral never reads as blue-grey against it. */
+  --background: oklch(0.985 0.003 75);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --muted: oklch(0.965 0.004 75);
+  --muted-foreground: oklch(0.52 0.01 75);
+  --border: oklch(0.915 0.004 75);
+  --input: oklch(0.915 0.004 75);
   --ring: oklch(0.62 0.13 45);
 
   /* Brand: a warm café amber. Used for primary actions and the active nav item. */
@@ -33,14 +41,18 @@
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.99 0 0);
 
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(0.995 0.002 75);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --sidebar-border: oklch(0.915 0.004 75);
+  /* Proportional bars, not a chart palette: the brand amber, a lighter tint of it, and two
+     neutrals. Enough to tell two or three series apart without the interface turning into a
+     colour wheel — and never the only way a value is communicated, since every bar is
+     labelled with its own figure. */
+  --chart-1: oklch(0.62 0.13 45);
+  --chart-2: oklch(0.75 0.09 55);
+  --chart-3: oklch(0.55 0.02 75);
+  --chart-4: oklch(0.72 0.02 75);
+  --chart-5: oklch(0.87 0.01 75);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
@@ -48,36 +60,54 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.7 0.12 45);
+/* Designed, not inverted.
 
-  --primary: oklch(0.7 0.13 45);
-  --primary-foreground: oklch(0.21 0.03 45);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --accent: oklch(0.29 0.02 60);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
+   The light theme separates a page from a card by making the page slightly DARKER than the
+   card. Flipping that literally would put the page above the card, which is backwards: in a
+   dark room the eye reads *lighter* as *nearer*. So the relationship is rebuilt rather than
+   mirrored — the page is the darkest surface, cards sit above it, popovers and dialogs above
+   those, and each step is large enough to survive a cheap till screen at an angle.
+
+   Everything keeps the same faint warmth as the light theme (hue 75), so the amber brand
+   still belongs to the palette instead of floating on a neutral grey. The brand itself is
+   lightened, because the light theme's amber on a dark background fails contrast. */
+.dark {
+  color-scheme: dark;
+
+  /* page → card → popover: three clearly separable steps. */
+  --background: oklch(0.16 0.006 75);
+  --foreground: oklch(0.97 0.002 75);
+  --card: oklch(0.213 0.007 75);
+  --card-foreground: oklch(0.97 0.002 75);
+  --popover: oklch(0.246 0.008 75);
+  --popover-foreground: oklch(0.97 0.002 75);
+  --muted: oklch(0.268 0.007 75);
+  /* Comfortably past 4.5:1 on both --background and --card, which the old 0.708 was not. */
+  --muted-foreground: oklch(0.74 0.012 75);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: oklch(0.74 0.13 55);
+
+  --primary: oklch(0.76 0.13 60);
+  --primary-foreground: oklch(0.2 0.03 60);
+  --secondary: oklch(0.268 0.007 75);
+  --secondary-foreground: oklch(0.97 0.002 75);
+  --accent: oklch(0.3 0.02 60);
+  --accent-foreground: oklch(0.97 0.002 75);
+  /* Lifted off the light theme's red so it reads as urgent rather than muddy on a dark card. */
+  --destructive: oklch(0.68 0.19 25);
   --destructive-foreground: oklch(0.99 0 0);
 
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* The sidebar sits beside the page rather than on it, so it is a step darker than a card
+     — the same relationship the light theme draws, in the other direction. */
+  --sidebar: oklch(0.185 0.006 75);
+  --sidebar-foreground: oklch(0.97 0.002 75);
+  --sidebar-border: oklch(1 0 0 / 12%);
+  --chart-1: oklch(0.76 0.13 60);
+  --chart-2: oklch(0.83 0.08 65);
+  --chart-3: oklch(0.68 0.02 75);
+  --chart-4: oklch(0.52 0.02 75);
+  --chart-5: oklch(0.4 0.012 75);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
@@ -119,6 +149,10 @@
      the default control heights. */
   --spacing-touch: 3rem;
   --spacing-touch-lg: 4rem;
+  /* The height MobileNav occupies at the bottom of the viewport below `md`. Anything else
+     that sticks to the bottom on a small screen offsets by this instead of guessing, so the
+     two can never end up on top of each other. */
+  --spacing-mobile-nav: 4.25rem;
   --font-heading: var(--font-sans);
   --font-sans: 'Geist Variable', sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);

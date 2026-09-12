@@ -5,6 +5,7 @@ import { AlertCircle, ChefHat } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/data/EmptyState'
 import { useAuth } from '@/features/auth/useAuth'
 import { useStaffSession } from '@/features/staff/useStaffSession'
 import { BusinessDateBar } from '@/features/pos/BusinessDateBar'
@@ -93,9 +94,9 @@ export function QueuePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-7xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Queue</h1>
+        <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">Queue</h1>
         <p className="text-muted-foreground">
           Orders still to be made and handed over, oldest first. Each card moves one step: pending
           to preparing, preparing to ready, ready to delivered. A delivered or voided order leaves
@@ -115,9 +116,13 @@ export function QueuePage() {
       {loading ? (
         <Skeleton className="h-96 w-full" />
       ) : queued === 0 ? (
-        <p className="text-muted-foreground" data-testid="queue-empty">
-          Nothing waiting on this date. Every order has been delivered or voided.
-        </p>
+        <div data-testid="queue-empty">
+          <EmptyState
+            title="Nothing waiting on this date"
+            description="Every order has been delivered or voided. New orders appear here as they are rung up."
+            icon={<ChefHat className="size-6" aria-hidden="true" />}
+          />
+        </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-3">
           {columns.map((column) => (
@@ -148,20 +153,25 @@ function QueueColumnPanel({
 }) {
   return (
     <section
-      className="space-y-3 rounded-lg border bg-muted/30 p-3"
+      className="space-y-3 rounded-xl border bg-muted/40 p-3"
       aria-label={QUEUE_COLUMN_LABELS[status]}
       data-testid="queue-column"
       data-status={status}
     >
       <h2 className="flex items-baseline gap-2 text-sm font-semibold tracking-wide uppercase">
         {QUEUE_COLUMN_LABELS[status]}
-        <span className="tabular-nums text-muted-foreground" data-testid="queue-column-count">
+        <span
+          className="rounded-full bg-background px-2 py-0.5 text-xs tabular-nums text-muted-foreground"
+          data-testid="queue-column-count"
+        >
           {views.length}
         </span>
       </h2>
 
       {views.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Empty.</p>
+        <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+          Nothing here.
+        </p>
       ) : (
         <ul className="space-y-3">
           {views.map((view) => (
@@ -189,7 +199,7 @@ function QueueCard({
 
   return (
     <article
-      className="space-y-3 rounded-lg border bg-background p-3"
+      className="space-y-3 rounded-xl border bg-card p-3 shadow-xs transition-[box-shadow,border-color] duration-150 hover:border-primary/30 hover:shadow-sm"
       data-testid="queue-card"
       data-order-number={order.number}
       data-fulfillment={view.fulfillment}

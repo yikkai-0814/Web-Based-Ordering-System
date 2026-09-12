@@ -25,10 +25,12 @@ export function StaffPicker({
   const { operators, select, loading } = useStaffSession()
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 py-8">
-      <div className="text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">{heading}</h1>
-        <p className="text-muted-foreground">{blurb}</p>
+    <div className="mx-auto w-full max-w-2xl space-y-6 py-6 sm:py-8">
+      <div className="space-y-1 text-center">
+        <h1 className="font-heading text-xl font-semibold tracking-tight text-balance sm:text-2xl">
+          {heading}
+        </h1>
+        <p className="text-sm text-balance text-muted-foreground">{blurb}</p>
       </div>
 
       {/* The roster arrives asynchronously. Without this, the picker briefly shows only the
@@ -36,6 +38,8 @@ export function StaffPicker({
       {loading && <p className="text-center text-sm text-muted-foreground">Loading staff…</p>}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {/* Two across even on the narrowest phone: these are names, not paragraphs, and a
+            single column would push the later ones off a short screen. */}
         {operators.map((operator) => (
           <button
             key={operator.id}
@@ -49,7 +53,7 @@ export function StaffPicker({
             }}
             // min-h, not a fixed height: the name is the point of this screen, so the tile grows
             // to fit rather than clipping it.
-            className="flex min-h-touch-lg flex-col items-center justify-center gap-1 rounded-lg border bg-card px-3 py-4 text-center transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+            className="flex min-h-touch-lg flex-col items-center justify-center gap-1 rounded-xl border bg-card px-3 py-4 text-center shadow-xs transition-[box-shadow,border-color,background-color,transform] duration-100 hover:border-primary/40 hover:bg-primary/[0.04] hover:shadow-sm focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.98]"
           >
             <UserRound className="size-5 text-muted-foreground" aria-hidden="true" />
             <span className="line-clamp-2 text-base font-medium">{operator.name}</span>

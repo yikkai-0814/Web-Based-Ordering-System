@@ -24,10 +24,10 @@ export function Topbar() {
   const [switching, setSwitching] = useState(false)
 
   return (
-    <header className="flex h-16 shrink-0 items-center gap-4 border-b px-4 md:px-6">
-      <span className="text-base font-semibold tracking-tight">Ordering System</span>
+    <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3 border-b bg-card/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-card/80 md:gap-4 md:px-6">
+      <span className="font-heading text-base font-semibold tracking-tight">Ordering System</span>
       {profile && (
-        <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
+        <span className="hidden rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground sm:inline">
           {ROLE_LABELS[profile.role]}
         </span>
       )}
@@ -37,10 +37,15 @@ export function Topbar() {
       {operator && (
         <AlertDialog open={switching} onOpenChange={setSwitching}>
           <AlertDialogTrigger asChild>
-            <Button variant="ghost" size="sm" className="gap-2" data-testid="switch-operator">
-              <UserRound className="size-4" aria-hidden="true" />
-              <span className="hidden sm:inline">Operating as</span>
-              <span className="font-medium" data-testid="current-operator">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="min-w-0 gap-2 rounded-full border bg-background/60"
+              data-testid="switch-operator"
+            >
+              <UserRound className="size-4 shrink-0" aria-hidden="true" />
+              <span className="hidden text-muted-foreground sm:inline">Operating as</span>
+              <span className="min-w-0 truncate font-medium" data-testid="current-operator">
                 {operator.name}
               </span>
             </Button>

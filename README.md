@@ -72,6 +72,28 @@ New Order, Orders, Queue. An admin still lands on the Dashboard with everything 
 New Order asks who is making **this** order, every time — two people share a counter, and the
 one who took the last order is not necessarily taking the next.
 
+**Phase 16** is presentation only. The page and the cards were both pure white, so nothing
+read as a surface; the page is now a hair off white and cards sit on it, at three deliberate
+weights rather than one. Cost and profit are the loudest figures on both admin screens, with
+payment mix and revenue-leading items as proportional bars built from figures already
+fetched. There is deliberately **no trend chart and no charting library**: no time series
+exists in the data, and inventing one would have meant inventing a calculation. Below `md`
+there was previously no navigation at all; there is now a bottom bar carrying exactly the
+same role lists.
+
+**Cost coverage is no longer a metric.** Every menu item is meant to have a recorded cost, so
+an item sold without one is a data-integrity exception, not a number to watch: nothing is
+shown when the data is sound, and when it is not, the item table marks the offending rows and
+a notice says to record their cost. The arithmetic is untouched — `buildReport` still resolves
+every line against the cost history and still returns `coverage`, which the CSV export still
+carries for anyone chasing the gap.
+
+**Phase 17** adds the two things a screen in a café needs: a sidebar that collapses to icons
+when the counter wants the width, and a **light / dark / system** theme in the user menu.
+Dark is designed rather than inverted — the page is the darkest surface, cards sit above it,
+popovers above those, and the amber brand is lightened so it still passes contrast. Both
+preferences are per device, and both are UI only.
+
 Still to come — no partial refunds, no tax or discounts. The admin page remains a deliberate
 placeholder that proves access control works end to end.
 
@@ -348,6 +370,15 @@ figures — and every shift began by navigating away from it.
 for both roles, and neither the route guards nor the security rules changed: what a staff
 account may _read_ is exactly what it could read before. Removing a link is not a boundary,
 and the two must not be confused — `RequireRole` and firestore.rules are the boundaries.
+
+Below `md` the sidebar is hidden and `MobileNav` takes over as a bottom bar — built from the
+same `navItemsForRole` data, so the two can never disagree about what a role may see.
+
+**The desktop sidebar collapses to icons**, remembered per device in `localStorage`. Collapsing
+is only a width: the same items, the same order, the same role filtering, with each label
+moving into a tooltip that appears on focus as well as hover and staying the link's accessible
+name either way. `main` is `flex-1`, so the space the sidebar gives up goes straight to the
+page. The bottom bar has no such state — there is nothing for it to collapse into.
 
 `landingPathFor(role)` is used by the index route (`LandingRedirect`) and by the login page's
 fallback, so there is one answer rather than a string written into two files. A deep link
@@ -1051,9 +1082,14 @@ costCoverage %  = revenue from known-cost lines ÷ total revenue
 ```
 
 Lines with no recorded cost contribute **nothing** to estimated cost, which means profit and
-margin are an **upper bound** whenever coverage is below 100%. The page says so: the tiles
-are relabelled "(incomplete)" and a warning states what share of revenue has a recorded
-cost. An estimate must never be read as an actual figure.
+margin are an **upper bound** whenever coverage is below 100%.
+
+**That is an exception, not a statistic.** Every menu item is meant to carry a cost, so the
+screens do not report coverage as a figure: when it is complete they say nothing, and when it
+is not, the item table marks the rows that are missing one and a notice says to record them.
+`coverage` is still computed and still exported to CSV — it is how somebody finds the gap —
+it simply is not presented as a business metric. A figure that is an upper bound must still
+never be read as an actual one, which is what that notice is for.
 
 ### Queries and performance
 
@@ -1134,7 +1170,10 @@ src/
 ├─ index.css                   Tailwind entry + design tokens
 ├─ components/
 │  ├─ ui/                      shadcn primitives (generated; not hand-edited)
-│  └─ layout/                  AppShell, Sidebar, Topbar, UserMenu, nav-items
+│  ├─ data/                    StatCard, MeterBar, Panel, SectionHeader, EmptyState —
+│  │                          the presentation pieces Dashboard and Reports share
+│  └─ layout/                  AppShell, Sidebar, MobileNav, Topbar, UserMenu, nav-items,
+│                             sidebar-state
 ├─ features/
 │  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage,
 │  │                          LandingRedirect
@@ -1143,6 +1182,7 @@ src/
 │  ├─ pos/                     till: cart, order transaction, receipts, voids,
 │  │                          date-scoped workspace, filters, fulfilment queue
 │  ├─ staff/                   till operators: roster, session, picker
+│  ├─ theme/                   light / dark / system: pure rules + one provider
 │  └─ reports/                 admin-only: aggregation, cost resolution, CSV export
 ├─ lib/                        firebase, env, auth-errors, money, utils
 └─ pages/                      Admin, 403, 404 — the screens that are not a feature
