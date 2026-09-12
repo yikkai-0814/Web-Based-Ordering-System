@@ -7,7 +7,16 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing'
-import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore'
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 const ADMIN_UID = 'admin-uid'
@@ -33,6 +42,19 @@ afterEach(async () => {
 })
 
 /**
+ * The display name each seeded account actually has. `createdByName` is now checked against
+ * the profile behind `createdBy`, so a fixture that changes one without the other is refused
+ * as the spoof it would be — which is the point of the rule, but makes it a poor way to
+ * write "the same order, rung up by the admin". Deriving the pair from one argument keeps
+ * every caller honest.
+ */
+const ACCOUNT_NAMES: Record<string, string> = {
+  [ADMIN_UID]: 'Ada Admin',
+  [STAFF_UID]: 'Sam Staff',
+  [OTHER_UID]: 'Otto Other',
+}
+
+/**
  * A well-formed order as the till now writes one: placed, and carrying nothing about
  * payment. Tests spread it and break one field.
  */
@@ -50,7 +72,7 @@ const placedOrder = (uid = STAFF_UID) => ({
   total: 3190,
   createdAt: new Date(),
   createdBy: uid,
-  createdByName: 'Sam Staff',
+  createdByName: ACCOUNT_NAMES[uid] ?? 'Sam Staff',
   // Phase 6: every order names the staff identity that operated the till.
   staffId: 'alice',
   staffName: 'Alice',
@@ -461,5 +483,138 @@ describe('cost history rules: admin-only and append-only', () => {
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     await assertFails(getDocs(collection(db, 'menuItemCostHistory')))
     await assertFails(setDoc(doc(db, 'menuItemCostHistory', 'h1'), entry()))
+  })
+})
+
+/**
+ * Phase 10. Two kinds of check, both about what a write may CONTAIN rather than who may
+ * make it:
+ *
+ *   * the document must carry exactly the keys createOrder writes — nothing reads a stray
+ *     field today, which is precisely why an invented one must not be able to get in and
+ *     wait for something that does;
+ *   * the account name must belong to the account it names. The operator half of the pair
+ *     has been verified since Phase 6; this is the other half.
+ */
+describe('order rules: the exact shape of a sale', () => {
+  it('refuses an order carrying a field the till does not write', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    // Each of these is a plausible field a future phase might add. None may be minted by a
+    // client before the phase that defines what it means.
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), discount: 100 }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), paid: true }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), status: 'delivered' }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), refunded: 0 }))
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), note: 'extra shot' }))
+  })
+
+  it('refuses an order missing a field the till always writes', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    const { staffName: _name, ...noOperatorName } = placedOrder()
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), noOperatorName))
+    const { createdByName: _account, ...noAccountName } = placedOrder()
+    await assertFails(setDoc(doc(db, 'orders', 'bad'), noAccountName))
+  })
+
+  it('still allows a takeaway order, which legitimately omits tableNumber', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    const { tableNumber: _table, ...takeaway } = placedOrder()
+    await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), { ...takeaway, orderType: 'takeaway' }))
+  })
+
+  it('refuses a sale attributed to the caller under somebody else’s name', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    // The uid is the caller's own, so the existing createdBy check passes. What is being
+    // faked is the NAME the sale will be read under for the rest of its life.
+    await assertFails(
+      setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), createdByName: 'Ada Admin' }),
+    )
+    await assertFails(
+      setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), createdByName: 'Nobody At All' }),
+    )
+  })
+
+  it('refuses a business date that is not a date', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    // Ten characters each, which is all the old check asked for.
+    for (const businessDate of ['xxxxxxxxxx', '2026/09/11', '11-09-2026', '          ']) {
+      await assertFails(setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), businessDate }))
+    }
+    // Right idea, wrong shape: businessDateOf always zero-pads.
+    await assertFails(
+      setDoc(doc(db, 'orders', 'bad'), { ...placedOrder(), businessDate: '2026-9-11' }),
+    )
+  })
+})
+
+describe('counter rules: the day it counts for', () => {
+  it('refuses a counter opened under a key that is not a business date', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    // A counter under a malformed key would mint order numbers for a day no screen queries.
+    await assertFails(setDoc(doc(db, 'counters', 'not-a-date'), { lastNumber: 1 }))
+    await assertFails(setDoc(doc(db, 'counters', '2026-9-11'), { lastNumber: 1 }))
+  })
+
+  it('refuses a counter carrying anything but lastNumber', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(setDoc(doc(db, 'counters', DATE), { lastNumber: 1, businessDate: DATE }))
+  })
+
+  it('still opens a counter for a well-formed date', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertSucceeds(setDoc(doc(db, 'counters', DATE), { lastNumber: 1 }))
+  })
+})
+
+describe('cost history rules: an entry must point at a real item', () => {
+  const entryFor = (itemId: string) => ({
+    itemId,
+    cost: 400,
+    effectiveFrom: new Date(),
+    recordedBy: ADMIN_UID,
+  })
+
+  it('refuses an entry journalled against a menu item that does not exist', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    // Worse than stray data: reporting resolves an order line's cost by itemId, so this
+    // would be a cost that silently applies to nothing — and the journal is append-only,
+    // so it could never be taken back out.
+    await assertFails(setDoc(doc(db, 'menuItemCostHistory', 'h1'), entryFor('no-such-item')))
+  })
+
+  it('refuses an entry carrying a field the journal does not have', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'menuItemCostHistory', 'h1'), { ...entryFor('i1'), reason: 'supplier' }),
+    )
+  })
+
+  it('still allows an item and its first history entry in one batch', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    // The reason the guard uses existsAfter: at the moment this entry is evaluated the item
+    // does not exist yet. This is createMenuItem's real path.
+    const batch = writeBatch(db)
+    batch.set(doc(db, 'menuItems', 'i2'), {
+      name: 'Cortado',
+      categoryId: 'c1',
+      price: 990,
+      sortOrder: 2,
+      active: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    batch.set(doc(collection(db, 'menuItemCostHistory')), entryFor('i2'))
+    await assertSucceeds(batch.commit())
   })
 })

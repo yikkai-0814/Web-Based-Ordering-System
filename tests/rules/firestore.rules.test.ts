@@ -170,3 +170,18 @@ describe('firestore rules: default deny', () => {
     await assertFails(setDoc(doc(db, 'anything', 'at-all'), { x: 1 }))
   })
 })
+
+/**
+ * Phase 10. The catch-all was only ever tested against a sibling top-level collection. A
+ * subcollection hung beneath a path that IS matched is the more plausible mistake — every
+ * collection with an explicit rule is a place somebody could try to nest one.
+ */
+describe('default deny reaches nested paths too', () => {
+  it('denies a subcollection invented under a collection that has rules', async () => {
+    await seedProfiles()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(setDoc(doc(db, 'orders', 'o1', 'notes', 'n1'), { text: 'anything' }))
+    await assertFails(setDoc(doc(db, 'users', ADMIN_UID, 'sessions', 's1'), { at: new Date() }))
+    await assertFails(getDoc(doc(db, 'orders', 'o1', 'notes', 'n1')))
+  })
+})

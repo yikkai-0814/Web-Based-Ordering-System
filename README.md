@@ -37,8 +37,16 @@ estimated profit for an admin only. It stores nothing new; every figure is deriv
 same rows the Orders list and the Queue board already show. The same phase bounded the
 report's reads, which had been downloading every payment and void ever recorded on each load.
 
-Still to come — no partial refunds, no tax or discounts, no receipt printing. The admin page
-remains a deliberate placeholder that proves access control works end to end.
+**Phase 10** adds no feature at all. It finishes the boundary every earlier phase relied on:
+each collection now states the exact set of keys a write may carry, the Firebase account
+named on an order, payment, fulfilment step or void is checked against the profile it claims
+to be, a business date has to be a date, cost history has to point at a real item, and a menu
+item can no longer be deleted out from under its cost. Alongside it, a third test suite
+exercises the app's own write functions against the emulators, so a rule and the code that
+writes for it can no longer drift apart unnoticed.
+
+Still to come — no partial refunds, no tax or discounts. The admin page remains a deliberate
+placeholder that proves access control works end to end.
 
 ---
 
@@ -153,18 +161,19 @@ npm run dev
 
 ## Scripts
 
-| Script               | What it does                                                             |
-| -------------------- | ------------------------------------------------------------------------ |
-| `npm run dev`        | Vite dev server                                                          |
-| `npm run build`      | Typecheck, then production build to `dist/`                              |
-| `npm run preview`    | Serve the production build locally                                       |
-| `npm run typecheck`  | TypeScript only, no emit                                                 |
-| `npm run lint`       | oxlint                                                                   |
-| `npm run format`     | Prettier, writing changes                                                |
-| `npm run emulators`  | Start the Firebase Emulator Suite                                        |
-| `npm test`           | Both suites: unit then rules                                             |
-| `npm run test:unit`  | Pure-logic tests (money and cart arithmetic). No emulator needed         |
-| `npm run test:rules` | Start the Firestore emulator and run the security-rules tests against it |
+| Script                     | What it does                                                             |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `npm run dev`              | Vite dev server                                                          |
+| `npm run build`            | Typecheck, then production build to `dist/`                              |
+| `npm run preview`          | Serve the production build locally                                       |
+| `npm run typecheck`        | TypeScript only, no emit                                                 |
+| `npm run lint`             | oxlint                                                                   |
+| `npm run format`           | Prettier, writing changes                                                |
+| `npm run emulators`        | Start the Firebase Emulator Suite                                        |
+| `npm test`                 | All three suites: unit, then rules, then integration                     |
+| `npm run test:unit`        | Pure-logic tests (money and cart arithmetic). No emulator needed         |
+| `npm run test:rules`       | Start the Firestore emulator and run the security-rules tests against it |
+| `npm run test:integration` | Start the Firestore **and Auth** emulators and drive the real write APIs |
 
 ---
 
@@ -188,6 +197,99 @@ Roles live in the `users/{uid}` document rather than in a custom auth claim, and
 subscribes to that document live. An admin who changes someone's role or sets
 `active: false` sees it take effect in that person's open session, without waiting for a
 re-login.
+
+### Every write states its exact key set
+
+A rule that validates the fields it names still accepts the fields it does not. Until Phase
+10 none of them used `hasOnly()`, so a client calling Firestore directly could attach
+`discount`, `paid`, `refunded` or anything else to a new order, payment, fulfilment record or
+void. Nothing read those fields — which is exactly the danger. The first feature to read one
+would be reading a value a client invented, sitting in documents that are immutable and can
+never be cleaned up.
+
+So `hasFields(required, optional)` is applied to every validated write, and the key set for
+each collection is taken from the function that writes it: `createOrder` for `orders`,
+`recordPayment` for `orderPayments`, `writeTransition` for fulfilment and its journal,
+`voidOrder` for `orderVoids`, `menu-api.ts` for the catalog, `staff-api.ts` for the roster.
+Two details matter when changing one:
+
+- **An update is checked against the merged document, not the delta.** So the list for a
+  collection the app edits with `updateDoc` — categories, menu items, costs, staff members —
+  must name every key the document has ever carried, `createdAt` included.
+- **Optional means optional.** `orders` has exactly one optional key, `tableNumber`, and
+  `validService` still decides which order type may carry it. `orderPayments` has none: an
+  e-wallet payment writes `cashTendered` and `changeGiven` as `null` rather than omitting
+  them, so they are required, not optional.
+
+### Both identities on a record are now verified
+
+Every order, payment, fulfilment step and void names two identities: the POS operator, and
+the signed-in Firebase account. The operator half has been verified since Phase 6 by
+`validOperator` — the id must be the caller's own account or a roster member who exists, is
+active, and whose current name matches. The account half was only ever checked as
+`is string`, so any signed-in user could stamp an arbitrary name onto the account that rang
+a sale up, took the money, moved the order or cancelled it. `accountNameMatches` now
+compares it with the `displayName` on the profile that uid belongs to. It costs nothing:
+`profile()` is already fetched by `isActive()` on every one of those paths, and rules cache
+a `get()` per path.
+
+### Smaller guarantees closed in the same pass
+
+- **`businessDate` must be a date**, `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`, on an order and on the
+  `counters/{businessDate}` document id. The old check was "a string of length 10", which
+  `xxxxxxxxxx` passes — and an order filed under a day nothing queries cannot be corrected
+  afterwards, orders being immutable.
+- **A cost-history entry must name a real menu item.** Reporting resolves an order line's
+  historical cost by `itemId`, so an entry against an id nothing has is a cost that silently
+  applies to nothing — in an append-only journal, permanently.
+- **A menu item cannot be deleted without its cost.** `deleteMenuItem()` has always batched
+  both; now `!existsAfter(...)` on the cost makes skipping it impossible, rather than merely
+  unlikely.
+
+### What the rules cannot enforce
+
+One gap is left open, deliberately and in the open: **`total` is not verified against
+`lines`, and the lines are not shape-checked individually.**
+
+Rules have no iteration. Summing a list would mean unrolling a fixed maximum number of
+lines, and `MAX_CART_LINES` is 100; checking each line's `unitPrice` against the live menu
+would need one `get()` per line against a hard limit of ten document accesses per request.
+Neither is viable. The honest fix is to move order creation behind a server-side write,
+which means Cloud Functions and the Blaze plan — outside this project's stated constraints.
+
+So state the residual risk plainly rather than implying it away: **an active staff account
+calling Firestore directly can write an order whose `total` disagrees with its own lines**,
+and the payment, void and reporting layers all trust `order.total`. `validateCart` and
+`cartTotal` in `src/features/pos/cart.ts` guard the app's own path, but a client-side check
+is not a control.
+
+What the rules do guarantee about a sale: it is immutable once written, it carries exactly
+the keys the till writes and no others, every scalar is the right type and in range, the
+business date is a date, it is attributed to the calling account under that account's own
+name and to an operator who is real and active, and it claims nothing about having been
+paid.
+
+### Three test suites, and what each one is for
+
+| Suite               | Needs                            | Answers                                                                |
+| ------------------- | -------------------------------- | ---------------------------------------------------------------------- |
+| `tests/unit`        | nothing                          | Is the pure logic right — money, cart, status resolution, aggregation? |
+| `tests/rules`       | Firestore emulator               | Would the database accept this document from this caller?              |
+| `tests/integration` | Firestore **and** Auth emulators | Is this the document the app actually sends?                           |
+
+The third exists because the first two can both be green while disagreeing. The rules suites
+hand-build the documents they submit, so a rename inside `fulfillment-api.ts` would break the
+app without breaking a single test. `tests/integration` signs a real account in against the
+Auth emulator and calls `createOrder`, `recordPayment`, `setFulfillment`, `voidOrder`,
+`updateMenuItem` and the rest, under the real rules, then reads back what landed.
+
+Its accounts are created under a unique prefix each run and never deleted — the Auth emulator
+resolves a request's project from its API key rather than from the configured project id, so
+"clear the accounts for this project" is not reliably scoped, and wiping it would throw away
+whatever the developer had created in their own emulator. Firestore is cleared between tests,
+scoped to the suite's own `demo-` project id. The Firebase config the suite uses is fixed in
+`vitest.config.ts` and obviously fake, so the suite tests the same thing on every machine and
+can never reach a real project.
 
 ---
 
@@ -877,6 +979,7 @@ src/
 
 tests/unit/                    pure logic; no emulator
 tests/rules/                   Firestore security-rules tests
+tests/integration/             the real write APIs, against both emulators
 firestore.rules                The authorization boundary
 ```
 

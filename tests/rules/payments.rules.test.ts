@@ -640,3 +640,47 @@ describe('payment rules: who took the money must be a real, active operator', ()
     )
   })
 })
+
+/**
+ * Phase 10. A payment may carry exactly the keys recordPayment writes, and the account it
+ * names must be the account that wrote it. Money is the last record where an invented field
+ * or a borrowed name should be able to get in.
+ */
+describe('payment rules: the exact shape of a payment', () => {
+  it('refuses a payment carrying a field the till does not write', async () => {
+    await seed()
+    await assertFails(
+      setDoc(doc(staffDb(), 'orderPayments', UNPAID_ORDER_ID), {
+        ...cashPayment(),
+        tip: 500,
+      }),
+    )
+    await assertFails(
+      setDoc(doc(staffDb(), 'orderPayments', UNPAID_ORDER_ID), {
+        ...cashPayment(),
+        refunded: false,
+      }),
+    )
+  })
+
+  it('refuses a payment that omits the cash fields instead of nulling them', async () => {
+    await seed()
+    // An e-wallet payment writes cashTendered and changeGiven as null rather than leaving
+    // them out — validCashPayment reads both on that branch, so absent is not the same as
+    // null here any more than it is for tableNumber.
+    const { cashTendered: _t, changeGiven: _c, ...missing } = ewalletPayment()
+    await assertFails(setDoc(doc(staffDb(), 'orderPayments', UNPAID_ORDER_ID), missing))
+  })
+
+  it('refuses money recorded under somebody else’s name', async () => {
+    await seed()
+    // paidBy is the caller's own uid, so the existing check passes. What is being faked is
+    // who the record will say took the money.
+    await assertFails(
+      setDoc(doc(staffDb(), 'orderPayments', UNPAID_ORDER_ID), {
+        ...cashPayment(),
+        paidByName: 'Ada Admin',
+      }),
+    )
+  })
+})

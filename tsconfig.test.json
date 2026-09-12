@@ -2,8 +2,11 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
     "target": "es2023",
-    "lib": ["ES2023"],
-    "types": ["node"],
+    "lib": ["ES2023", "DOM"],
+    /* tests/integration imports the app's own db and auth, which reaches src/lib/env.ts and
+       its `import.meta.env` reads — so this project needs Vite's ambient types (and the DOM
+       lib they build on) exactly as tsconfig.app.json does. */
+    "types": ["node", "vite/client"],
     "skipLibCheck": true,
 
     /* Bundler mode — Vitest resolves like Vite, so tests may use the @/ alias and

@@ -767,3 +767,53 @@ describe('fulfilment rules: the transition journal', () => {
     )
   })
 })
+
+/**
+ * Phase 10. Both documents a move writes carry exactly the keys fulfillment-api.ts gives
+ * them, and the account named on a step is the account that made it. The journal is the
+ * answer to "who did which step", so a borrowed name there is the whole point of it lost.
+ */
+describe('fulfilment rules: the exact shape of a move', () => {
+  it('refuses a fulfilment record carrying a field the app does not write', async () => {
+    await seed()
+    const db = staffDb()
+    const batch = writeBatch(db)
+    batch.set(doc(db, 'orderFulfillment', ORDER_ID), {
+      ...step('preparing'),
+      priority: 'rush',
+    })
+    batch.set(
+      doc(collection(db, 'orderFulfillment', ORDER_ID, 'transitions')),
+      transition('pending', 'preparing'),
+    )
+    await assertFails(batch.commit())
+  })
+
+  it('refuses a journal entry carrying a field the app does not write', async () => {
+    await seed()
+    const db = staffDb()
+    const batch = writeBatch(db)
+    batch.set(doc(db, 'orderFulfillment', ORDER_ID), step('preparing'))
+    batch.set(doc(collection(db, 'orderFulfillment', ORDER_ID, 'transitions')), {
+      ...transition('pending', 'preparing'),
+      note: 'started early',
+    })
+    await assertFails(batch.commit())
+  })
+
+  it('refuses a move credited to somebody else’s account', async () => {
+    await seed()
+    const db = staffDb()
+    const batch = writeBatch(db)
+    // updatedBy is the caller's own uid; only the name is borrowed.
+    batch.set(doc(db, 'orderFulfillment', ORDER_ID), {
+      ...step('preparing'),
+      updatedByName: 'Ada Admin',
+    })
+    batch.set(
+      doc(collection(db, 'orderFulfillment', ORDER_ID, 'transitions')),
+      transition('pending', 'preparing'),
+    )
+    await assertFails(batch.commit())
+  })
+})

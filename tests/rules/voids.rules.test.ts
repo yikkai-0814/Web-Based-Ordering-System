@@ -247,3 +247,28 @@ describe('regression: orders are still immutable after adding voids', () => {
     await assertSucceeds(setDoc(doc(db, 'orders', 'order-2'), { ...order(), number: 2 }))
   })
 })
+
+/**
+ * Phase 10. A void carries exactly the keys voidOrder writes, and names the admin who
+ * actually wrote it — the record of a cancelled sale being the one an audit reads first.
+ */
+describe('void rules: the exact shape of a void', () => {
+  it('refuses a void carrying a field voidOrder does not write', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), { ...voidRecord(), refundMethod: 'cash' }),
+    )
+    await assertFails(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), { ...voidRecord(), approvedBy: STAFF_UID }),
+    )
+  })
+
+  it('refuses a void recorded under somebody else’s name', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), { ...voidRecord(), voidedByName: 'Sam Staff' }),
+    )
+  })
+})

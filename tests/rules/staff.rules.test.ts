@@ -267,7 +267,14 @@ describe('the till can always sell: the signed-in account is itself an operator'
     await assertSucceeds(
       setDoc(
         doc(db, 'orders', 'o1'),
-        order({ createdBy: ADMIN_UID, staffId: ADMIN_UID, staffName: 'Ada Admin' }),
+        // createdByName travels with createdBy: the rules now check the account name
+        // against the profile that uid belongs to, so changing one alone is a spoof.
+        order({
+          createdBy: ADMIN_UID,
+          createdByName: 'Ada Admin',
+          staffId: ADMIN_UID,
+          staffName: 'Ada Admin',
+        }),
       ),
     )
   })
@@ -318,5 +325,26 @@ describe('regressions: Phase 1–5 guarantees still hold', () => {
     // Adding operator attribution did not create a way to smuggle payment onto an order.
     await assertFails(setDoc(doc(db, 'orders', 'o1'), order({ paymentMethod: 'cash' })))
     await assertFails(setDoc(doc(db, 'orders', 'o1'), order({ cashTendered: 2000 })))
+  })
+})
+
+/**
+ * Phase 10. The roster states its full key set, like every other collection.
+ */
+describe('staff rules: the exact shape of a roster entry', () => {
+  it('refuses a member carrying a field the roster does not have', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    const member = { name: 'Bea', active: true, createdAt: new Date(), updatedAt: new Date() }
+    // A PIN is the field this system has most often been asked for and most deliberately
+    // refused — a client-side secret is not a credential. It cannot be added by writing one.
+    await assertFails(setDoc(doc(db, 'staffMembers', 'bea'), { ...member, pin: '1234' }))
+    await assertFails(setDoc(doc(db, 'staffMembers', 'bea'), { ...member, role: 'admin' }))
+  })
+
+  it('refuses a member written without its timestamps', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(setDoc(doc(db, 'staffMembers', 'bea'), { name: 'Bea', active: true }))
   })
 })

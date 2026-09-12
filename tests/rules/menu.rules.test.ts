@@ -61,6 +61,13 @@ const ITEM = {
   updatedAt: new Date(),
 }
 
+/**
+ * A cost exactly as writeCost in menu-api.ts produces one. `updatedAt` is not decoration:
+ * the rules now state the full key set for this document, so a cost written without it is
+ * refused. Tests that mean to break the cost itself spread this and override `cost`.
+ */
+const cost = (value: unknown) => ({ cost: value, updatedAt: new Date() })
+
 /** Seeds profiles and one category/item with rules bypassed, as an admin would have. */
 async function seed({ adminActive = true, staffActive = true } = {}) {
   await testEnv.withSecurityRulesDisabled(async (context) => {
@@ -151,7 +158,12 @@ describe('menu rules: admin can write', () => {
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     await assertSucceeds(setDoc(doc(db, 'menuItems', 'item-2'), ITEM))
     await assertSucceeds(updateDoc(doc(db, 'menuItems', 'item-1'), { price: 990 }))
-    await assertSucceeds(deleteDoc(doc(db, 'menuItems', 'item-1')))
+    // item-1 has a cost, and an item may no longer be deleted without it — so this is the
+    // batch deleteMenuItem() has always written, not a new client obligation.
+    const removal = writeBatch(db)
+    removal.delete(doc(db, 'menuItems', 'item-1'))
+    removal.delete(doc(db, 'menuItemCosts', 'item-1'))
+    await assertSucceeds(removal.commit())
   })
 
   it('lets an admin create, update and delete categories', async () => {
@@ -253,7 +265,7 @@ describe('menu rules: cost is admin-only', () => {
   it('denies staff writing a cost', async () => {
     await seed()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
-    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), { cost: 100 }))
+    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), cost(100)))
     await assertFails(updateDoc(doc(db, 'menuItemCosts', 'item-1'), { cost: 1 }))
     await assertFails(deleteDoc(doc(db, 'menuItemCosts', 'item-1')))
   })
@@ -263,7 +275,7 @@ describe('menu rules: cost is admin-only', () => {
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     const snapshot = await assertSucceeds(getDoc(doc(db, 'menuItemCosts', 'item-1')))
     expect(snapshot.get('cost')).toBe(400)
-    await assertSucceeds(setDoc(doc(db, 'menuItemCosts', 'item-2'), { cost: 250 }))
+    await assertSucceeds(setDoc(doc(db, 'menuItemCosts', 'item-2'), cost(250)))
     await assertSucceeds(updateDoc(doc(db, 'menuItemCosts', 'item-1'), { cost: 450 }))
     await assertSucceeds(deleteDoc(doc(db, 'menuItemCosts', 'item-1')))
   })
@@ -272,7 +284,7 @@ describe('menu rules: cost is admin-only', () => {
     await seed({ adminActive: false })
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     await assertFails(getDoc(doc(db, 'menuItemCosts', 'item-1')))
-    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), { cost: 250 }))
+    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), cost(250)))
   })
 
   it('rejects a float, negative or non-numeric cost', async () => {
@@ -280,9 +292,9 @@ describe('menu rules: cost is admin-only', () => {
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     // item-2 exists, so these can only be refused by validItemCost() — not by the
     // existence guard.
-    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), { cost: 4.5 }))
-    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), { cost: -1 }))
-    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), { cost: '400' }))
+    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), cost(4.5)))
+    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), cost(-1)))
+    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), cost('400')))
   })
 })
 
@@ -291,13 +303,13 @@ describe('menu rules: a cost cannot be orphaned at creation', () => {
     await seed()
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     // Valid shape, admin caller — refused purely because there is no such menu item.
-    await assertFails(setDoc(doc(db, 'menuItemCosts', 'no-such-item'), { cost: 400 }))
+    await assertFails(setDoc(doc(db, 'menuItemCosts', 'no-such-item'), cost(400)))
   })
 
   it('allows a cost for an item that exists', async () => {
     await seed()
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
-    await assertSucceeds(setDoc(doc(db, 'menuItemCosts', 'item-2'), { cost: 400 }))
+    await assertSucceeds(setDoc(doc(db, 'menuItemCosts', 'item-2'), cost(400)))
   })
 
   it('allows an item and its cost created together in one batch', async () => {
@@ -308,7 +320,7 @@ describe('menu rules: a cost cannot be orphaned at creation', () => {
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     const batch = writeBatch(db)
     batch.set(doc(db, 'menuItems', 'item-3'), { ...ITEM, name: 'Cortado' })
-    batch.set(doc(db, 'menuItemCosts', 'item-3'), { cost: 380 })
+    batch.set(doc(db, 'menuItemCosts', 'item-3'), cost(380))
     await assertSucceeds(batch.commit())
   })
 
@@ -317,7 +329,7 @@ describe('menu rules: a cost cannot be orphaned at creation', () => {
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     const batch = writeBatch(db)
     batch.delete(doc(db, 'menuItems', 'item-1'))
-    batch.set(doc(db, 'menuItemCosts', 'item-1'), { cost: 999 })
+    batch.set(doc(db, 'menuItemCosts', 'item-1'), cost(999))
     await assertFails(batch.commit())
   })
 })
@@ -327,5 +339,48 @@ describe('menu rules: default deny still holds', () => {
     await seed()
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     await assertFails(setDoc(doc(db, 'unmappedCollection', 'doc-1'), { anything: 1 }))
+  })
+})
+
+/**
+ * Phase 10. The catalog collections state their full key set too, and an item may no longer
+ * be deleted out from under its cost.
+ */
+describe('menu rules: the exact shape of the catalog', () => {
+  it('refuses a category or item carrying a field the form does not write', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(setDoc(doc(db, 'categories', 'cat-2'), { ...CATEGORY, colour: 'red' }))
+    await assertFails(setDoc(doc(db, 'menuItems', 'item-2'), { ...ITEM, cost: 400 }))
+    await assertFails(setDoc(doc(db, 'menuItems', 'item-2'), { ...ITEM, stock: 12 }))
+  })
+
+  it('refuses an item that smuggles cost onto the document staff can read', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    // The reason cost has its own collection is that staff must read menuItems. Before the
+    // key set was stated, an admin could have quietly put it back where staff can see it.
+    await assertFails(updateDoc(doc(db, 'menuItems', 'item-1'), { cost: 400 }))
+  })
+
+  it('refuses a cost written without the timestamp writeCost always sets', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(setDoc(doc(db, 'menuItemCosts', 'item-2'), { cost: 250 }))
+  })
+
+  it('refuses deleting a menu item while its cost stays behind', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    // item-1 has a cost. Deleting the item alone would strand an admin-only document that
+    // no screen would ever show again — deleteMenuItem() batches both, and now must.
+    await assertFails(deleteDoc(doc(db, 'menuItems', 'item-1')))
+  })
+
+  it('still deletes an item that never had a cost', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    // item-2 is seeded without one, so there is nothing to strand.
+    await assertSucceeds(deleteDoc(doc(db, 'menuItems', 'item-2')))
   })
 })
