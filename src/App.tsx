@@ -1,7 +1,8 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
+import { BrowserRouter, Route, Routes } from 'react-router'
 
 import { AppShell } from '@/components/layout/AppShell'
 import { AuthProvider } from '@/features/auth/AuthProvider'
+import { LandingRedirect } from '@/features/auth/LandingRedirect'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { RequireAuth } from '@/features/auth/RequireAuth'
 import { RequireRole } from '@/features/auth/RequireRole'
@@ -32,7 +33,9 @@ export function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route element={<RequireAuth />}>
               <Route element={<AppShell />}>
-                <Route index element={<Navigate to="/dashboard" replace />} />
+                {/* Role decides where a session starts — staff at New Order, admin at
+                    the Dashboard. See landingPathFor in nav-items.ts. */}
+                <Route index element={<LandingRedirect />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 {/* The catalog is readable by both roles — staff serve from it. */}
                 <Route path="/menu" element={<MenuListPage />} />

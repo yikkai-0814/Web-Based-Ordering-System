@@ -29,12 +29,23 @@ export const NAV_ITEMS: readonly NavItem[] = [
     to: '/dashboard',
     label: 'Dashboard',
     icon: LayoutDashboard,
-    roles: ROLES,
+    // Admin only. It answers an owner's questions — takings, outstanding money, estimated
+    // profit — which is not what somebody standing at the counter needs a link to.
+    roles: ['admin'],
   },
   {
     to: '/pos',
-    label: 'Till',
+    // Named for what it is used for. "Till" described the hardware; this page is where an
+    // order is started, served, filled and taken payment for.
+    label: 'New Order',
     icon: ScanBarcode,
+    // First for both roles, and the whole nav for staff: taking an order is the job.
+    roles: ROLES,
+  },
+  {
+    to: '/orders',
+    label: 'Orders',
+    icon: ReceiptText,
     roles: ROLES,
   },
   {
@@ -45,16 +56,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     roles: ROLES,
   },
   {
-    to: '/orders',
-    label: 'Orders',
-    icon: ReceiptText,
-    roles: ROLES,
-  },
-  {
     to: '/menu',
     label: 'Menu',
     icon: CupSoda,
-    roles: ROLES,
+    // Admin only in the nav. The catalog is still readable by staff — the route and the
+    // security rules are unchanged — it simply is not one of the three things the counter
+    // is here to do.
+    roles: ['admin'],
   },
   {
     to: '/reports',
@@ -81,4 +89,22 @@ export const NAV_ITEMS: readonly NavItem[] = [
 export function navItemsForRole(role: Role | null): readonly NavItem[] {
   if (!role) return []
   return NAV_ITEMS.filter((item) => item.roles.includes(role))
+}
+
+/**
+ * Where a session starts, by role.
+ *
+ * Staff land on New Order because that is the entire reason the account exists: sign in,
+ * take an order, take the next one. Sending them to the Dashboard first made every shift
+ * begin with a screen of figures they cannot act on and a hunt for the page they wanted.
+ *
+ * An admin still lands on the Dashboard, which is the screen written for them.
+ *
+ * Declared here rather than at the two places that redirect, because "where does this role
+ * belong" is the same question the nav list answers, and two copies of it would be two
+ * things to keep in step. A deep link the user actually asked for still wins over this —
+ * see RequireAuth and LoginPage.
+ */
+export function landingPathFor(role: Role | null): string {
+  return role === 'staff' ? '/pos' : '/dashboard'
 }

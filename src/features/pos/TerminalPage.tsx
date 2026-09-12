@@ -27,6 +27,34 @@ import {
 import { createOrder } from '@/features/pos/pos-api'
 import { formatMoney } from '@/lib/money'
 
+interface PlacedOrder {
+  number: number
+  total: number
+  service: string
+}
+
+/**
+ * What was just written, shown on the screen that asks who is making the next order.
+ *
+ * It reports the order the counter has finished with, at the moment the counter is starting
+ * the next one — which is where the person standing there is actually looking.
+ */
+function OrderPlacedAlert({ order }: { order: PlacedOrder }) {
+  return (
+    <Alert className="mx-auto max-w-2xl" data-testid="order-confirmation">
+      <CheckCircle2 aria-hidden="true" />
+      <AlertDescription>
+        Order #{order.number} placed · {formatMoney(order.total)} ·{' '}
+        {/* Echoes what was actually written, so the operator confirms the service details
+            rather than assuming them. */}
+        <span data-testid="confirmation-service">{order.service}</span> ·{' '}
+        <span className="font-semibold">unpaid</span>. Record payment from the Orders page once the
+        customer has paid.
+      </AlertDescription>
+    </Alert>
+  )
+}
+
 export function TerminalPage() {
   const { profile } = useAuth()
   const { operator, loading: staffLoading } = useStaffSession()
@@ -44,13 +72,22 @@ export function TerminalPage() {
    */
   const [orderType, setOrderType] = useState<OrderType>('dine_in')
   const [tableNumber, setTableNumber] = useState('')
+  /**
+   * Whether somebody has said who is making **this** order.
+   *
+   * Per order, not per shift, and deliberately so: two people share one counter, and the
+   * one who took the last order is not necessarily taking the next. Defaulting to the
+   * previous name would put one person's sale under another's — permanently, since orders
+   * are immutable — and it would do it silently, which is the worst kind of wrong.
+   *
+   * The persisted selection from Phase 13 is still what STORES the answer (uid-scoped, so
+   * another account can never inherit it). It is simply not treated as an answer to a
+   * question nobody has asked yet.
+   */
+  const [operatorChosen, setOperatorChosen] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [lastOrder, setLastOrder] = useState<{
-    number: number
-    total: number
-    service: string
-  } | null>(null)
+  const [lastOrder, setLastOrder] = useState<PlacedOrder | null>(null)
 
   // Only what is actually for sale: archived items and hidden categories never reach the
   // till, so staff cannot ring up something the café has taken off the menu.
@@ -109,6 +146,9 @@ export function TerminalPage() {
       // invisible because the field looks the same either way.
       setOrderType('dine_in')
       setTableNumber('')
+      // And back to asking who is making the next one. The confirmation below travels with
+      // it, so the order just placed is still reported on the screen that asks.
+      setOperatorChosen(false)
       setLastOrder({ number: created.number, total, service })
     } catch (caught) {
       setError(
@@ -125,17 +165,31 @@ export function TerminalPage() {
     return <Skeleton className="h-[70vh] w-full" />
   }
 
-  // Nothing can be rung up until somebody says who is on the till. The same check the
-  // rules enforce server-side, surfaced here so the failure never reaches the counter.
-  if (!operator) {
-    return <StaffPicker />
+  // Nothing is rung up until somebody says who is making this order — asked at the start of
+  // every order, not once a shift. `operator` may already hold the last person's name; that
+  // is what the Topbar reports and what the other screens use, but it is not an answer here.
+  if (!operator || !operatorChosen) {
+    return (
+      <div className="space-y-4">
+        {lastOrder && <OrderPlacedAlert order={lastOrder} />}
+        <StaffPicker
+          heading="Who is making this order?"
+          blurb="Their name is recorded on this order. Tap a name to start it."
+          onSelected={() => {
+            setOperatorChosen(true)
+            // The previous order's confirmation belongs to the previous order.
+            setLastOrder(null)
+          }}
+        />
+      </div>
+    )
   }
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_26rem]">
       <section className="space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Till</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">New Order</h1>
           <p className="text-muted-foreground">Tap an item to add it to the order.</p>
         </div>
 
@@ -179,20 +233,6 @@ export function TerminalPage() {
       </section>
 
       <aside className="flex min-h-[24rem] flex-col rounded-lg border bg-card lg:sticky lg:top-4 lg:h-[calc(100svh-6rem)]">
-        {lastOrder && (
-          <Alert className="m-4 mb-0" data-testid="order-confirmation">
-            <CheckCircle2 aria-hidden="true" />
-            <AlertDescription>
-              Order #{lastOrder.number} placed · {formatMoney(lastOrder.total)} ·{' '}
-              {/* Echoes what was actually written, so the operator confirms the service
-                  details rather than assuming them. */}
-              <span data-testid="confirmation-service">{lastOrder.service}</span> ·{' '}
-              <span className="font-semibold">unpaid</span>. Record payment from the Orders page
-              once the customer has paid.
-            </AlertDescription>
-          </Alert>
-        )}
-
         <CartPanel
           cart={cart}
           disabled={pending}

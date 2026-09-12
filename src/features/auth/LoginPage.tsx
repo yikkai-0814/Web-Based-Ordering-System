@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { landingPathFor } from '@/components/layout/nav-items'
 import { useAuth } from '@/features/auth/useAuth'
 import { authErrorMessage } from '@/lib/auth-errors'
 
@@ -23,7 +24,7 @@ interface LocationState {
 }
 
 export function LoginPage() {
-  const { status, signIn, rejectionMessage } = useAuth()
+  const { status, role, signIn, rejectionMessage } = useAuth()
   const location = useLocation()
 
   const [email, setEmail] = useState('')
@@ -31,8 +32,10 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
-  // Where RequireAuth wanted to go before it detoured through here.
-  const from = (location.state as LocationState | null)?.from?.pathname ?? '/dashboard'
+  // Where RequireAuth wanted to go before it detoured through here. Falling back to the
+  // role's own landing page rather than a fixed one, so a staff member who simply signed in
+  // arrives at New Order — while a deep link they actually asked for still wins.
+  const from = (location.state as LocationState | null)?.from?.pathname ?? landingPathFor(role)
 
   if (status === 'authenticated') {
     return <Navigate to={from} replace />

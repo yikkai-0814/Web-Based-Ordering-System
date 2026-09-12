@@ -47,6 +47,15 @@ const ALICE: StaffMember = {
   updatedAt: null,
 }
 
+/** A second name on the roster, so a hand-over can be played out. */
+const BOB_ON_ROSTER: StaffMember = {
+  id: 'bob',
+  name: 'Bob',
+  active: true,
+  createdAt: null,
+  updatedAt: null,
+}
+
 /** Swapped between renders to play a sign-out and a different sign-in. */
 let currentProfile: UserProfile | null = ADA
 let roster: StaffMember[] = [ALICE]
@@ -67,6 +76,9 @@ function Consumer() {
       <span data-testid="operator">{operator ? operator.name : 'nobody'}</span>
       <button type="button" onClick={() => select('alice')}>
         Pick Alice
+      </button>
+      <button type="button" onClick={() => select('bob')}>
+        Pick Bob
       </button>
       <button type="button" onClick={() => select(currentProfile?.uid ?? '')}>
         Pick myself
@@ -193,6 +205,58 @@ describe('StaffSessionProvider: the account as its own operator', () => {
   it('does not hand a self-selection to the next account', async () => {
     const { user, unmount } = renderTill()
     await user.click(screen.getByText('Pick myself'))
+    unmount()
+
+    currentProfile = BOB
+    renderTill()
+    expect(operatorName()).toBe('nobody')
+  })
+})
+
+/**
+ * Phase 15. The counter picks a name once, not before every order.
+ *
+ * This is the persistence Phase 13 built, read from the angle the staff workflow cares
+ * about: Alice is asked for once and then stays put through a service, and a hand-over is
+ * the existing Switch Operator flow rather than a second mechanism. The uid-scoping that
+ * makes it safe is unchanged and still covered above.
+ */
+describe('StaffSessionProvider: one selection lasts a service', () => {
+  it('keeps the operator across order after order, without asking again', async () => {
+    roster = [ALICE, BOB_ON_ROSTER]
+    const { user, unmount } = renderTill()
+    await user.click(screen.getByText('Pick Alice'))
+    expect(operatorName()).toBe('Alice')
+    unmount()
+
+    // Each remount stands for another trip through the New Order page: ring one up, come
+    // back for the next. Alice is still there every time, and nobody is asked anything.
+    for (let order = 0; order < 3; order += 1) {
+      const round = renderTill()
+      expect(operatorName()).toBe('Alice')
+      round.unmount()
+    }
+  })
+
+  it('hands over to Bob, and stays handed over', async () => {
+    roster = [ALICE, BOB_ON_ROSTER]
+    const { user, unmount } = renderTill()
+    await user.click(screen.getByText('Pick Alice'))
+    await user.click(screen.getByText('Pick Bob'))
+    expect(operatorName()).toBe('Bob')
+    unmount()
+
+    // The next order is Bob's, not a return to whoever was there first.
+    renderTill()
+    expect(operatorName()).toBe('Bob')
+  })
+
+  it('still refuses to hand either of them to the next account', async () => {
+    // The Phase 13 guarantee, restated against a switched operator: a hand-over between two
+    // people on one account must not become a hand-over between accounts.
+    roster = [ALICE, BOB_ON_ROSTER]
+    const { user, unmount } = renderTill()
+    await user.click(screen.getByText('Pick Bob'))
     unmount()
 
     currentProfile = BOB

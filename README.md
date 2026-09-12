@@ -66,6 +66,12 @@ account that made it.
 what today was when it mounted and never looked again, which left a counter trading past
 midnight with a kitchen board silently stuck on the previous day.
 
+**Phase 15** points the staff session at the work. The till page is now called **New Order**,
+it is where a staff session lands, and staff navigation is the three things a counter does —
+New Order, Orders, Queue. An admin still lands on the Dashboard with everything they had. And
+New Order asks who is making **this** order, every time — two people share a counter, and the
+one who took the last order is not necessarily taking the next.
+
 Still to come — no partial refunds, no tax or discounts. The admin page remains a deliberate
 placeholder that proves access control works end to end.
 
@@ -323,6 +329,53 @@ scoped to the suite's own `demo-` project id. The Firebase config the suite uses
 can never reach a real project.
 
 ---
+
+## Navigation, and where each role starts
+
+Both are decided in one place, `src/components/layout/nav-items.ts`, because they answer the
+same question: what is this role here to do?
+
+|            | Staff                    | Admin                                                            |
+| ---------- | ------------------------ | ---------------------------------------------------------------- |
+| Lands on   | **New Order** (`/pos`)   | **Dashboard**                                                    |
+| Navigation | New Order, Orders, Queue | Dashboard, New Order, Orders, Queue, Menu, Reports, Staff, Admin |
+
+A staff session exists to take orders, so it starts on the page that takes them and carries
+the three links a counter uses. It used to start on the Dashboard — a screen of an owner's
+figures — and every shift began by navigating away from it.
+
+**This is navigation, not permission.** `/dashboard` and `/menu` are still reachable by URL
+for both roles, and neither the route guards nor the security rules changed: what a staff
+account may _read_ is exactly what it could read before. Removing a link is not a boundary,
+and the two must not be confused — `RequireRole` and firestore.rules are the boundaries.
+
+`landingPathFor(role)` is used by the index route (`LandingRedirect`) and by the login page's
+fallback, so there is one answer rather than a string written into two files. A deep link
+still beats it: `RequireAuth` remembers where somebody was heading before the login screen
+interrupted, and that destination wins over the default.
+
+The page is called **New Order** rather than Till because that is what it is for — starting
+an order, choosing how it is served, adding items, and taking payment. The route stayed
+`/pos`, so existing links still work.
+
+### Who is making this order
+
+**The question is asked once per order, not once per shift.** Opening New Order asks it;
+placing an order asks it again for the next one. Nothing is pre-filled from the last answer.
+
+That is deliberate friction. Two or three people work one counter during a service, and the
+person who rang up the last order is not necessarily ringing up the next — so defaulting to
+the previous name would file one person's sale under another's. Orders, payments, fulfilment
+steps and voids are all immutable, so that misattribution could never be corrected, and it
+would happen silently, which is worse than an inconvenient prompt.
+
+The distinction to hold on to is between **storing** an answer and **defaulting** to it. The
+uid-scoped selection from Phase 13 is unchanged and still does the storing: it is what the
+Topbar reports as "Operating as", what the Orders and Queue screens attribute a payment or a
+fulfilment step to, and what another Firebase account can never inherit. New Order simply
+does not treat a stored answer as an answer to a question it has not asked yet — it holds its
+own per-order flag, and the confirmation for the order just placed is shown on the screen
+that asks for the next one, so nothing is lost in the handover.
 
 ## Money
 
@@ -1041,9 +1094,13 @@ expensive, pre-aggregated daily rollups are the answer — deliberately not buil
 
 ## The dashboard
 
-The landing page for both roles, and the only screen that is fixed to **today**: the date
-comes from `businessDateOf(new Date())`, the same helper the till files orders under. Looking
-at another day is what the Orders and Queue screens are for.
+**The admin's landing page**, and the only screen fixed to **today**: the date follows the
+clock through `useBusinessToday` rather than being chosen, which is why this screen has no
+date bar. Looking at another day is what the Orders and Queue screens are for.
+
+Staff land on New Order instead and do not see this page in their navigation — it answers an
+owner's questions, and a shift should not begin by hunting for the page that takes orders.
+The route stays open to both roles; only the navigation differs (see below).
 
 **It stores nothing and computes nothing twice.** The rows come from `useOrdersWorkspace` —
 the same live subscription set the Orders list and the Queue board use — and
@@ -1079,7 +1136,8 @@ src/
 │  ├─ ui/                      shadcn primitives (generated; not hand-edited)
 │  └─ layout/                  AppShell, Sidebar, Topbar, UserMenu, nav-items
 ├─ features/
-│  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage
+│  ├─ auth/                    AuthProvider, useAuth, RequireAuth, RequireRole, LoginPage,
+│  │                          LandingRedirect
 │  ├─ dashboard/               today at a glance: pure summariser + the landing page
 │  ├─ menu/                    catalog: hooks, write API, list/form/categories pages
 │  ├─ pos/                     till: cart, order transaction, receipts, voids,
@@ -1099,7 +1157,8 @@ firestore.rules                The authorization boundary
 Architecture is feature-first: cross-cutting code lives in `src/lib` and `src/components`,
 and each domain gets its own `src/features/<domain>/`. Phase 1 creates exactly one feature
 (`auth`), establishing the pattern without pre-building anything else. Navigation is
-declared as data in `src/components/layout/nav-items.ts`, so a new section is a line there
+declared as data in `src/components/layout/nav-items.ts` — which also answers where each role
+starts, through `landingPathFor` — so a new section is a line there
 plus a route — not an edit to the Sidebar.
 
 ---

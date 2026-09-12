@@ -58,7 +58,7 @@ export function DashboardPage() {
 
       <div className="flex flex-wrap gap-2">
         <Button asChild size="lg" className="h-touch text-base">
-          <Link to="/pos">Open the till</Link>
+          <Link to="/pos">Start a new order</Link>
         </Button>
         <Button asChild size="lg" variant="outline" className="h-touch text-base">
           <Link to="/queue">Go to the queue</Link>

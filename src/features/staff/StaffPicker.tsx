@@ -12,16 +12,23 @@ import { useStaffSession } from '@/features/staff/useStaffSession'
  * staff-role user cannot create staff identities, and being unable to sell because nobody
  * has set the roster up would be far worse than an unnamed operator.
  */
-export function StaffPicker({ onSelected }: { onSelected?: () => void }) {
+export function StaffPicker({
+  onSelected,
+  heading = 'Who is on the till?',
+  blurb = 'Your name is recorded on every order you take. Tap yours to start.',
+}: {
+  onSelected?: () => void
+  /** Overridden by New Order, which asks per order rather than per shift. */
+  heading?: string
+  blurb?: string
+}) {
   const { operators, select, loading } = useStaffSession()
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 py-8">
       <div className="text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">Who is on the till?</h1>
-        <p className="text-muted-foreground">
-          Your name is recorded on every order you take. Tap yours to start.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">{heading}</h1>
+        <p className="text-muted-foreground">{blurb}</p>
       </div>
 
       {/* The roster arrives asynchronously. Without this, the picker briefly shows only the
