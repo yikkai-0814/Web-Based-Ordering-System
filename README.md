@@ -12,8 +12,8 @@ read by staff, with costs visible to admins only.
 **Phase 3** added the till: a touch-operated terminal, a cart, and an immutable order with
 a daily number and snapshotted line items.
 
-**Phase 4** added voiding: an admin can cancel a completed sale with a stated reason,
-without altering the sale itself.
+**Phase 4** added voiding: a completed sale can be cancelled with a stated reason, without
+altering the sale itself (Phase 11 later let staff start one, with a manager approving).
 
 **Phase 5** added reports: an admin-only view of revenue, item performance, payment mix,
 voids, and estimated cost and profit resolved from the cost-history journal.
@@ -44,6 +44,12 @@ to be, a business date has to be a date, cost history has to point at a real ite
 item can no longer be deleted out from under its cost. Alongside it, a third test suite
 exercises the app's own write functions against the emulators, so a rule and the code that
 writes for it can no longer drift apart unnoticed.
+
+**Phase 11** lets staff void a sale without giving staff the power to void a sale. The
+operator picks the sale and gives the reason; a manager then authorises it with their own
+credentials, which sign in on a second, in-memory Auth session lasting exactly one write. The
+void is therefore written with an admin's token — `allow create: if isAdmin()` never had to
+change — and records both people: who authorised it, and who asked for it.
 
 Still to come — no partial refunds, no tax or discounts. The admin page remains a deliberate
 placeholder that proves access control works end to end.
@@ -343,8 +349,9 @@ orderFulfillment/{orderId}/transitions/{autoId}
                                                     ← append-only journal, one per step
 counters/{businessDate}
                      lastNumber                     ← issues the daily order number
-orderVoids/{orderId} orderId, reason, amount (sen), voidedAt, voidedBy, voidedByName
-                                                    ← ADMIN-WRITE, append-only
+orderVoids/{orderId} orderId, reason, amount (sen), voidedAt, voidedBy, voidedByName,
+                     initiatedByStaffId, initiatedByStaffName
+                                                    ← ADMIN-AUTHORISED, append-only
 staffMembers/{id}    name, active, createdAt, updatedAt
                                                     ← ADMIN-WRITE, NO DELETE
 ```
@@ -392,23 +399,53 @@ Orders written before Phase 6 have no `staffId`. They are not backfilled — ord
 immutable — so `operatorNameOf()` falls back to the account name. That fallback is permanent,
 not transitional.
 
-### Why there is no PIN
+### Why a manager signs in instead of typing a PIN
 
-We evaluated one and deliberately left it out.
+The obvious way to let staff void a sale is a manager's PIN. We evaluated one, twice, and
+built something else both times — the reasoning is kept here because it is the reason the
+current design looks the way it does.
 
 Firestore rules _can_ check a secret without exposing it, since rules `get()` ignores the
-caller's read permission — so no plaintext and no readable hash. Two things still defeat it:
+caller's read permission — so no plaintext and no readable hash. Three things still defeat
+a PIN:
 
 1. **Rules cannot rate-limit.** A lockout counter is itself attacker-writable and racy, so a
    4-digit PIN's 10,000 candidates fall in minutes.
-2. **It could not be an authorisation boundary anyway.** Every operator authenticates as the
-   _same shared account_, so the rules genuinely cannot tell one person's browser from
-   another's. A PIN would gate a screen, not a permission.
+2. **The submitted PIN would have to be stored.** Rules only see the document being written,
+   so the value has to travel inside the void — and staff can read voids. A hash is no
+   better: four digits of sha256 fall in under a second offline, from a document the
+   attacker is allowed to read.
+3. **It could not be an authorisation boundary anyway.** Every operator authenticates as the
+   _same shared account_, so the rules cannot tell one person's browser from another's. A
+   PIN would gate a screen, not a permission.
 
 A gate that does not gate is the security theatre this project rejects, and worse, someone
 might rely on it in a dispute about takings. Real PIN security needs a server to hold the
-secret and throttle attempts — Cloud Functions on Blaze, or per-worker accounts. What is
-available instead is attribution that is **visible and permanent**, which is what is built.
+secret and throttle attempts — which on this stack means Cloud Functions and the Blaze plan.
+
+**So the manager's own credentials are the secret, and Firebase Auth is the server.** It
+already holds passwords hashed, already throttles guessing (`auth/too-many-requests` is
+handled and shown as such), and already issues exactly the thing the rules need: a token
+that proves the holder is an admin. The app signs the manager in on a _second_ Firebase app
+(`src/lib/authorizer.ts`) with `inMemoryPersistence`, uses that session's Firestore handle
+for the one write, and signs it out in a `finally`. The till's session is never touched, and
+`allow create: if isAdmin()` did not have to change to accommodate any of it.
+
+That is the test of the design: **a staff member who tampers with the frontend gains
+nothing**, because the missing ingredient is not a check in the JavaScript but an admin's
+token, which only admin credentials produce.
+
+What it costs, stated plainly:
+
+- **It is a password, not four digits.** Slower at a busy till, and unpleasant to type on a
+  phone-sized screen. That is the price of it being real.
+- **A manager who shares their password hands over full admin** — worse than a leaked PIN
+  would have been. The mitigation is procedural: managers type it themselves.
+- **Nothing proves who typed it.** The void records the manager as authoriser and the
+  operator as initiator, but a manager who walks away from an unlocked till has authorised
+  whatever happens next.
+- **The initiator is attested, not proven.** The rules check that the named initiator is a
+  real, active identity with that name; they cannot check that person was standing there.
 
 ### Orders are immutable
 
@@ -639,8 +676,15 @@ no backfill.
 
 ### Voiding a sale
 
-A mistake is corrected by **voiding**, never by editing. An admin records a void with a
-required reason; the order document is not touched at all.
+A mistake is corrected by **voiding**, never by editing. A void carries a required reason;
+the order document is not touched at all.
+
+**Staff start a void; a manager finishes it.** A staff member picks the sale, gives the
+reason, and is then asked for a manager's credentials. Those credentials sign in on a
+separate, in-memory Auth session that exists for the length of one write and is discarded —
+so the void arrives carrying an _admin's_ token while the till stays signed in as itself. An
+admin voiding their own sale is never asked for anything. See "Why a manager signs in"
+below for why it works this way.
 
 The void is its own document at `orderVoids/{orderId}`, keyed by the order it cancels,
 because orders are immutable — marking one would mean granting update permission, which
@@ -652,9 +696,19 @@ design for free:
 - **A void cannot be edited or withdrawn.** There is no un-voiding; reversing a correction
   would destroy the audit trail that is the point of recording it.
 
-Staff **read** voids but cannot create one. A till operator has to know a sale was
-cancelled, or the orders list would misrepresent the day to the person working it. Creating
-a void erases revenue, so that stays with admins. `amount` duplicates the order's total,
+**A void names two people, and the difference matters.** `voidedBy`/`voidedByName` is who
+_authorised_ it — always an admin, because the rules accept the write from nobody else.
+`initiatedByStaffId`/`initiatedByStaffName` is who _asked_ for it: the operator at the till.
+On an admin's own void both are the same person. Keeping them apart is what makes the record
+answer "who cancelled this sale" honestly when a manager approved something a staff member
+requested. The rules verify the initiator the only way they can — it must be a real, still
+active identity, roster member or account, whose _current_ name matches what was written —
+which stops a name being invented, though not a manager attributing a void to the wrong
+colleague. Voids written before Phase 11 carry no initiator and are never backfilled, voids
+being immutable; those display the authoriser for both.
+
+Staff **read** voids. A till operator has to know a sale was cancelled, or the orders list
+would misrepresent the day to the person working it. `amount` duplicates the order's total,
 which is safe because orders are immutable and the rules enforce the equality with a
 `get()` on the order.
 

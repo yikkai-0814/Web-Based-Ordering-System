@@ -16,6 +16,7 @@ import {
 } from '@/features/pos/fulfillment'
 import { setFulfillment } from '@/features/pos/fulfillment-api'
 import { ORDER_TYPE_LABELS } from '@/features/pos/order-type'
+import { withManagerAuthorization } from '@/features/pos/manager-authorization'
 import { recordPayment } from '@/features/pos/payment-api'
 import { canRecordPayment } from '@/features/pos/payments'
 import {
@@ -28,12 +29,13 @@ import {
   fulfillmentOperatorNameOf,
   operatorNameOf,
   paymentOperatorNameOf,
+  voidInitiatorNameOf,
   PAYMENT_LABELS,
   type PaymentMethod,
 } from '@/features/pos/types'
 import { useOrderDetail } from '@/features/pos/useOrderDetail'
 import { voidOrder } from '@/features/pos/void-api'
-import { VoidOrderDialog } from '@/features/pos/VoidOrderDialog'
+import { VoidOrderDialog, type ManagerCredentials } from '@/features/pos/VoidOrderDialog'
 import { formatMoney } from '@/lib/money'
 
 /**
@@ -166,18 +168,55 @@ export function OrderDetailPage() {
     }
   }
 
-  async function handleVoid(reason: string) {
-    if (!profile || !order) return
+  /**
+   * Two routes to the same record.
+   *
+   * An admin writes it with their own session. Anyone else hands a manager's credentials to
+   * `withManagerAuthorization`, which borrows that manager's authority for exactly one write
+   * and gives it back — the till's session is never elevated, and `voidOrder` is the same
+   * writer either way, so the two routes cannot produce differently shaped voids.
+   *
+   * Both record the operator at the till as the initiator, so an admin's own void answers
+   * "who asked for this" with their own name rather than leaving it blank.
+   */
+  async function handleVoid(reason: string, credentials: ManagerCredentials | null) {
+    if (!profile || !order || !operator) return
     setError(null)
+
+    const initiatedBy = { staffId: operator.id, staffName: operator.name }
+
     try {
-      await voidOrder(order.id, {
-        amount: order.total,
-        reason,
-        user: { uid: profile.uid, displayName: profile.displayName },
-      })
-    } catch {
-      setError('That sale could not be voided. Only administrators may void a sale.')
-      throw new Error('void refused')
+      if (credentials) {
+        await withManagerAuthorization(credentials, (manager, firestore) =>
+          voidOrder(
+            order.id,
+            {
+              amount: order.total,
+              reason,
+              authorizedBy: manager,
+              initiatedBy,
+            },
+            firestore,
+          ),
+        )
+      } else {
+        await voidOrder(order.id, {
+          amount: order.total,
+          reason,
+          authorizedBy: { uid: profile.uid, displayName: profile.displayName },
+          initiatedBy,
+        })
+      }
+    } catch (caught) {
+      // withManagerAuthorization already produces a sentence worth reading — a wrong
+      // password, a throttled account, credentials that are not a manager's. Anything else
+      // is a rules refusal, which needs one written here.
+      const message =
+        caught instanceof Error && caught.message
+          ? caught.message
+          : 'That sale could not be voided.'
+      setError(message)
+      throw new Error(message)
     }
   }
 
@@ -192,7 +231,7 @@ export function OrderDetailPage() {
             </span>
             <span className="block">Reason: {voided.reason}</span>
             <span className="block text-xs">
-              Voided by {voided.voidedByName}
+              Requested by {voidInitiatorNameOf(voided)}, authorised by {voided.voidedByName}
               {voided.voidedAt ? ` on ${voided.voidedAt.toDate().toLocaleString()}` : ''}
             </span>
           </AlertDescription>
@@ -387,10 +426,17 @@ export function OrderDetailPage() {
           />
         )}
 
-        {/* Admin-only, and already voided sales cannot be voided again — the rules would
-            refuse it anyway, but offering the button would be a lie. */}
-        {isAdmin && !voided && (
-          <VoidOrderDialog orderNumber={order.number} amount={order.total} onConfirm={handleVoid} />
+        {/* Open to everyone, because a staff member can now START a void — but only an
+            admin's credentials can complete one, which the dialog asks for and the rules
+            insist on. Already voided sales cannot be voided again: the rules would refuse it
+            anyway, but offering the button would be a lie. */}
+        {!voided && (
+          <VoidOrderDialog
+            orderNumber={order.number}
+            amount={order.total}
+            requiresAuthorization={!isAdmin}
+            onConfirm={handleVoid}
+          />
         )}
       </div>
     </div>

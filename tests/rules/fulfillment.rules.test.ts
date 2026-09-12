@@ -179,6 +179,8 @@ async function seed({ staffActive = true } = {}) {
       voidedAt: new Date(),
       voidedBy: ADMIN_UID,
       voidedByName: 'Ada Admin',
+      initiatedByStaffId: ADMIN_UID,
+      initiatedByStaffName: 'Ada Admin',
     })
   })
 }
@@ -365,6 +367,8 @@ describe('fulfilment rules: unauthorised manipulation is rejected', () => {
         voidedAt: new Date(),
         voidedBy: STAFF_UID,
         voidedByName: 'Shared Till',
+        initiatedByStaffId: STAFF_UID,
+        initiatedByStaffName: 'Shared Till',
       }),
     )
   })

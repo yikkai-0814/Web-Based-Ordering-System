@@ -52,7 +52,12 @@ const order = () => ({
   staffName: 'Alice',
 })
 
-/** A well-formed void. Tests spread it and break one field on purpose. */
+/**
+ * A well-formed void. Tests spread it and break one field on purpose.
+ *
+ * Defaults to an admin voiding their own sale, where the same person authorised and
+ * initiated it. Phase 11's staff-initiated case overrides the initiator instead.
+ */
 const voidRecord = (uid = ADMIN_UID) => ({
   orderId: ORDER_ID,
   reason: 'Wrong item rung up',
@@ -60,6 +65,8 @@ const voidRecord = (uid = ADMIN_UID) => ({
   voidedAt: new Date(),
   voidedBy: uid,
   voidedByName: 'Ada Admin',
+  initiatedByStaffId: uid,
+  initiatedByStaffName: 'Ada Admin',
 })
 
 async function seed({ adminActive = true, staffActive = true } = {}) {
@@ -269,6 +276,127 @@ describe('void rules: the exact shape of a void', () => {
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
     await assertFails(
       setDoc(doc(db, 'orderVoids', ORDER_ID), { ...voidRecord(), voidedByName: 'Sam Staff' }),
+    )
+  })
+})
+
+/**
+ * Phase 11. A staff member may now START a void, but the write still has to arrive with an
+ * admin's token — the app gets one by having a manager sign in on a second, throwaway Auth
+ * session, so from the database's point of view nothing about who may void has changed.
+ *
+ * What is new is the second identity. A void now answers both "who authorised this" and
+ * "who asked for it", and the rules verify the second the only way they can: the claimed
+ * initiator must be a real, active identity whose CURRENT name matches. They cannot prove
+ * that person was standing there — the authorising manager attests to that.
+ */
+describe('void rules: manager-authorised voids record both identities', () => {
+  /** What the app writes when Sam asks and Ada approves. */
+  const staffInitiated = () => ({
+    ...voidRecord(),
+    initiatedByStaffId: STAFF_UID,
+    initiatedByStaffName: 'Sam Staff',
+  })
+
+  it('accepts a void authorised by an admin and initiated by the till account', async () => {
+    await seed()
+    // Written by the ADMIN's context, because that is what the manager's session is.
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertSucceeds(setDoc(doc(db, 'orderVoids', ORDER_ID), staffInitiated()))
+
+    // Read back as the STAFF member: they must be able to see that the sale was cancelled.
+    const staffDb = testEnv.authenticatedContext(STAFF_UID).firestore()
+    const snapshot = await getDoc(doc(staffDb, 'orderVoids', ORDER_ID))
+    expect(snapshot.get('voidedBy')).toBe(ADMIN_UID)
+    expect(snapshot.get('initiatedByStaffId')).toBe(STAFF_UID)
+  })
+
+  it('accepts a named roster member as the initiator', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertSucceeds(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), {
+        ...voidRecord(),
+        initiatedByStaffId: 'alice',
+        initiatedByStaffName: 'Alice',
+      }),
+    )
+  })
+
+  it('STILL denies staff voiding, whatever the initiator says', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    // The staff account naming itself as initiator, and naming the admin as authoriser —
+    // the two shapes a tampered client would try. Both are refused because the TOKEN is not
+    // an admin's, which no field on the document can change.
+    await assertFails(setDoc(doc(db, 'orderVoids', ORDER_ID), staffInitiated()))
+    await assertFails(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), {
+        ...staffInitiated(),
+        voidedBy: ADMIN_UID,
+        voidedByName: 'Ada Admin',
+      }),
+    )
+  })
+
+  it('refuses a void that does not say who initiated it', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    const withoutInitiator = { ...voidRecord() } as Record<string, unknown>
+    delete withoutInitiator.initiatedByStaffId
+    delete withoutInitiator.initiatedByStaffName
+    await assertFails(setDoc(doc(db, 'orderVoids', ORDER_ID), withoutInitiator))
+  })
+
+  it('refuses an initiator nobody has heard of', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), {
+        ...voidRecord(),
+        initiatedByStaffId: 'ghost',
+        initiatedByStaffName: 'Nobody',
+      }),
+    )
+  })
+
+  it('refuses a deactivated initiator', async () => {
+    await seed({ staffActive: false })
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(setDoc(doc(db, 'orderVoids', ORDER_ID), staffInitiated()))
+  })
+
+  it('refuses an initiator name that is not their current one', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    // The uid is real and active, but the name attached to it is not theirs — which is how
+    // a void would be pinned on a colleague.
+    await assertFails(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), {
+        ...staffInitiated(),
+        initiatedByStaffName: 'Someone Else',
+      }),
+    )
+    await assertFails(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), {
+        ...voidRecord(),
+        initiatedByStaffId: 'alice',
+        initiatedByStaffName: 'Alicia',
+      }),
+    )
+  })
+
+  it('refuses an empty or over-long initiator name', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), { ...staffInitiated(), initiatedByStaffName: '' }),
+    )
+    await assertFails(
+      setDoc(doc(db, 'orderVoids', ORDER_ID), {
+        ...staffInitiated(),
+        initiatedByStaffName: 'x'.repeat(61),
+      }),
     )
   })
 })

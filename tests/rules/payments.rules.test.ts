@@ -152,6 +152,8 @@ async function seed({ staffActive = true } = {}) {
       voidedAt: new Date(),
       voidedBy: ADMIN_UID,
       voidedByName: 'Ada Admin',
+      initiatedByStaffId: ADMIN_UID,
+      initiatedByStaffName: 'Ada Admin',
     })
   })
 }
@@ -302,6 +304,8 @@ describe('payment rules: a voided sale cannot be paid', () => {
         voidedAt: new Date(),
         voidedBy: ADMIN_UID,
         voidedByName: 'Ada Admin',
+        initiatedByStaffId: ADMIN_UID,
+        initiatedByStaffName: 'Ada Admin',
       }),
     )
   })
@@ -318,6 +322,8 @@ describe('payment rules: a voided sale cannot be paid', () => {
         voidedAt: new Date(),
         voidedBy: STAFF_UID,
         voidedByName: 'Sam Staff',
+        initiatedByStaffId: STAFF_UID,
+        initiatedByStaffName: 'Sam Staff',
       }),
     )
   })

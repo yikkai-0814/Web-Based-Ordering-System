@@ -34,7 +34,11 @@ export interface TestAccount {
   role: 'admin' | 'staff'
 }
 
-const PASSWORD = 'emulator-password'
+/**
+ * Exported because the manager-authorisation tests need to present these credentials the way
+ * a manager would type them, rather than reusing an already-signed-in session.
+ */
+export const ACCOUNT_PASSWORD = 'emulator-password'
 
 /**
  * Accounts are created under a fresh prefix every run and NEVER deleted.
@@ -103,7 +107,7 @@ export async function createAccount(
   role: 'admin' | 'staff',
 ): Promise<TestAccount> {
   const email = `${RUN_PREFIX}-${handle}-${accountCounter++}@example.test`
-  const credential = await createUserWithEmailAndPassword(auth, email, PASSWORD)
+  const credential = await createUserWithEmailAndPassword(auth, email, ACCOUNT_PASSWORD)
   const uid = credential.user.uid
 
   await requireEnv().withSecurityRulesDisabled(async (context) => {
@@ -123,7 +127,7 @@ export async function createAccount(
 
 /** Signs the shared app SDK in as one of the accounts. Every write afterwards is theirs. */
 export async function signInAs(account: TestAccount): Promise<void> {
-  await signInWithEmailAndPassword(auth, account.email, PASSWORD)
+  await signInWithEmailAndPassword(auth, account.email, ACCOUNT_PASSWORD)
 }
 
 /** Writes fixture data with rules bypassed — the out-of-band setup an admin would have done. */

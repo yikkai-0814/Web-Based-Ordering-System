@@ -159,6 +159,8 @@ async function seed() {
       voidedAt: new Date(),
       voidedBy: ADMIN_UID,
       voidedByName: 'Ada Admin',
+      initiatedByStaffId: ADMIN_UID,
+      initiatedByStaffName: 'Ada Admin',
     })
 
     await setDoc(doc(db, 'orderFulfillment', 'today-1'), step('preparing', 'today-1'))
@@ -377,6 +379,9 @@ describe('payment and void regressions', () => {
       voidedAt: new Date(),
       voidedBy: STAFF_UID,
       voidedByName: 'Shared Till',
+      // Phase 11's shape: the till initiated it, and only an admin's token can complete it.
+      initiatedByStaffId: STAFF_UID,
+      initiatedByStaffName: 'Shared Till',
     }
     await assertFails(setDoc(doc(staffDb(), 'orderVoids', 'today-1'), record))
     await assertSucceeds(

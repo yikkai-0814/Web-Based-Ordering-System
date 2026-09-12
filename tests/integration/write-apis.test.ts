@@ -18,14 +18,19 @@ import {
   FULFILLMENT_ORIGIN,
   setFulfillment,
 } from '@/features/pos/fulfillment-api'
+import {
+  NOT_A_MANAGER_MESSAGE,
+  withManagerAuthorization,
+} from '@/features/pos/manager-authorization'
 import { recordPayment } from '@/features/pos/payment-api'
 import { createOrder } from '@/features/pos/pos-api'
 import { businessDateOf } from '@/features/pos/types'
 import { voidOrder } from '@/features/pos/void-api'
 import { createStaffMember, renameStaffMember, setStaffActive } from '@/features/staff/staff-api'
-import { db } from '@/lib/firebase'
+import { auth, db } from '@/lib/firebase'
 
 import {
+  ACCOUNT_PASSWORD,
   createAccount,
   resetEmulators,
   seed,
@@ -55,6 +60,17 @@ const asUser = (account: TestAccount) => ({
 
 /** The self-operator form: the signed-in account standing in as the till operator. */
 const asOperator = (account: TestAccount) => ({ id: account.uid, name: account.displayName })
+
+/** The same identity as a void's initiator, which names its fields differently. */
+const asInitiator = (account: TestAccount) => ({
+  staffId: account.uid,
+  staffName: account.displayName,
+})
+
+interface ManagerCredentials {
+  email: string
+  password: string
+}
 
 beforeAll(async () => {
   await startHarness()
@@ -367,13 +383,15 @@ describe('voidOrder cancels a sale without editing it', () => {
     await voidOrder(orderId, {
       amount: CART_TOTAL,
       reason: 'Wrong item rung up',
-      user: asUser(admin),
+      authorizedBy: asUser(admin),
+      initiatedBy: asInitiator(admin),
     })
 
     const record = await getDoc(doc(db, 'orderVoids', orderId))
     expect(record.get('amount')).toBe(CART_TOTAL)
     expect(record.get('reason')).toBe('Wrong item rung up')
     expect(record.get('voidedByName')).toBe('Ada Admin')
+    expect(record.get('initiatedByStaffName')).toBe('Ada Admin')
 
     const order = await getDoc(doc(db, 'orders', orderId))
     expect(order.get('total')).toBe(CART_TOTAL)
@@ -383,7 +401,12 @@ describe('voidOrder cancels a sale without editing it', () => {
   it('refuses a void from a staff account', async () => {
     const orderId = await placeOrder()
     await expect(
-      voidOrder(orderId, { amount: CART_TOTAL, reason: 'Nope', user: asUser(staff) }),
+      voidOrder(orderId, {
+        amount: CART_TOTAL,
+        reason: 'Nope',
+        authorizedBy: asUser(staff),
+        initiatedBy: asInitiator(staff),
+      }),
     ).rejects.toThrow()
   })
 
@@ -391,14 +414,24 @@ describe('voidOrder cancels a sale without editing it', () => {
     const orderId = await placeOrder()
     await signInAs(admin)
     await expect(
-      voidOrder(orderId, { amount: CART_TOTAL, reason: '   ', user: asUser(admin) }),
+      voidOrder(orderId, {
+        amount: CART_TOTAL,
+        reason: '   ',
+        authorizedBy: asUser(admin),
+        initiatedBy: asInitiator(admin),
+      }),
     ).rejects.toThrow()
   })
 
   it('refuses payment on a voided sale', async () => {
     const orderId = await placeOrder()
     await signInAs(admin)
-    await voidOrder(orderId, { amount: CART_TOTAL, reason: 'Cancelled', user: asUser(admin) })
+    await voidOrder(orderId, {
+      amount: CART_TOTAL,
+      reason: 'Cancelled',
+      authorizedBy: asUser(admin),
+      initiatedBy: asInitiator(admin),
+    })
 
     await signInAs(staff)
     await expect(
@@ -410,6 +443,134 @@ describe('voidOrder cancels a sale without editing it', () => {
         staff: asOperator(staff),
       }),
     ).rejects.toThrow()
+  })
+})
+
+/**
+ * Phase 11. The point of this block is that it is driven exactly as the till drives it: the
+ * staff session stays signed in throughout, and the only thing that changes is whether a
+ * manager's credentials are presented. Nothing here grants the staff account anything.
+ */
+describe('a staff-initiated void needs a manager to authorise it', () => {
+  async function placeOrderAsStaff(): Promise<string> {
+    await signInAs(staff)
+    const created = await createOrder({
+      cart: CART,
+      placement: DINE_IN,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+    return created.id
+  }
+
+  /** What the dialog does once a manager has typed their credentials. */
+  function voidWithManagerAuthorization(orderId: string, credentials: ManagerCredentials) {
+    return withManagerAuthorization(credentials, (manager, firestore) =>
+      voidOrder(
+        orderId,
+        {
+          amount: CART_TOTAL,
+          reason: 'Wrong item rung up',
+          authorizedBy: manager,
+          initiatedBy: asInitiator(staff),
+        },
+        firestore,
+      ),
+    )
+  }
+
+  it('records the manager as authoriser and the till operator as initiator', async () => {
+    const orderId = await placeOrderAsStaff()
+
+    await voidWithManagerAuthorization(orderId, {
+      email: admin.email,
+      password: ACCOUNT_PASSWORD,
+    })
+
+    const record = await getDoc(doc(db, 'orderVoids', orderId))
+    expect(record.get('voidedBy')).toBe(admin.uid)
+    expect(record.get('voidedByName')).toBe('Ada Admin')
+    expect(record.get('initiatedByStaffId')).toBe(staff.uid)
+    expect(record.get('initiatedByStaffName')).toBe('Sam Staff')
+
+    // The sale itself is still untouched — a void is a counter-entry, not an edit.
+    const order = await getDoc(doc(db, 'orders', orderId))
+    expect(order.get('total')).toBe(CART_TOTAL)
+  })
+
+  it('leaves the till signed in as the staff member throughout', async () => {
+    const orderId = await placeOrderAsStaff()
+    await voidWithManagerAuthorization(orderId, {
+      email: admin.email,
+      password: ACCOUNT_PASSWORD,
+    })
+
+    // The borrowed authority is gone, and the session that is left is the till's own — not
+    // the manager's. A staff account that came out of this holding admin rights would be the
+    // whole feature backfiring.
+    expect(auth.currentUser?.uid).toBe(staff.uid)
+    const stillStaff = await getDoc(doc(db, 'users', staff.uid))
+    expect(stillStaff.get('role')).toBe('staff')
+  })
+
+  it('writes nothing when the manager password is wrong', async () => {
+    const orderId = await placeOrderAsStaff()
+
+    await expect(
+      voidWithManagerAuthorization(orderId, { email: admin.email, password: 'not-the-password' }),
+    ).rejects.toThrow()
+
+    expect((await getDoc(doc(db, 'orderVoids', orderId))).exists()).toBe(false)
+    expect((await getDoc(doc(db, 'orders', orderId))).get('total')).toBe(CART_TOTAL)
+    expect(auth.currentUser?.uid).toBe(staff.uid)
+  })
+
+  it('refuses a staff member’s own credentials as the authorisation', async () => {
+    const orderId = await placeOrderAsStaff()
+
+    // Correct credentials, real account, simply not a manager's. This is the attempt the
+    // feature exists to refuse, and it fails before the write is even attempted.
+    await expect(
+      voidWithManagerAuthorization(orderId, { email: staff.email, password: ACCOUNT_PASSWORD }),
+    ).rejects.toThrow(NOT_A_MANAGER_MESSAGE)
+
+    expect((await getDoc(doc(db, 'orderVoids', orderId))).exists()).toBe(false)
+  })
+
+  it('refuses a deactivated manager', async () => {
+    const orderId = await placeOrderAsStaff()
+    await seed(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', admin.uid), { active: false }, { merge: true })
+    })
+
+    await expect(
+      voidWithManagerAuthorization(orderId, { email: admin.email, password: ACCOUNT_PASSWORD }),
+    ).rejects.toThrow(NOT_A_MANAGER_MESSAGE)
+
+    expect((await getDoc(doc(db, 'orderVoids', orderId))).exists()).toBe(false)
+  })
+
+  it('refuses an initiator the roster has never heard of', async () => {
+    const orderId = await placeOrderAsStaff()
+
+    // The manager is genuine, so this is refused by the RULES rather than by the sign-in:
+    // an initiator has to be a real, active identity, not a name someone typed.
+    await expect(
+      withManagerAuthorization({ email: admin.email, password: ACCOUNT_PASSWORD }, (manager, fs) =>
+        voidOrder(
+          orderId,
+          {
+            amount: CART_TOTAL,
+            reason: 'Wrong item rung up',
+            authorizedBy: manager,
+            initiatedBy: { staffId: 'ghost', staffName: 'Nobody' },
+          },
+          fs,
+        ),
+      ),
+    ).rejects.toThrow()
+
+    expect((await getDoc(doc(db, 'orderVoids', orderId))).exists()).toBe(false)
   })
 })
 

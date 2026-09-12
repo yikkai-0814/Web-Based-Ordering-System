@@ -379,6 +379,8 @@ describe('Test 6 — a voided order cannot be paid', () => {
         voidedAt: new Date(),
         voidedBy: ADMIN_UID,
         voidedByName: 'Ada Admin',
+        initiatedByStaffId: ADMIN_UID,
+        initiatedByStaffName: 'Ada Admin',
       }),
     )
 
@@ -401,6 +403,8 @@ describe('Test 6 — a voided order cannot be paid', () => {
         voidedAt: new Date(),
         voidedBy: ADMIN_UID,
         voidedByName: 'Ada Admin',
+        initiatedByStaffId: ADMIN_UID,
+        initiatedByStaffName: 'Ada Admin',
       }),
     )
 
@@ -691,6 +695,8 @@ describe('Test 8 - the whole pay-later journey, against the live rules', () => {
         voidedAt: new Date(),
         voidedBy: ADMIN_UID,
         voidedByName: 'Ada Admin',
+        initiatedByStaffId: ADMIN_UID,
+        initiatedByStaffName: 'Ada Admin',
       }),
     )
 

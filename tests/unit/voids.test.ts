@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
+import { voidInitiatorNameOf } from '@/features/pos/types'
 import {
   indexVoidsByOrderId,
   isVoided,
+  validateManagerCredentials,
   validateVoidReason,
   VOID_REASON_MAX,
 } from '@/features/pos/voids'
@@ -64,5 +66,59 @@ describe('indexVoidsByOrderId', () => {
   it('reports nothing as voided when there are no voids at all', () => {
     const index = indexVoidsByOrderId([])
     expect(isVoided('o1', index)).toBe(false)
+  })
+})
+
+/**
+ * Phase 11. This validates the FORM, not the credentials — whether these are a manager's is
+ * settled by Firebase Auth and then by firestore.rules, and nothing here could stand in for
+ * that. What it saves is a pointless round trip and an opaque error on an empty field.
+ */
+describe('validateManagerCredentials', () => {
+  it('accepts a filled-in form and returns the email trimmed', () => {
+    const result = validateManagerCredentials('  ada@example.com  ', 'hunter2')
+    expect(result).toEqual({ ok: true, email: 'ada@example.com', password: 'hunter2' })
+  })
+
+  it('rejects a missing email', () => {
+    expect(validateManagerCredentials('', 'hunter2').ok).toBe(false)
+    expect(validateManagerCredentials('   ', 'hunter2').ok).toBe(false)
+  })
+
+  it('rejects a missing password', () => {
+    const result = validateManagerCredentials('ada@example.com', '')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toMatch(/password/i)
+  })
+
+  it('does not trim the password — leading and trailing spaces are part of it', () => {
+    const result = validateManagerCredentials('ada@example.com', '  spaced  ')
+    expect(result).toEqual({ ok: true, email: 'ada@example.com', password: '  spaced  ' })
+  })
+
+  it('leaves the shape of the address to Firebase', () => {
+    // Not this function's job to decide: a client-side email regex rejects valid addresses
+    // without making anything safer, and the sign-in will reject it in a moment anyway.
+    expect(validateManagerCredentials('not-an-email', 'hunter2').ok).toBe(true)
+  })
+})
+
+describe('voidInitiatorNameOf', () => {
+  it('names the initiator when there is one', () => {
+    expect(
+      voidInitiatorNameOf({ initiatedByStaffName: 'Sam Staff', voidedByName: 'Ada Admin' }),
+    ).toBe('Sam Staff')
+  })
+
+  it('falls back to the authoriser on a pre-Phase-11 void', () => {
+    // Those voids recorded only the admin who did both, and are never backfilled: voids are
+    // immutable, so naming the authoriser is the honest answer rather than a guess.
+    expect(voidInitiatorNameOf({ initiatedByStaffName: null, voidedByName: 'Ada Admin' })).toBe(
+      'Ada Admin',
+    )
+  })
+
+  it('never returns an empty string', () => {
+    expect(voidInitiatorNameOf({ initiatedByStaffName: '  ', voidedByName: '' })).toBe('Unknown')
   })
 })

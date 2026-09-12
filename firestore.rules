@@ -609,7 +609,7 @@ service cloud.firestore {
       }
     }
 
-    // ---- Voids (admin only, final) -----------------------------------------
+    // ---- Voids (admin-authorised, final) -----------------------------------
     // Correcting a mis-rung sale. A void is its OWN document keyed by the order's id,
     // never a flag on the order: orders are immutable, and marking one would mean granting
     // update permission, which would reopen every field on every sale to whoever can void.
@@ -621,19 +621,62 @@ service cloud.firestore {
     // Staff READ voids but cannot create one. A till operator has to know a sale was
     // cancelled; hiding it would make the orders list lie to them. Creating one erases
     // revenue, which is the classic till-fraud vector, so that stays with admins.
+    //
+    // **Phase 11 did not change that, and this is the point of the design.** Staff can now
+    // START a void, but the write still has to arrive carrying an admin's own token:
+    // `allow create: if isAdmin()` is untouched below. The app obtains that token by having
+    // a manager sign in on a SECOND, in-memory Auth session (src/lib/authorizer.ts) which is
+    // discarded immediately afterwards — the till's own session is never elevated, and no
+    // amount of frontend tampering produces an admin token without admin credentials.
+    //
+    // What that buys, which a PIN could not: Firebase Auth holds the secret and throttles
+    // guesses server-side. Rules cannot rate-limit, and a PIN checked by rules would have to
+    // travel INSIDE the void document, where staff — who may read voids — could lift it and
+    // brute-force four digits offline. See "Why a manager signs in" in README.md.
+
+    // The initiator of a void is judged differently from an operator anywhere else, because
+    // the void is written by the MANAGER's token: request.auth.uid is the authoriser, so
+    // isSelfOperator's "the caller is the operator" test cannot apply to the till.
+    //
+    // This is the account-identity equivalent of isNamedOperator: the claimed initiator must
+    // be a real, still-active user profile whose CURRENT displayName matches the name
+    // recorded. It cannot prove that person physically initiated the void — the authorising
+    // manager attests to that — but it does stop a name being invented wholesale.
+    function isAccountOperator(staffId, staffName) {
+      let path = /databases/$(database)/documents/users/$(staffId);
+      return exists(path)
+        && get(path).data.active == true
+        && get(path).data.displayName == staffName;
+    }
+
+    // Either form of operator the till offers: a named roster member, the calling account
+    // itself (an admin voiding their own sale), or — the case unique to voids — the till
+    // account that started it while somebody else authorised it.
+    function validInitiator(staffId, staffName) {
+      return validOperator(staffId, staffName) || isAccountOperator(staffId, staffName);
+    }
 
     function validVoid(orderId) {
       let d = request.resource.data;
       // Key set from voidOrder in src/features/pos/void-api.ts.
       return hasFields(
-          ['orderId', 'reason', 'amount', 'voidedAt', 'voidedBy', 'voidedByName'], [])
+          ['orderId', 'reason', 'amount', 'voidedAt', 'voidedBy', 'voidedByName',
+           'initiatedByStaffId', 'initiatedByStaffName'], [])
         && d.orderId == orderId
         && d.reason is string && d.reason.size() > 0 && d.reason.size() <= 200
         && d.amount is int && d.amount >= 0
         // Also proves the order exists: get() on a missing document fails the rule.
         && d.amount == get(/databases/$(database)/documents/orders/$(orderId)).data.total
+        // Who AUTHORISED it: always the caller, and always an admin (see the match below).
         && d.voidedBy == request.auth.uid
         && d.voidedByName is string && accountNameMatches(d.voidedByName)
+        // Who INITIATED it: on an admin's own void, the same person; on a staff-initiated
+        // one, the operator at the till. Required either way, so every void answers both
+        // questions rather than leaving the second to be inferred from the first.
+        && d.initiatedByStaffId is string && d.initiatedByStaffId.size() > 0
+        && d.initiatedByStaffName is string && d.initiatedByStaffName.size() > 0
+        && d.initiatedByStaffName.size() <= 60
+        && validInitiator(d.initiatedByStaffId, d.initiatedByStaffName)
         && d.voidedAt is timestamp;
     }
 

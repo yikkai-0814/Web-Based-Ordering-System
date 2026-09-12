@@ -60,6 +60,8 @@ const voided = (orderId: string): OrderVoid => ({
   voidedAt: null,
   voidedBy: 'admin-uid',
   voidedByName: 'Ada Admin',
+  initiatedByStaffId: 'alice',
+  initiatedByStaffName: 'Alice',
 })
 
 const sidecars = (over: Partial<OrderSidecars> = {}): OrderSidecars => ({

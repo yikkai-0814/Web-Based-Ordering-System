@@ -243,12 +243,45 @@ export interface OrderVoid {
   reason: string
   amount: number
   voidedAt: Timestamp | null
+  /**
+   * The account that AUTHORISED the void — always an admin, because the rules only accept
+   * the write from one. On a staff-initiated void this is the manager who signed in to
+   * approve it, not the person who asked for it.
+   */
   voidedBy: string
   voidedByName: string
+  /**
+   * The operator who INITIATED it, and their name at that moment. Null on voids written
+   * before Phase 11, which recorded only the admin who did both. Those are never backfilled:
+   * voids are immutable, so the gap is permanent rather than transitional.
+   */
+  initiatedByStaffId: string | null
+  initiatedByStaffName: string | null
+}
+
+/**
+ * Who to show as having asked for the sale to be cancelled.
+ *
+ * Prefers the initiator, falling back to the authorising account — which is the honest
+ * answer for a pre-Phase-11 void, where the admin who authorised it was also the one who
+ * initiated it. The twin of `paymentOperatorNameOf`, built on the same rule.
+ */
+export function voidInitiatorNameOf(
+  record: Pick<OrderVoid, 'initiatedByStaffName' | 'voidedByName'>,
+): string {
+  return preferOperatorName(record.initiatedByStaffName, record.voidedByName)
 }
 
 export function parseOrderVoid(orderId: string, data: Record<string, unknown>): OrderVoid | null {
-  const { reason, amount, voidedAt, voidedBy, voidedByName } = data
+  const {
+    reason,
+    amount,
+    voidedAt,
+    voidedBy,
+    voidedByName,
+    initiatedByStaffId,
+    initiatedByStaffName,
+  } = data
 
   if (typeof reason !== 'string' || reason.trim() === '') return null
   if (typeof amount !== 'number' || !Number.isInteger(amount) || amount < 0) return null
@@ -260,6 +293,8 @@ export function parseOrderVoid(orderId: string, data: Record<string, unknown>): 
     voidedAt: (voidedAt as Timestamp | undefined) ?? null,
     voidedBy: typeof voidedBy === 'string' ? voidedBy : '',
     voidedByName: typeof voidedByName === 'string' ? voidedByName : 'Unknown',
+    initiatedByStaffId: typeof initiatedByStaffId === 'string' ? initiatedByStaffId : null,
+    initiatedByStaffName: typeof initiatedByStaffName === 'string' ? initiatedByStaffName : null,
   }
 }
 

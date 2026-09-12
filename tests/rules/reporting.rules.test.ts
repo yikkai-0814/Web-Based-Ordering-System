@@ -72,6 +72,8 @@ beforeAll(async () => {
       voidedAt: new Date(),
       voidedBy: ADMIN_UID,
       voidedByName: 'Ada Admin',
+      initiatedByStaffId: ADMIN_UID,
+      initiatedByStaffName: 'Ada Admin',
     })
     // Two more orders, each settled the modern way, so the id-scoped sidecar fetch has
     // something to include AND something to leave out. `o3` is in a different month, which
