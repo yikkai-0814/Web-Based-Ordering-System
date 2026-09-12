@@ -9,6 +9,10 @@
     "types": ["node", "vite/client"],
     "skipLibCheck": true,
 
+    /* tests/components renders JSX. Vitest transpiles it through esbuild either way, but
+       `tsc -b` type-checks the suite and needs to be told, exactly as tsconfig.app.json is. */
+    "jsx": "react-jsx",
+
     /* Bundler mode — Vitest resolves like Vite, so tests may use the @/ alias and
        extensionless relative imports just as src/ does. */
     "module": "esnext",

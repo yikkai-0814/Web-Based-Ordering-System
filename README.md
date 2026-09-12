@@ -51,6 +51,12 @@ credentials, which sign in on a second, in-memory Auth session lasting exactly o
 void is therefore written with an admin's token — `allow create: if isAdmin()` never had to
 change — and records both people: who authorised it, and who asked for it.
 
+**Phase 12** adds no feature either. Until it, the app's correctness was proven everywhere
+except where a person actually touches it: ~4,400 lines of React had no automated test of any
+kind, and a prop rename or a refactor of the void dialog could break the till without failing
+anything. A fourth suite now renders the interaction surfaces in jsdom and drives them with
+real clicks and typing.
+
 Still to come — no partial refunds, no tax or discounts. The admin page remains a deliberate
 placeholder that proves access control works end to end.
 
@@ -176,8 +182,9 @@ npm run dev
 | `npm run lint`             | oxlint                                                                   |
 | `npm run format`           | Prettier, writing changes                                                |
 | `npm run emulators`        | Start the Firebase Emulator Suite                                        |
-| `npm test`                 | All three suites: unit, then rules, then integration                     |
+| `npm test`                 | All four suites: unit, components, rules, then integration               |
 | `npm run test:unit`        | Pure-logic tests (money and cart arithmetic). No emulator needed         |
+| `npm run test:components`  | React components in jsdom, driven by clicks and typing. No emulator      |
 | `npm run test:rules`       | Start the Firestore emulator and run the security-rules tests against it |
 | `npm run test:integration` | Start the Firestore **and Auth** emulators and drive the real write APIs |
 
@@ -275,15 +282,24 @@ business date is a date, it is attributed to the calling account under that acco
 name and to an operator who is real and active, and it claims nothing about having been
 paid.
 
-### Three test suites, and what each one is for
+### Four test suites, and what each one is for
 
 | Suite               | Needs                            | Answers                                                                |
 | ------------------- | -------------------------------- | ---------------------------------------------------------------------- |
 | `tests/unit`        | nothing                          | Is the pure logic right — money, cart, status resolution, aggregation? |
+| `tests/components`  | nothing (jsdom)                  | Does the screen do what the operator expects?                          |
 | `tests/rules`       | Firestore emulator               | Would the database accept this document from this caller?              |
 | `tests/integration` | Firestore **and** Auth emulators | Is this the document the app actually sends?                           |
 
-The third exists because the first two can both be green while disagreeing. The rules suites
+Each answers a question the others cannot. `tests/components` (Phase 12) renders the
+interaction surfaces in jsdom and drives them with real clicks and typing: both paths through
+the void dialog, cash-and-change entry, the cart, the table-number rule, and the operator
+picker. It asserts on the callback boundary — what the component collected and handed over —
+which for the void dialog is also where Phase 11's control sits: staff reach `onConfirm` only
+with credentials attached. Components under test hold no Firestore, so nothing is mocked; the
+few that read context are given one directly.
+
+`tests/integration` exists because the first suites can all be green while disagreeing. The rules suites
 hand-build the documents they submit, so a rename inside `fulfillment-api.ts` would break the
 app without breaking a single test. `tests/integration` signs a real account in against the
 Auth emulator and calls `createOrder`, `recordPayment`, `setFulfillment`, `voidOrder`,
@@ -1032,6 +1048,7 @@ src/
 └─ pages/                      Admin, 403, 404 — the screens that are not a feature
 
 tests/unit/                    pure logic; no emulator
+tests/components/              React components in jsdom; no emulator
 tests/rules/                   Firestore security-rules tests
 tests/integration/             the real write APIs, against both emulators
 firestore.rules                The authorization boundary

@@ -2,11 +2,17 @@ import { fileURLToPath, URL } from 'node:url'
 
 import { defineConfig } from 'vitest/config'
 
-// Three suites live under tests/:
+// Four suites live under tests/:
 //   tests/unit        — pure logic, no emulator, run by `npm run test:unit`
+//   tests/components  — React components in jsdom, no emulator, `npm run test:components`
 //   tests/rules       — security rules, needs the Firestore emulator, `npm run test:rules`
 //   tests/integration — the real write APIs against both emulators, `npm run test:integration`
 // The scripts pass the directory, so this config only needs the shared setup.
+//
+// The environment stays `node` here and tests/components opts itself into jsdom with a
+// `@vitest-environment` docblock per file. That way the three Node suites — which spend
+// their time talking to emulators — are not slowed down by building a DOM they never touch,
+// and each component file states the environment it needs where a reader will see it.
 export default defineConfig({
   resolve: {
     alias: {
@@ -15,7 +21,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     // The emulator can be slow to answer the first request after start-up.
     testTimeout: 20_000,
     hookTimeout: 30_000,
