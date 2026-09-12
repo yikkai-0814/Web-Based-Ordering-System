@@ -9,7 +9,6 @@ export interface StaffSessionValue {
   operators: Operator[]
   loading: boolean
   select: (operatorId: string) => void
-  clear: () => void
 }
 
 /**

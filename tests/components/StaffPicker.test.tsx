@@ -34,7 +34,6 @@ function setup({
     operators,
     loading,
     select,
-    clear: vi.fn(),
   }
   const rendered = renderComponent(
     <StaffSessionContext value={value}>

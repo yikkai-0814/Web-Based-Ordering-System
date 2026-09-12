@@ -77,3 +77,59 @@ export function resolveOperator(
   if (!selectedId) return null
   return operators.find((operator) => operator.id === selectedId) ?? null
 }
+
+/**
+ * A selection belongs to the account that made it.
+ *
+ * The two functions below are why. The stored operator survives a refresh, which is the
+ * point — but it must NOT survive a change of account, and it used to. The provider is
+ * mounted above the router and outside the auth guard, so it stays mounted when somebody
+ * signs out; the stored id was read once and never reconsidered. If Alice was selected and
+ * then Bob signed in on the same till, the roster still offered Alice, the stored id still
+ * matched, and Bob's sales were recorded as Alice — permanently, since orders, payments,
+ * fulfilment steps and voids are all immutable.
+ *
+ * Storing the uid alongside the id fixes that at the source rather than at each exit. Signing
+ * out is not the only way an account ends: AuthProvider also drops a session when a profile
+ * is deactivated or missing, and a clearing function has to be remembered at every one of
+ * those points. A selection that simply does not apply to a different uid cannot be
+ * forgotten about.
+ */
+interface StoredSelection {
+  uid: string
+  operatorId: string
+}
+
+/** What goes into localStorage: the operator, and who chose them. */
+export function serializeSelection(uid: string, operatorId: string): string {
+  return JSON.stringify({ uid, operatorId } satisfies StoredSelection)
+}
+
+/**
+ * Reads a stored selection back, but only for the account that made it.
+ *
+ * Returns null — "ask who is on the till" — for anything unrecognisable: a different uid,
+ * malformed JSON, the wrong shape, or a value written before selections were scoped this way
+ * (which was a bare id string). That last case costs every existing till one re-pick, which
+ * is the honest outcome: nothing in the old format records who chose it, and guessing would
+ * be exactly the mistake this function exists to prevent.
+ */
+export function readSelectionFor(raw: string | null | undefined, uid: string): string | null {
+  if (!raw || !uid) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    // Includes the legacy bare-id format, which is not valid JSON.
+    return null
+  }
+
+  if (typeof parsed !== 'object' || parsed === null) return null
+
+  const { uid: storedUid, operatorId } = parsed as Partial<StoredSelection>
+  if (typeof storedUid !== 'string' || typeof operatorId !== 'string') return null
+  if (storedUid !== uid || operatorId === '') return null
+
+  return operatorId
+}

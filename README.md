@@ -57,6 +57,11 @@ kind, and a prop rename or a refactor of the void dialog could break the till wi
 anything. A fourth suite now renders the interaction surfaces in jsdom and drives them with
 real clicks and typing.
 
+**Phase 13** fixed a defect the previous phase's new test suite was built to catch: the till
+kept the previous person's identity after a different account signed in, so one person's sales
+could be recorded against another — permanently. The operator selection is now scoped to the
+account that made it.
+
 Still to come — no partial refunds, no tax or discounts. The admin page remains a deliberate
 placeholder that proves access control works end to end.
 
@@ -410,6 +415,19 @@ yesterday's orders reading Alice.
 **There is no deletion.** Retiring someone is deactivation: they drop out of the picker while
 every order they rang up keeps their name. A record that history points at should not be
 removable by accident.
+
+**A selection belongs to the account that made it, and never outlives it.** The chosen
+operator is remembered per device — a refresh mid-shift should not interrupt service — but it
+is stored with the uid that chose it and read back only for that uid. Phase 13 fixed this: the
+selection used to be a bare id, and `StaffSessionProvider` mounts above the router and outside
+the auth guard, so it survived a sign-out. If Alice was selected and Bob then signed in on the
+same till, the roster still offered Alice and the stored id still matched — so Bob's sales,
+payments, fulfilment steps and voids were all recorded as Alice, permanently, since every one
+of those records is immutable. Scoping the selection by uid fixes it at the source rather than
+at each exit: signing out is not the only way a session ends (a deactivated or missing profile
+also ends one), and a selection that simply does not apply to a different account cannot be
+forgotten about. A till that had a selection stored in the old format asks who is on it once,
+which is the honest outcome — nothing in that format recorded who chose it.
 
 Orders written before Phase 6 have no `staffId`. They are not backfilled — orders are
 immutable — so `operatorNameOf()` falls back to the account name. That fallback is permanent,

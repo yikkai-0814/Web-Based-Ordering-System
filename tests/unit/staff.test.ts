@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import { operatorNameOf } from '@/features/pos/types'
-import { buildOperators, resolveOperator } from '@/features/staff/staff-session'
+import {
+  buildOperators,
+  readSelectionFor,
+  resolveOperator,
+  serializeSelection,
+} from '@/features/staff/staff-session'
 import {
   parseStaffMember,
   STAFF_NAME_MAX,
@@ -158,5 +163,73 @@ describe('operatorNameOf', () => {
   it('never renders an empty string', () => {
     expect(operatorNameOf({ staffName: null, createdByName: '' })).toBe('Unknown')
     expect(operatorNameOf({ staffName: '  ', createdByName: '   ' })).toBe('Unknown')
+  })
+})
+
+/**
+ * Phase 13. A selection belongs to the account that made it.
+ *
+ * The bug these cover: the provider is mounted outside the auth guard, so it survives a
+ * sign-out. Before this, Alice could be selected, Bob could sign in on the same till, and
+ * Bob's sales would be recorded as Alice — permanently, orders being immutable.
+ */
+describe('readSelectionFor', () => {
+  const ADA = 'ada-uid'
+
+  it('gives the operator back to the account that chose them', () => {
+    const stored = serializeSelection(ADA, 'alice')
+    expect(readSelectionFor(stored, ADA)).toBe('alice')
+  })
+
+  it('gives nothing to a different account — the whole point', () => {
+    const stored = serializeSelection(ADA, 'alice')
+    expect(readSelectionFor(stored, 'bob-uid')).toBeNull()
+  })
+
+  it('ignores a selection stored before selections were scoped', () => {
+    // The old format was a bare id with nothing recording who chose it. Guessing an owner is
+    // exactly the mistake this function exists to prevent, so it costs one re-pick instead.
+    expect(readSelectionFor('alice', ADA)).toBeNull()
+  })
+
+  it('ignores junk rather than throwing at the counter', () => {
+    expect(readSelectionFor('{not json', ADA)).toBeNull()
+    expect(readSelectionFor('null', ADA)).toBeNull()
+    expect(readSelectionFor('[]', ADA)).toBeNull()
+    expect(readSelectionFor('"a string"', ADA)).toBeNull()
+    expect(readSelectionFor('42', ADA)).toBeNull()
+  })
+
+  it('ignores the right shape with the wrong types', () => {
+    expect(readSelectionFor(JSON.stringify({ uid: ADA, operatorId: 7 }), ADA)).toBeNull()
+    expect(readSelectionFor(JSON.stringify({ uid: 7, operatorId: 'alice' }), ADA)).toBeNull()
+    expect(readSelectionFor(JSON.stringify({ uid: ADA }), ADA)).toBeNull()
+    expect(readSelectionFor(JSON.stringify({ operatorId: 'alice' }), ADA)).toBeNull()
+  })
+
+  it('ignores an empty operator id', () => {
+    expect(readSelectionFor(serializeSelection(ADA, ''), ADA)).toBeNull()
+  })
+
+  it('handles nothing stored, and no account signed in', () => {
+    expect(readSelectionFor(null, ADA)).toBeNull()
+    expect(readSelectionFor(undefined, ADA)).toBeNull()
+    expect(readSelectionFor('', ADA)).toBeNull()
+    expect(readSelectionFor(serializeSelection(ADA, 'alice'), '')).toBeNull()
+  })
+
+  it('round-trips whatever it wrote', () => {
+    for (const [uid, operatorId] of [
+      [ADA, 'alice'],
+      ['uid-with-dashes', 'operator.with.dots'],
+      ['uid', 'name with spaces'],
+    ] as const) {
+      expect(readSelectionFor(serializeSelection(uid, operatorId), uid)).toBe(operatorId)
+    }
+  })
+
+  it('still lets the account pick ITSELF as operator', () => {
+    // The self-identity case: the stored operator id is the account's own uid.
+    expect(readSelectionFor(serializeSelection(ADA, ADA), ADA)).toBe(ADA)
   })
 })
