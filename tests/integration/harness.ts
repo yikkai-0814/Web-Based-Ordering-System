@@ -16,7 +16,12 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing'
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth'
 import { doc, setDoc } from 'firebase/firestore'
 
 import { auth, db } from '@/lib/firebase'
@@ -41,21 +46,30 @@ export interface TestAccount {
 export const ACCOUNT_PASSWORD = 'emulator-password'
 
 /**
- * Accounts are created under a fresh prefix every run and NEVER deleted.
+ * Accounts are created under a fresh prefix every run, and deleted again by `stopHarness()`.
  *
- * The obvious alternative — fixed emails, wiped between tests through the Auth emulator's
- * clear endpoint — is wrong here for two reasons. It would delete whatever accounts the
- * developer had created in their own running emulator, which is not this suite's to throw
- * away; and the Auth emulator resolves a request's project from its API key rather than
- * from the config's projectId, so the namespace this suite would be clearing is not
- * reliably the one it writes to. A unique prefix needs neither answer: nothing collides,
- * and nothing belonging to anyone else is touched. Emulator accounts do not outlive the
- * emulator, so they cost nothing to leave behind.
+ * Both halves matter. The prefix means two runs can never collide on an email, so nothing
+ * here depends on the emulator being empty when the suite starts. The deletion means the
+ * suite leaves the emulator as it found it: this file creates two accounts per test, so
+ * without it a developer's long-lived `npm run emulators` accumulated dozens of dead
+ * `run-…@example.test` logins per run — hundreds within a day — burying the handful of real
+ * accounts they had made for themselves in the Emulator UI.
+ *
+ * The tempting shortcut — the Auth emulator's clear-all endpoint — is still wrong, for the
+ * same reason it always was. It would delete whatever accounts the developer created in
+ * their own running emulator, which is not this suite's to throw away; and the Auth emulator
+ * resolves a request's project from its API key rather than from the config's projectId, so
+ * the namespace it would clear is not reliably the one this suite writes to. Hence
+ * `createdAccounts`: teardown deletes exactly the accounts this process created, by
+ * identity, and can touch nothing else even in principle.
  */
 const RUN_PREFIX = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 let testEnv: RulesTestEnvironment | null = null
 let accountCounter = 0
+
+/** Every account `createAccount()` has made in this process — the exact delete set for teardown. */
+const createdAccounts: TestAccount[] = []
 
 /**
  * Loads the real rules into the emulator for this project id and keeps a privileged handle
@@ -75,8 +89,30 @@ export async function startHarness(): Promise<void> {
 
 export async function stopHarness(): Promise<void> {
   await signOut(auth).catch(() => undefined)
+  await deleteCreatedAccounts()
   await testEnv?.cleanup()
   testEnv = null
+}
+
+/**
+ * Removes this run's Auth accounts, one by one, from `createdAccounts`.
+ *
+ * Deleting a user needs that user's own credentials — there is no admin SDK here — so each
+ * account is signed back in and deletes itself. Failures are swallowed deliberately: this is
+ * cleanup running after the assertions have already passed or failed, and an emulator that
+ * has gone away mid-teardown should not turn a green suite red. The worst case is the old
+ * behaviour, a few accounts left behind.
+ */
+async function deleteCreatedAccounts(): Promise<void> {
+  for (const account of createdAccounts.splice(0)) {
+    try {
+      const credential = await signInWithEmailAndPassword(auth, account.email, ACCOUNT_PASSWORD)
+      await deleteUser(credential.user)
+    } catch {
+      // See above: teardown never fails the run.
+    }
+  }
+  await signOut(auth).catch(() => undefined)
 }
 
 function requireEnv(): RulesTestEnvironment {
@@ -122,7 +158,9 @@ export async function createAccount(
   })
 
   await signOut(auth)
-  return { uid, email, displayName, role }
+  const account: TestAccount = { uid, email, displayName, role }
+  createdAccounts.push(account)
+  return account
 }
 
 /** Signs the shared app SDK in as one of the accounts. Every write afterwards is theirs. */
