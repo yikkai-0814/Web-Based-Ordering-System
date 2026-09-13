@@ -213,18 +213,24 @@ export function indexFulfillmentsByOrderId<T extends { orderId: string }>(
 }
 
 /* ---------------------------------------------------------------------------
- * Preparation timing
+ * Order elapsed time
  *
- * The clock starts when the ORDER IS CREATED and stops when it is marked ready:
- * `order.createdAt` to `readyAt`. Nothing else starts, pauses or resets it — in particular
- * payment has no bearing on it at all, and neither does the moment somebody presses "Start
- * preparing". A ticket that sits untouched for ten minutes has still been waiting ten
- * minutes, and that wait is exactly what this number is for.
+ * How long the customer has been waiting: `order.createdAt` until the order is handed over.
+ * It starts the instant the sale is rung up and stops at exactly one moment — delivery.
  *
- * There is therefore **no separate start timestamp**. `order.createdAt` already records when
- * the clock started, on a document that is immutable, so storing a second one would be a
- * fact that could disagree with itself. Only the finish is recorded, on the fulfilment
- * sidecar, because nothing else knows when the order stopped being made.
+ * Nothing else stops it, pauses it or resets it. Not payment, which lives in a different
+ * document this never reads. Not the kitchen picking the ticket up, and not the kitchen
+ * finishing it: an order that has been sitting on the pass for six minutes is still an order
+ * the customer has not been given, and a clock that stopped at `ready` would hide precisely
+ * the wait worth seeing.
+ *
+ * `readyAt` is still recorded — it answers "when did this become ready?" — but it has no say
+ * in this number.
+ *
+ * There is no separate START timestamp. `order.createdAt` already records when the clock
+ * began, on a document that is immutable, so storing a second one would be a fact that could
+ * disagree with itself. Only the END is recorded, on the fulfilment sidecar, because nothing
+ * else knows when the order was handed over.
  *
  * Nothing here reads a clock. The elapsed value is derived at render time from the stored
  * timestamps and a `now` the caller supplies, so a running timer costs no writes — see
@@ -232,37 +238,55 @@ export function indexFulfillmentsByOrderId<T extends { orderId: string }>(
  * ------------------------------------------------------------------------- */
 
 /**
- * What a transition should do to `readyAt`.
+ * What a transition should do to a recorded timestamp.
  *
  * `'now'` is the server's own time for this write, `'keep'` leaves the stored value alone,
  * and `null` clears it. Deliberately a description rather than a value: the API turns it
  * into `serverTimestamp()` (or into not writing the field at all) and firestore.rules checks
- * the same table against `request.time`, so the two agree without either trusting the other.
+ * the same tables against `request.time`, so the two agree without either trusting the other.
  */
-export type ReadyAtInstruction = 'now' | 'keep' | null
+export type TimestampInstruction = 'now' | 'keep' | null
 
 /**
- * What each step does to the finish time.
+ * When the order was handed over — the one thing that stops the clock.
+ *
+ * | Step                | deliveredAt | Why                                             |
+ * | ------------------- | ----------- | ----------------------------------------------- |
+ * | ready → delivered   | now         | the customer has it; the wait is over           |
+ * | delivered → ready   | null        | it was not handed over after all; clock resumes |
+ * | every other step    | null        | the order is not delivered, so it cannot claim  |
+ *
+ * There is no `keep`, and that is what makes the rule total: an order is delivered or it is
+ * not, `delivered` is reachable only from `ready`, and the only way out of it clears the
+ * stamp. A re-delivery after an admin correction records the second handover, which is the
+ * one that actually happened.
+ */
+export function nextDeliveredAt(
+  _from: FulfillmentStatus,
+  to: FulfillmentStatus,
+): TimestampInstruction {
+  return to === FINAL_FULFILLMENT ? 'now' : null
+}
+
+/**
+ * When the order became ready. Kept for the question it answers; it does NOT stop the timer.
  *
  * | Step                   | readyAt | Why                                              |
  * | ---------------------- | ------- | ------------------------------------------------ |
- * | pending → preparing    | null    | not finished; the clock has been running already |
- * | preparing → ready      | now     | this is the moment being measured                |
- * | ready → delivered      | keep    | handing over is not making                       |
+ * | pending → preparing    | null    | not finished                                     |
+ * | preparing → ready      | now     | the kitchen finished it                          |
+ * | ready → delivered      | keep    | handing over does not un-finish it               |
  * | delivered → ready      | keep    | a fulfilment correction, not a remake            |
- * | ready → preparing      | null    | it is being worked on again, so it is not done   |
+ * | ready → preparing      | null    | it is being worked on again                      |
  * | preparing → pending    | null    | already null; stated so the table is total       |
- *
- * Note what is NOT here: no step touches the start, because no step owns it. The order's own
- * `createdAt` does, and orders are immutable.
  */
-export function nextReadyAt(from: FulfillmentStatus, to: FulfillmentStatus): ReadyAtInstruction {
+export function nextReadyAt(from: FulfillmentStatus, to: FulfillmentStatus): TimestampInstruction {
   if (to === 'ready') {
-    // Arriving from `preparing` is the order being finished. Arriving from `delivered` is an
+    // Arriving from `preparing` is the kitchen finishing. Arriving from `delivered` is an
     // admin undoing a mis-tap, which must not overwrite the time it was really finished.
     return from === 'preparing' ? 'now' : 'keep'
   }
-  if (to === 'delivered') return 'keep'
+  if (to === FINAL_FULFILLMENT) return 'keep'
   return null
 }
 
@@ -281,52 +305,52 @@ export interface TimeableOrder {
   createdAt: DateLike | null
 }
 
-/** The fulfilment half: when it stopped, if it has. */
-export interface FinishableFulfillment {
-  readyAt: DateLike | null
+/** The fulfilment half: when it was handed over, if it has been. */
+export interface DeliverableFulfillment {
+  deliveredAt: DateLike | null
 }
 
-/** When preparation started and, if it has, when it finished. */
-export interface PreparationWindow {
+/** When the clock started and, if it has stopped, when it stopped. */
+export interface ElapsedWindow {
   startedAt: Date | null
   finishedAt: Date | null
 }
 
 /**
- * The window for one order: creation to ready.
+ * The window for one order: creation to delivery.
  *
  * `startedAt` is null only while a just-placed order's `createdAt` is still an unresolved
  * server timestamp in the local cache — a frame or two, after which it fills in.
  */
-export function preparationWindowOf(
+export function elapsedWindowOf(
   order: TimeableOrder | null,
-  fulfillment: FinishableFulfillment | null,
-): PreparationWindow {
+  fulfillment: DeliverableFulfillment | null,
+): ElapsedWindow {
   return {
     startedAt: order?.createdAt?.toDate() ?? null,
-    finishedAt: fulfillment?.readyAt?.toDate() ?? null,
+    finishedAt: fulfillment?.deliveredAt?.toDate() ?? null,
   }
 }
 
 /**
  * How long the order has taken, in milliseconds, or null when the start is not known yet.
  *
- * Still running: measured against the `now` the caller passes. Finished: frozen at
- * `finishedAt`, so the number stops the instant the order is marked ready and stays
- * available for the rest of the order's life, through `delivered`.
+ * Still running: measured against the `now` the caller passes. Delivered: frozen at
+ * `finishedAt`, so the number stops the instant the customer is handed the order and stays
+ * available for the rest of its life.
  *
  * Clamped at zero. A finish before the start should be impossible — one comes from the
  * order's own creation and the other from the server's clock — but a negative duration on a
  * kitchen display would be a worse answer than nothing.
  */
-export function preparationElapsedMs(window: PreparationWindow, now: number): number | null {
+export function elapsedMsOf(window: ElapsedWindow, now: number): number | null {
   if (!window.startedAt) return null
   const end = window.finishedAt ? window.finishedAt.getTime() : now
   return Math.max(0, end - window.startedAt.getTime())
 }
 
-/** True once the window has closed — the duration shown is final, not ticking. */
-export function isPreparationFinished(window: PreparationWindow): boolean {
+/** True once the order has been handed over — the duration shown is final, not ticking. */
+export function isElapsedFinished(window: ElapsedWindow): boolean {
   return window.startedAt !== null && window.finishedAt !== null
 }
 
@@ -348,9 +372,12 @@ export function formatDuration(ms: number): string {
 }
 
 /**
- * The one wording for this number anywhere in the UI.
+ * What the number means, for anything that cannot see the clock icon beside it.
  *
- * Named rather than inlined because the distinction it draws is the whole point: a reader
- * seeing a bare duration on an order card would reasonably take it for something else.
+ * A duration on an order card is ambiguous on its own — it could as easily be a countdown or
+ * a preparation time — so this is the readout's accessible name rather than a decoration.
  */
-export const PREPARATION_LABEL = 'Prep time'
+export const ELAPSED_LABEL = 'Time since ordered'
+
+/** The same, once it has stopped. */
+export const ELAPSED_FINAL_LABEL = 'Total time to delivery'

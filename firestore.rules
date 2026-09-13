@@ -144,6 +144,54 @@ service cloud.firestore {
         && !existsAfter(/databases/$(database)/documents/menuItemCosts/$(itemId));
     }
 
+    // ---- Menu item customisation (admin-configured, staff-readable) --------
+    // What a customer may choose when an item is ordered: "No vegetables", "Extra egg
+    // +RM1.00". One document per GROUP, keyed to its menu item by `itemId`, with the group's
+    // options held as an array inside it.
+    //
+    // Staff READ this — they cannot take an order without knowing what to ask — and only an
+    // admin writes it, which is the same split as menuItems and categories. Nothing here is
+    // sensitive the way cost is, so it does not need a collection of its own to hide it; it
+    // is separate from menuItems because it is a list per item, not a field.
+    //
+    // **What these rules cannot check.** The options are a list, and rules cannot iterate
+    // one, so an option's name and price adjustment are validated by the form and by
+    // parseModifierGroup rather than here — the same limitation, and the same honest
+    // statement of it, as the `lines` array on an order. What is checked is every scalar and
+    // the list's own type and size, so a group cannot be created without a real item, a
+    // legal selection mode, or with an unbounded number of options.
+    //
+    // Note what does NOT depend on any of this: a past order. Every chosen option is copied
+    // onto the order line at the time of sale, so an admin editing, deactivating or deleting
+    // a group changes what the next customer is offered and nothing that has already been
+    // rung up.
+
+    function validModifierGroup() {
+      let d = request.resource.data;
+      // Key set from createModifierGroup/updateModifierGroup in src/features/menu/menu-api.ts.
+      return hasFields(
+          ['itemId', 'name', 'selection', 'required', 'sortOrder', 'active', 'options',
+           'createdAt', 'updatedAt'], [])
+        && d.itemId is string && d.itemId.size() > 0
+        // The group must belong to an item that exists, so a stray document cannot be
+        // created against a typo and then surface on no screen at all.
+        && exists(/databases/$(database)/documents/menuItems/$(d.itemId))
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 60
+        && (d.selection == 'single' || d.selection == 'multiple')
+        && d.required is bool
+        && d.sortOrder is int
+        && d.active is bool
+        && d.options is list && d.options.size() > 0 && d.options.size() <= 30
+        && d.createdAt is timestamp
+        && d.updatedAt is timestamp;
+    }
+
+    match /modifierGroups/{groupId} {
+      allow read: if isActive();
+      allow create, update: if isAdmin() && validModifierGroup();
+      allow delete: if isAdmin();
+    }
+
     // ---- Item cost (admin only) --------------------------------------------
     // What the café pays for an item lives in its OWN collection, keyed by the same
     // document id as the menu item, rather than as a field on menuItems.
@@ -542,13 +590,14 @@ service cloud.firestore {
       // tolerated so those orders keep moving, and read by nothing.
       return hasFields(
           ['orderId', 'status', 'updatedAt', 'updatedBy', 'updatedByName', 'updatedByStaffId',
-           'updatedByStaffName', 'readyAt'], ['preparingAt'])
+           'updatedByStaffName', 'readyAt', 'deliveredAt'], ['preparingAt'])
         && d.orderId == orderId
         && d.status is string
         && fulfillmentIndex(d.status) >= 0
         && d.updatedAt is timestamp
         // Either a real instant or explicitly nothing.
         && (d.readyAt == null || d.readyAt is timestamp)
+        && (d.deliveredAt == null || d.deliveredAt is timestamp)
         && validMover(d)
         && exists(/databases/$(database)/documents/orders/$(orderId))
         // A voided sale is cancelled; it must not continue through the kitchen.
@@ -560,11 +609,15 @@ service cloud.firestore {
       return request.resource.data.status == 'preparing';
     }
 
-    // ---- Preparation timing ------------------------------------------------
-    // How long an order took, measured from when the SALE WAS RUNG UP to when it was marked
-    // ready. The start is the order's own immutable `createdAt`, so nothing here records it
-    // and nothing here can move it: a ticket that waits before anybody starts on it has
-    // still been waiting, and payment has no bearing on any of it.
+    // ---- Order timing --------------------------------------------------------
+    // How long the customer waited, measured from when the SALE WAS RUNG UP to when the
+    // order was HANDED OVER. The start is the order's own immutable `createdAt`, so nothing
+    // here records it and nothing here can move it; payment has no bearing on any of it.
+    //
+    // `deliveredAt` is what stops the clock, and it is the one field that decides the
+    // duration. `readyAt` is still recorded because it answers a different question — when
+    // did the kitchen finish — but an order sitting on the pass is still an order the
+    // customer has not been given, so it must not end the measurement.
     //
     // Only the finish lives on this document, and the client sends it, so it is checked
     // against `request.time` — the server's own clock for this write, which is what
@@ -583,9 +636,18 @@ service cloud.firestore {
       return 'readyAt' in resource.data ? resource.data.readyAt : null;
     }
 
-    // A first move is always pending -> preparing, so nothing can have finished yet.
+    // A first move is always pending -> preparing, so nothing can have happened yet.
     function validPreparationCreate() {
-      return request.resource.data.readyAt == null;
+      return request.resource.data.readyAt == null
+        && request.resource.data.deliveredAt == null;
+    }
+
+    // The clock stops on exactly one step and restarts if that step is undone. There is no
+    // "unchanged" case: an order is delivered or it is not, so a stale stamp cannot survive.
+    function validDeliveredAt() {
+      return request.resource.data.status == 'delivered'
+        ? request.resource.data.deliveredAt == request.time
+        : request.resource.data.deliveredAt == null;
     }
 
     function validPreparationUpdate() {
@@ -616,6 +678,7 @@ service cloud.firestore {
       allow update: if isActive()
         && validFulfillmentFields(orderId)
         && validPreparationUpdate()
+        && validDeliveredAt()
         && (fulfillmentStepChange() == 1 || (isAdmin() && fulfillmentStepChange() == -1));
       // A record of how an order progressed is not something to erase.
       allow delete: if false;

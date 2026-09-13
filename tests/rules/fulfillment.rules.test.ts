@@ -76,9 +76,11 @@ const order = (over: Record<string, unknown> = {}) => ({
  * where the stored value is a server timestamp nobody can predict — use `stepAt` instead.
  */
 function arrivingAt(status: string): Preparation {
-  if (status === 'ready') return { readyAt: serverTimestamp() }
-  if (status === 'delivered') return { readyAt: SEEDED_READY_AT }
-  return { readyAt: null }
+  if (status === 'ready') return { readyAt: serverTimestamp(), deliveredAt: null }
+  if (status === 'delivered') {
+    return { readyAt: SEEDED_READY_AT, deliveredAt: serverTimestamp() }
+  }
+  return { readyAt: null, deliveredAt: null }
 }
 
 const step = (
@@ -113,23 +115,34 @@ const step = (
  */
 interface Preparation {
   readyAt: unknown
+  deliveredAt: unknown
 }
 
 /** A concrete finish for a document seeded past `ready`, with rules disabled. */
 const SEEDED_READY_AT = new Date('2026-09-11T10:05:00.000Z')
 
+/** A concrete handover for a document seeded at `delivered`, with rules disabled. */
+const SEEDED_DELIVERED_AT = new Date('2026-09-11T10:07:00.000Z')
+
 /** What a document seeded at `status` carries, so an update can be checked against it. */
 function seededPrior(status: string): Preparation {
-  return status === 'ready' || status === 'delivered'
-    ? { readyAt: SEEDED_READY_AT }
-    : { readyAt: null }
+  if (status === 'delivered') {
+    return { readyAt: SEEDED_READY_AT, deliveredAt: SEEDED_DELIVERED_AT }
+  }
+  if (status === 'ready') return { readyAt: SEEDED_READY_AT, deliveredAt: null }
+  return { readyAt: null, deliveredAt: null }
 }
 
-/** The finish the server will accept for a step out of `from` into `to`. */
+/** The timestamps the server will accept for a step out of `from` into `to`. */
 function preparationFor(from: string, to: string, prior: Preparation): Preparation {
-  if (to === 'ready' && from === 'preparing') return { readyAt: serverTimestamp() }
-  if (to === 'ready' || to === 'delivered') return { readyAt: prior.readyAt }
-  return { readyAt: null }
+  // The handover is the only thing that stops the clock, and it has no "unchanged" case:
+  // an order is delivered or it is not.
+  const deliveredAt = to === 'delivered' ? serverTimestamp() : null
+  if (to === 'ready' && from === 'preparing') {
+    return { readyAt: serverTimestamp(), deliveredAt }
+  }
+  if (to === 'ready' || to === 'delivered') return { readyAt: prior.readyAt, deliveredAt }
+  return { readyAt: null, deliveredAt }
 }
 
 /** The journal entry written alongside it, in the same batch. */
@@ -178,8 +191,11 @@ async function move(
   // resend the one actually stored — the document is written whole.
   const existing = await getDoc(doc(db, 'orderFulfillment', orderId))
   const prior: Preparation = existing.exists()
-    ? { readyAt: existing.get('readyAt') ?? null }
-    : { readyAt: null }
+    ? {
+        readyAt: existing.get('readyAt') ?? null,
+        deliveredAt: existing.get('deliveredAt') ?? null,
+      }
+    : { readyAt: null, deliveredAt: null }
 
   const batch = writeBatch(db)
   batch.set(
@@ -270,6 +286,7 @@ async function seedLegacyAt(status: string, orderId = ORDER_ID) {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     const legacy: Record<string, unknown> = step(status)
     delete legacy.readyAt
+    delete legacy.deliveredAt
     await setDoc(doc(context.firestore(), 'orderFulfillment', orderId), legacy)
   })
 }
@@ -293,8 +310,11 @@ async function stepAt(
   const existing = await getDoc(doc(db, 'orderFulfillment', orderId))
   const from = existing.exists() ? (existing.get('status') as string) : 'pending'
   const prior: Preparation = existing.exists()
-    ? { readyAt: existing.get('readyAt') ?? null }
-    : { readyAt: null }
+    ? {
+        readyAt: existing.get('readyAt') ?? null,
+        deliveredAt: existing.get('deliveredAt') ?? null,
+      }
+    : { readyAt: null, deliveredAt: null }
 
   return step(status, uid, orderId, operator, prep ?? preparationFor(from, status, prior))
 }
@@ -1136,7 +1156,7 @@ describe('fulfilment rules: preparation timing', () => {
         to: 'preparing',
         uid: ADMIN_UID,
         operator: ADMIN_OP,
-        prep: { readyAt: SEEDED_READY_AT },
+        prep: { readyAt: SEEDED_READY_AT, deliveredAt: null },
       }),
     )
   })
@@ -1147,7 +1167,11 @@ describe('fulfilment rules: preparation timing', () => {
     await seed()
     await seedAt('preparing')
     await assertFails(
-      move(staffDb(), { from: 'preparing', to: 'ready', prep: { readyAt: new Date() } }),
+      move(staffDb(), {
+        from: 'preparing',
+        to: 'ready',
+        prep: { readyAt: new Date(), deliveredAt: null },
+      }),
     )
   })
 
@@ -1158,7 +1182,7 @@ describe('fulfilment rules: preparation timing', () => {
       move(staffDb(), {
         from: 'preparing',
         to: 'ready',
-        prep: { readyAt: new Date('2020-01-01T00:00:00.000Z') },
+        prep: { readyAt: new Date('2020-01-01T00:00:00.000Z'), deliveredAt: null },
       }),
     )
   })
@@ -1166,14 +1190,24 @@ describe('fulfilment rules: preparation timing', () => {
   it('refuses claiming a finish while merely starting preparation', async () => {
     await seed()
     await assertFails(
-      move(staffDb(), { from: 'pending', to: 'preparing', prep: { readyAt: serverTimestamp() } }),
+      move(staffDb(), {
+        from: 'pending',
+        to: 'preparing',
+        prep: { readyAt: serverTimestamp(), deliveredAt: null },
+      }),
     )
   })
 
   it('refuses dropping a recorded finish on the way to delivered', async () => {
     await seed()
     await seedAt('ready')
-    await assertFails(move(staffDb(), { from: 'ready', to: 'delivered', prep: { readyAt: null } }))
+    await assertFails(
+      move(staffDb(), {
+        from: 'ready',
+        to: 'delivered',
+        prep: { readyAt: null, deliveredAt: serverTimestamp() },
+      }),
+    )
   })
 
   it('refuses rewriting a recorded finish on the way to delivered', async () => {
@@ -1183,7 +1217,7 @@ describe('fulfilment rules: preparation timing', () => {
       move(staffDb(), {
         from: 'ready',
         to: 'delivered',
-        prep: { readyAt: new Date('2026-09-11T10:04:00.000Z') },
+        prep: { readyAt: new Date('2026-09-11T10:04:00.000Z'), deliveredAt: serverTimestamp() },
       }),
     )
   })
@@ -1245,5 +1279,127 @@ describe('fulfilment rules: preparation timing', () => {
     })
 
     await assertSucceeds(move(staffDb(), { from: 'preparing', to: 'ready' }))
+  })
+})
+
+/**
+ * The handover, which is the one moment that stops the clock.
+ *
+ * `deliveredAt` is the field the elapsed duration is computed from, so the server is the
+ * only thing allowed to decide it. Every value below is checked against `request.time`.
+ */
+describe('fulfilment rules: the delivery stamp', () => {
+  const ADMIN_OP = { id: ADMIN_UID, name: 'Ada Admin' }
+
+  async function readFulfillment(db: ReturnType<typeof staffDb>, orderId = ORDER_ID) {
+    return getDoc(doc(db, 'orderFulfillment', orderId))
+  }
+
+  it('is empty on every step short of delivery', async () => {
+    await seed()
+    const db = staffDb()
+
+    await assertSucceeds(move(db, { from: 'pending', to: 'preparing' }))
+    expect((await readFulfillment(db)).get('deliveredAt')).toBeNull()
+
+    await assertSucceeds(move(db, { from: 'preparing', to: 'ready' }))
+    // Ready is NOT the end of the wait: the customer still does not have the order.
+    expect((await readFulfillment(db)).get('deliveredAt')).toBeNull()
+    expect((await readFulfillment(db)).get('readyAt')).not.toBeNull()
+  })
+
+  it('is stamped when the order is handed over', async () => {
+    await seed()
+    await seedAt('ready')
+    const db = staffDb()
+    await assertSucceeds(move(db, { from: 'ready', to: 'delivered' }))
+
+    const record = await readFulfillment(db)
+    expect(record.get('deliveredAt')).not.toBeNull()
+    // The kitchen's own finish is untouched by the handover.
+    expect(record.get('readyAt').toDate()).toEqual(SEEDED_READY_AT)
+  })
+
+  it('is cleared when an admin corrects delivered back to ready', async () => {
+    await seed()
+    await seedAt('delivered')
+    const db = adminDb()
+    await assertSucceeds(
+      move(db, { from: 'delivered', to: 'ready', uid: ADMIN_UID, operator: ADMIN_OP }),
+    )
+
+    // It was not handed over after all, so the clock starts running again.
+    expect((await readFulfillment(db)).get('deliveredAt')).toBeNull()
+  })
+
+  it('refuses a client-chosen handover time', async () => {
+    await seed()
+    await seedAt('ready')
+    await assertFails(
+      move(staffDb(), {
+        from: 'ready',
+        to: 'delivered',
+        prep: { readyAt: SEEDED_READY_AT, deliveredAt: new Date() },
+      }),
+    )
+  })
+
+  it('refuses a backdated handover, which would shrink the wait', async () => {
+    await seed()
+    await seedAt('ready')
+    await assertFails(
+      move(staffDb(), {
+        from: 'ready',
+        to: 'delivered',
+        prep: { readyAt: SEEDED_READY_AT, deliveredAt: new Date('2020-01-01T00:00:00.000Z') },
+      }),
+    )
+  })
+
+  it('refuses delivering without stamping the handover at all', async () => {
+    await seed()
+    await seedAt('ready')
+    await assertFails(
+      move(staffDb(), {
+        from: 'ready',
+        to: 'delivered',
+        prep: { readyAt: SEEDED_READY_AT, deliveredAt: null },
+      }),
+    )
+  })
+
+  it('refuses claiming a handover on an order that is only ready', async () => {
+    await seed()
+    await seedAt('preparing')
+    await assertFails(
+      move(staffDb(), {
+        from: 'preparing',
+        to: 'ready',
+        prep: { readyAt: serverTimestamp(), deliveredAt: serverTimestamp() },
+      }),
+    )
+  })
+
+  it('refuses keeping a stale handover when stepping back out of delivered', async () => {
+    await seed()
+    await seedAt('delivered')
+    await assertFails(
+      move(adminDb(), {
+        from: 'delivered',
+        to: 'ready',
+        uid: ADMIN_UID,
+        operator: ADMIN_OP,
+        prep: { readyAt: SEEDED_READY_AT, deliveredAt: SEEDED_DELIVERED_AT },
+      }),
+    )
+  })
+
+  it('still moves a legacy record that has neither timestamp', async () => {
+    await seed()
+    await seedLegacyAt('ready')
+    const db = staffDb()
+
+    await assertSucceeds(move(db, { from: 'ready', to: 'delivered' }))
+    expect((await readFulfillment(db)).get('deliveredAt')).not.toBeNull()
   })
 })

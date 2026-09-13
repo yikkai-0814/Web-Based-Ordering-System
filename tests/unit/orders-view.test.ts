@@ -17,7 +17,16 @@ const order = (over: Partial<Order> = {}): Order => ({
   id: 'o1',
   number: 1,
   businessDate: '2026-09-12',
-  lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1595, quantity: 2 }],
+  lines: [
+    {
+      menuItemId: 'i1',
+      name: 'Flat White',
+      basePrice: 1595,
+      unitPrice: 1595,
+      modifiers: [],
+      quantity: 2,
+    },
+  ],
   total: 3190,
   orderType: 'dine_in',
   tableNumber: '5',
@@ -54,6 +63,7 @@ const fulfillment = (orderId: string, status: OrderFulfillment['status']): Order
   updatedByStaffId: 'bob',
   updatedByStaffName: 'Bob',
   readyAt: null,
+  deliveredAt: null,
 })
 
 const voided = (orderId: string): OrderVoid => ({
@@ -276,8 +286,22 @@ describe('search within the loaded date', () => {
       number: 12,
       tableNumber: 'A3',
       lines: [
-        { menuItemId: 'i1', name: 'Flat White', unitPrice: 1595, quantity: 2 },
-        { menuItemId: 'i2', name: 'Almond Croissant', unitPrice: 850, quantity: 1 },
+        {
+          menuItemId: 'i1',
+          name: 'Flat White',
+          basePrice: 1595,
+          unitPrice: 1595,
+          modifiers: [],
+          quantity: 2,
+        },
+        {
+          menuItemId: 'i2',
+          name: 'Almond Croissant',
+          basePrice: 850,
+          unitPrice: 850,
+          modifiers: [],
+          quantity: 1,
+        },
       ],
     }),
     sidecars(),
@@ -327,7 +351,16 @@ describe('filterOrders', () => {
       order({
         id: 'o3',
         number: 3,
-        lines: [{ menuItemId: 'i2', name: 'Iced Latte', unitPrice: 1200, quantity: 1 }],
+        lines: [
+          {
+            menuItemId: 'i2',
+            name: 'Iced Latte',
+            basePrice: 1200,
+            unitPrice: 1200,
+            modifiers: [],
+            quantity: 1,
+          },
+        ],
       }),
     ],
     sidecars({

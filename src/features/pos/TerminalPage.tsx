@@ -10,6 +10,9 @@ import { useStaffSession } from '@/features/staff/useStaffSession'
 import { useCategories } from '@/features/menu/useCategories'
 import { useMenuItems } from '@/features/menu/useMenuItems'
 import { bySortOrderThenName, type MenuItem } from '@/features/menu/types'
+import { offeredGroupsFor, type SelectedModifier } from '@/features/menu/modifiers'
+import { useModifierGroups } from '@/features/menu/useModifierGroups'
+import { ItemCustomisationDialog } from '@/features/pos/ItemCustomisationDialog'
 import { CartPanel } from '@/features/pos/CartPanel'
 import { OrderTypePanel } from '@/features/pos/OrderTypePanel'
 import { orderTypeSummaryOf, validatePlacement, type OrderType } from '@/features/pos/order-type'
@@ -63,6 +66,9 @@ export function TerminalPage() {
   const { items, loading: itemsLoading, error: itemsError } = useMenuItems()
 
   const [cart, setCart] = useState<Cart>(EMPTY_CART)
+  /** The item whose customisation dialog is open, if any. */
+  const [customising, setCustomising] = useState<MenuItem | null>(null)
+  const { groups: modifierGroups } = useModifierGroups()
   /**
    * Dine-in by default, deliberately.
    *
@@ -109,16 +115,36 @@ export function TerminalPage() {
   const placement = validatePlacement(orderType, tableNumber)
   const canPlace = validateCart(cart).ok && placement.ok
 
-  function addItem(item: MenuItem) {
+  /**
+   * Puts one of an item, configured, into the order.
+   *
+   * `addToCart` decides whether that is a new line or one more of an existing one: the same
+   * item with the same options merges, the same item made differently does not.
+   */
+  function addConfigured(item: MenuItem, modifiers: SelectedModifier[]) {
     setLastOrder(null)
     setError(null)
     setCart((current) =>
       addToCart(current, {
         menuItemId: item.id,
         name: item.name,
-        unitPrice: item.price,
+        basePrice: item.price,
+        modifiers,
       }),
     )
+  }
+
+  /**
+   * Tapping an item. Anything with a choice to make opens the customisation dialog first;
+   * anything without one is still a single tap, which is what keeps the counter quick.
+   */
+  function addItem(item: MenuItem) {
+    const groups = offeredGroupsFor(modifierGroups, item.id)
+    if (groups.length > 0) {
+      setCustomising(item)
+      return
+    }
+    addConfigured(item, [])
   }
 
   /**
@@ -188,6 +214,18 @@ export function TerminalPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-7xl gap-4 lg:grid-cols-[1fr_24rem] xl:grid-cols-[1fr_26rem]">
+      {customising && (
+        <ItemCustomisationDialog
+          item={customising}
+          groups={offeredGroupsFor(modifierGroups, customising.id)}
+          onCancel={() => setCustomising(null)}
+          onAdd={(modifiers) => {
+            addConfigured(customising, modifiers)
+            setCustomising(null)
+          }}
+        />
+      )}
+
       <section className="min-w-0 space-y-5">
         <div className="space-y-1">
           <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
@@ -244,9 +282,9 @@ export function TerminalPage() {
         <CartPanel
           cart={cart}
           disabled={pending}
-          onIncrement={(id) => setCart((current) => incrementLine(current, id))}
-          onDecrement={(id) => setCart((current) => decrementLine(current, id))}
-          onRemove={(id) => setCart((current) => removeLine(current, id))}
+          onIncrement={(lineId) => setCart((current) => incrementLine(current, lineId))}
+          onDecrement={(lineId) => setCart((current) => decrementLine(current, lineId))}
+          onRemove={(lineId) => setCart((current) => removeLine(current, lineId))}
           onClear={() => setCart(clearCart())}
         />
 

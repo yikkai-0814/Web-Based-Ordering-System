@@ -2,6 +2,7 @@ import { Minus, Plus, ShoppingBasket, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { cartItemCount, cartTotal, lineTotal, type Cart } from '@/features/pos/cart'
+import { describeModifiers } from '@/features/menu/modifiers'
 import { formatMoney } from '@/lib/money'
 
 export function CartPanel({
@@ -13,9 +14,9 @@ export function CartPanel({
   disabled = false,
 }: {
   cart: Cart
-  onIncrement: (menuItemId: string) => void
-  onDecrement: (menuItemId: string) => void
-  onRemove: (menuItemId: string) => void
+  onIncrement: (lineId: string) => void
+  onDecrement: (lineId: string) => void
+  onRemove: (lineId: string) => void
   onClear: () => void
   disabled?: boolean
 }) {
@@ -55,13 +56,23 @@ export function CartPanel({
           <ul className="divide-y">
             {cart.map((line) => (
               <li
-                key={line.menuItemId}
+                key={line.lineId}
                 className="flex items-center gap-2 px-4 py-3"
                 data-testid="cart-line"
                 data-item-name={line.name}
               >
                 <div className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{line.name}</span>
+                  {/* What makes this line different from the same dish ordered another way.
+                      Without it two lines of "Chicken Chop Rice" would look like a bug. */}
+                  {line.modifiers.length > 0 && (
+                    <span
+                      className="block truncate text-xs text-foreground"
+                      data-testid="cart-line-modifiers"
+                    >
+                      {describeModifiers(line.modifiers)}
+                    </span>
+                  )}
                   <span className="block text-xs text-muted-foreground">
                     {formatMoney(line.unitPrice)} each
                   </span>
@@ -72,7 +83,7 @@ export function CartPanel({
                     variant="outline"
                     size="icon"
                     aria-label={`Remove one ${line.name}`}
-                    onClick={() => onDecrement(line.menuItemId)}
+                    onClick={() => onDecrement(line.lineId)}
                     disabled={disabled}
                   >
                     <Minus aria-hidden="true" />
@@ -88,7 +99,7 @@ export function CartPanel({
                     variant="outline"
                     size="icon"
                     aria-label={`Add one ${line.name}`}
-                    onClick={() => onIncrement(line.menuItemId)}
+                    onClick={() => onIncrement(line.lineId)}
                     disabled={disabled}
                   >
                     <Plus aria-hidden="true" />
@@ -103,7 +114,7 @@ export function CartPanel({
                   variant="ghost"
                   size="icon"
                   aria-label={`Remove ${line.name} from the order`}
-                  onClick={() => onRemove(line.menuItemId)}
+                  onClick={() => onRemove(line.lineId)}
                   disabled={disabled}
                 >
                   <Trash2 aria-hidden="true" />

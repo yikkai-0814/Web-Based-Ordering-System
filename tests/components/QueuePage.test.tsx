@@ -36,7 +36,16 @@ function orderOf(): Order {
     id: ORDER_ID,
     number: 1,
     businessDate: BUSINESS_DATE,
-    lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 1 }],
+    lines: [
+      {
+        menuItemId: 'i1',
+        name: 'Flat White',
+        basePrice: 1250,
+        unitPrice: 1250,
+        modifiers: [],
+        quantity: 1,
+      },
+    ],
     total: 1250,
     orderType: 'takeaway',
     tableNumber: null,
@@ -51,7 +60,10 @@ function orderOf(): Order {
   }
 }
 
-function fulfillmentOf(status: FulfillmentStatus): OrderFulfillment {
+function fulfillmentOf(
+  status: FulfillmentStatus,
+  deliveredAt: OrderFulfillment['deliveredAt'] = null,
+): OrderFulfillment {
   return {
     orderId: ORDER_ID,
     status,
@@ -61,6 +73,7 @@ function fulfillmentOf(status: FulfillmentStatus): OrderFulfillment {
     updatedByStaffId: 'alice',
     updatedByStaffName: 'Alice',
     readyAt: null,
+    deliveredAt,
   }
 }
 
@@ -272,12 +285,102 @@ describe('when the write is refused', () => {
   })
 })
 
-describe('the preparation timer on a card', () => {
-  it('is running on a pending, unpaid order that nobody has touched', () => {
-    renderQueue()
+describe('the elapsed timer is on every card, in every column', () => {
+  const elapsed = () => within(card()).getByTestId('order-elapsed')
 
-    const readout = within(card()).getByTestId('preparation-time')
-    expect(readout.getAttribute('data-running')).toBe('true')
-    expect(readout.textContent).toContain('Prep time')
+  it('runs on a pending, unpaid order that nobody has touched', () => {
+    renderQueue()
+    expect(columnOf()).toBe('pending')
+    expect(elapsed().getAttribute('data-running')).toBe('true')
+  })
+
+  it('runs on a preparing order', () => {
+    renderQueue()
+    listenerReports('preparing')
+    expect(columnOf()).toBe('preparing')
+    expect(elapsed().getAttribute('data-running')).toBe('true')
+  })
+
+  it('KEEPS running on a ready order, which is the change', () => {
+    // The order is made but nobody has handed it over, so the customer is still waiting and
+    // the board must keep saying so.
+    renderQueue()
+    listenerReports('ready')
+    expect(columnOf()).toBe('ready')
+    expect(elapsed().getAttribute('data-running')).toBe('true')
+  })
+
+  it('states it at reading size, above the action that ends the wait', () => {
+    // Prominence is the requirement: this is what a kitchen scans a column for.
+    renderQueue()
+    expect(elapsed().className).toContain('text-base')
+
+    const cardText = card().textContent ?? ''
+    expect(cardText.indexOf('0:00')).toBeLessThan(cardText.indexOf('Start preparing'))
+  })
+
+  it('leaves the board once delivered, taking its frozen duration to the Orders page', () => {
+    // The board is what still needs doing. A delivered order's final duration is shown
+    // wherever delivered orders appear — see OrderElapsedTime.test.tsx and the order detail.
+    renderQueue()
+    listenerReports('delivered')
+    expect(screen.queryByTestId('queue-card')).toBeNull()
+    expect(screen.getByTestId('queue-empty')).not.toBeNull()
+  })
+})
+
+describe('rapid transitions do not regress the responsiveness fix', () => {
+  it('walks pending to delivered without ever waiting for an acknowledgement', async () => {
+    // Every write is left open. The board must stay usable the whole way down.
+    const open: Array<() => void> = []
+    setFulfillmentMock.mockImplementation(() => {
+      const held = deferred()
+      open.push(held.resolve)
+      return held.promise
+    })
+
+    const { user } = renderQueue()
+
+    await user.click(advanceButton())
+    listenerReports('preparing')
+    expect((advanceButton() as HTMLButtonElement).disabled).toBe(false)
+
+    await user.click(advanceButton())
+    listenerReports('ready')
+    expect((advanceButton() as HTMLButtonElement).disabled).toBe(false)
+
+    await user.click(advanceButton())
+    listenerReports('delivered')
+
+    expect(setFulfillmentMock).toHaveBeenCalledTimes(3)
+    expect(setFulfillmentMock.mock.calls.map((call) => call[1].to)).toEqual([
+      'preparing',
+      'ready',
+      'delivered',
+    ])
+    // Each step was sent from the state the board was actually showing, so no two writes
+    // describe the same move.
+    expect(setFulfillmentMock.mock.calls.map((call) => call[1].from)).toEqual([
+      'pending',
+      'preparing',
+      'ready',
+    ])
+    expect(screen.queryByTestId('queue-card')).toBeNull()
+
+    for (const resolve of open) resolve()
+  })
+
+  it('still refuses to send the same step twice however fast it is pressed', async () => {
+    const held = deferred()
+    setFulfillmentMock.mockReturnValue(held.promise)
+
+    const { user } = renderQueue()
+    const button = advanceButton()
+    await user.click(button)
+    await user.click(button)
+    await user.click(button)
+
+    expect(setFulfillmentMock).toHaveBeenCalledTimes(1)
+    held.resolve()
   })
 })

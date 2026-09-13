@@ -13,6 +13,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { createMenuItem, deleteMenuItem, updateMenuItem } from '@/features/menu/menu-api'
 import type { Cart } from '@/features/pos/cart'
+import { lineKeyOf } from '@/features/menu/modifiers'
+import {
+  createModifierGroup,
+  deleteModifierGroup,
+  updateModifierGroup,
+} from '@/features/menu/menu-api'
+import { addToCart, EMPTY_CART } from '@/features/pos/cart'
 import type { FulfillmentStatus } from '@/features/pos/fulfillment'
 import {
   correctFulfillment,
@@ -46,10 +53,23 @@ let staff: TestAccount
 
 /** A cart of two lines: RM 12.50 x2 and RM 6.90 x1 = RM 31.90. */
 const CART: Cart = [
-  { menuItemId: 'item-flat-white', name: 'Flat White', unitPrice: 1250, quantity: 2 },
-  { menuItemId: 'item-croissant', name: 'Croissant', unitPrice: 690, quantity: 1 },
+  cartLine('item-flat-white', 'Flat White', 1250, 2),
+  cartLine('item-croissant', 'Croissant', 690, 1),
 ]
 const CART_TOTAL = 3190
+
+/** A line with no customisation, built the way addToCart would build it. */
+function cartLine(menuItemId: string, name: string, unitPrice: number, quantity: number) {
+  return {
+    lineId: lineKeyOf({ menuItemId, modifiers: [] }),
+    menuItemId,
+    name,
+    basePrice: unitPrice,
+    unitPrice,
+    modifiers: [],
+    quantity,
+  }
+}
 
 const DINE_IN = { orderType: 'dine_in' as const, tableNumber: '5' }
 const TAKEAWAY = { orderType: 'takeaway' as const, tableNumber: '' }
@@ -370,14 +390,20 @@ describe('setFulfillment moves an order and journals every step', () => {
     ).rejects.toThrow()
   })
 
-  // ---- Preparation timing -------------------------------------------------
+  // ---- Order timing ---------------------------------------------------------
   // The app's own write path, against the real rules. The clock starts at the ORDER's
-  // createdAt, so what is checked here is the finish — and that a fulfilment step never
-  // touches the order document the start lives on.
+  // createdAt and stops at the HANDOVER, so what is checked here is `deliveredAt` — and
+  // that a fulfilment step never touches the order document the start lives on.
 
   async function finishOf(orderId: string) {
     const snapshot = await getDoc(doc(db, 'orderFulfillment', orderId))
     return snapshot.exists() ? (snapshot.get('readyAt') ?? null) : null
+  }
+
+  /** The handover — the one stamp the elapsed duration is measured to. */
+  async function handoverOf(orderId: string) {
+    const snapshot = await getDoc(doc(db, 'orderFulfillment', orderId))
+    return snapshot.exists() ? (snapshot.get('deliveredAt') ?? null) : null
   }
 
   async function createdAtOf(orderId: string) {
@@ -476,13 +502,56 @@ describe('setFulfillment moves an order and journals every step', () => {
     expect(await finishOf(orderId)).toBeNull()
   })
 
+  it('does not stamp a handover on any step short of delivery', async () => {
+    const orderId = await placeOrder()
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+    expect(await handoverOf(orderId)).toBeNull()
+
+    await advance(orderId, 'preparing', 'ready')
+    // Ready is not the end of the wait: the customer still does not have the order.
+    expect(await handoverOf(orderId)).toBeNull()
+    expect(await finishOf(orderId)).not.toBeNull()
+  })
+
+  it('stamps the handover on delivery, and measures the wait from the order', async () => {
+    const orderId = await placeOrder()
+    const created = await createdAtOf(orderId)
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+    await advance(orderId, 'preparing', 'ready')
+    await advance(orderId, 'ready', 'delivered')
+
+    const deliveredAt = await handoverOf(orderId)
+    expect(deliveredAt).not.toBeNull()
+    expect(deliveredAt.toMillis()).toBeGreaterThanOrEqual(created.toMillis())
+    // Orders are immutable: the start cannot have moved.
+    expect((await createdAtOf(orderId)).isEqual(created)).toBe(true)
+  })
+
+  it('clears the handover when an admin corrects delivered back to ready', async () => {
+    const orderId = await placeOrder()
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+    await advance(orderId, 'preparing', 'ready')
+    await advance(orderId, 'ready', 'delivered')
+    const readyBefore = await finishOf(orderId)
+
+    await signInAs(admin)
+    await correctFulfillment(orderId, {
+      from: 'delivered',
+      to: 'ready',
+      user: asUser(admin),
+      staff: asOperator(admin),
+    })
+
+    // The clock runs again; the kitchen's own finish is untouched by the correction.
+    expect(await handoverOf(orderId)).toBeNull()
+    expect((await finishOf(orderId)).isEqual(readyBefore)).toBe(true)
+  })
+
   it('is unaffected by payment, taken at any point in the workflow', async () => {
     const orderId = await placeOrder()
     const created = await createdAtOf(orderId)
 
     await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
-
-    // The customer pays mid-preparation, which is the normal case for a pay-later stall.
     await recordPayment(orderId, {
       method: 'cash',
       amount: CART_TOTAL,
@@ -490,14 +559,13 @@ describe('setFulfillment moves an order and journals every step', () => {
       user: asUser(staff),
       staff: asOperator(staff),
     })
-
     await advance(orderId, 'preparing', 'ready')
+    await advance(orderId, 'ready', 'delivered')
 
     // Neither end of the window moved, and the payment lives in its own document.
     expect((await createdAtOf(orderId)).isEqual(created)).toBe(true)
-    expect(await finishOf(orderId)).not.toBeNull()
-    const payment = await getDoc(doc(db, 'orderPayments', orderId))
-    expect(payment.exists()).toBe(true)
+    expect(await handoverOf(orderId)).not.toBeNull()
+    expect((await getDoc(doc(db, 'orderPayments', orderId))).exists()).toBe(true)
   })
 
   it('lets a second step be taken before the first is acknowledged', async () => {
@@ -522,8 +590,10 @@ describe('setFulfillment moves an order and journals every step', () => {
 
     const record = await getDoc(doc(db, 'orderFulfillment', orderId))
     expect(record.get('status')).toBe('delivered')
-    // The finish recorded by the first write survived the second, which said nothing about it.
+    // The finish recorded by the first write survived the second, which said nothing about
+    // it, and the second recorded the handover.
     expect(record.get('readyAt')).not.toBeNull()
+    expect(record.get('deliveredAt')).not.toBeNull()
   })
 })
 
@@ -851,5 +921,213 @@ describe('the staff roster deactivates rather than deletes', () => {
         staff: { id, name: 'Someone Else' },
       }),
     ).rejects.toThrow()
+  })
+})
+
+describe('menu item customisation, through the app’s own writes', () => {
+  const CHICKEN = 'item-chicken-chop-rice'
+
+  const VEG = {
+    itemId: CHICKEN,
+    name: 'Vegetables',
+    selection: 'single' as const,
+    required: true,
+    sortOrder: 0,
+    active: true,
+    options: [
+      { id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: true },
+      { id: 'veg-none', name: 'No vegetables', priceAdjustment: 0, active: true },
+    ],
+  }
+
+  const ADDONS = {
+    itemId: CHICKEN,
+    name: 'Add-ons',
+    selection: 'multiple' as const,
+    required: false,
+    sortOrder: 1,
+    active: true,
+    options: [{ id: 'add-chicken', name: 'Extra chicken', priceAdjustment: 300, active: true }],
+  }
+
+  beforeEach(async () => {
+    await seed(async (context) => {
+      await setDoc(doc(context.firestore(), 'menuItems', CHICKEN), {
+        name: 'Chicken Chop Rice',
+        categoryId: 'cat-mains',
+        price: 800,
+        sortOrder: 1,
+        active: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    })
+  })
+
+  /** A line as the till would build it, through the real cart. */
+  function configured(modifiers: Parameters<typeof lineKeyOf>[0]['modifiers']) {
+    return addToCart(EMPTY_CART, {
+      menuItemId: CHICKEN,
+      name: 'Chicken Chop Rice',
+      basePrice: 800,
+      modifiers,
+    })
+  }
+
+  const NO_VEG = {
+    groupId: 'g-veg',
+    groupName: 'Vegetables',
+    optionId: 'veg-none',
+    optionName: 'No vegetables',
+    priceAdjustment: 0,
+  }
+  const EXTRA_CHICKEN = {
+    groupId: 'g-addons',
+    groupName: 'Add-ons',
+    optionId: 'add-chicken',
+    optionName: 'Extra chicken',
+    priceAdjustment: 300,
+  }
+
+  it('lets an admin create and update a group, and refuses a staff account both', async () => {
+    await signInAs(admin)
+    const groupId = await createModifierGroup(VEG)
+    expect((await getDoc(doc(db, 'modifierGroups', groupId))).get('name')).toBe('Vegetables')
+
+    await updateModifierGroup(groupId, { ...VEG, name: 'Veg' })
+    expect((await getDoc(doc(db, 'modifierGroups', groupId))).get('name')).toBe('Veg')
+
+    await signInAs(staff)
+    await expect(createModifierGroup(ADDONS)).rejects.toThrow()
+    await expect(updateModifierGroup(groupId, { ...VEG, name: 'Hacked' })).rejects.toThrow()
+    // ...and the till can still read what it needs to take an order.
+    expect((await getDoc(doc(db, 'modifierGroups', groupId))).get('name')).toBe('Veg')
+  })
+
+  it('writes the chosen options onto the order line, with the price they produced', async () => {
+    await signInAs(staff)
+    const created = await createOrder({
+      cart: configured([NO_VEG, EXTRA_CHICKEN]),
+      placement: TAKEAWAY,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+
+    const stored = await getDoc(doc(db, 'orders', created.id))
+    const lines = stored.get('lines') as Record<string, unknown>[]
+    expect(lines).toHaveLength(1)
+    expect(lines[0]?.basePrice).toBe(800)
+    expect(lines[0]?.unitPrice).toBe(1100)
+    expect(lines[0]?.modifiers).toHaveLength(2)
+    expect(stored.get('total')).toBe(1100)
+  })
+
+  it('keeps two configurations of the same item as two lines, and merges identical ones', async () => {
+    await signInAs(staff)
+    let cart = configured([NO_VEG])
+    cart = addToCart(cart, {
+      menuItemId: CHICKEN,
+      name: 'Chicken Chop Rice',
+      basePrice: 800,
+      modifiers: [NO_VEG],
+    })
+    cart = addToCart(cart, {
+      menuItemId: CHICKEN,
+      name: 'Chicken Chop Rice',
+      basePrice: 800,
+      modifiers: [EXTRA_CHICKEN],
+    })
+
+    const created = await createOrder({
+      cart,
+      placement: TAKEAWAY,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+
+    const lines = (await getDoc(doc(db, 'orders', created.id))).get('lines') as Record<
+      string,
+      unknown
+    >[]
+    // Two lines, not three and not one: 2 × plain-with-no-veg, 1 × with extra chicken.
+    expect(lines).toHaveLength(2)
+    expect(lines.map((line) => line.quantity)).toEqual([2, 1])
+    expect(lines.map((line) => line.unitPrice)).toEqual([800, 1100])
+  })
+
+  it('leaves a placed order alone when the admin edits the configuration afterwards', async () => {
+    await signInAs(admin)
+    const groupId = await createModifierGroup(ADDONS)
+
+    await signInAs(staff)
+    const created = await createOrder({
+      cart: configured([{ ...EXTRA_CHICKEN, groupId }]),
+      placement: TAKEAWAY,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+    const before = (await getDoc(doc(db, 'orders', created.id))).get('lines')
+
+    // The admin renames the option, triples its price, deactivates it, then deletes the
+    // whole group — every way the configuration can move out from under a past sale.
+    await signInAs(admin)
+    await updateModifierGroup(groupId, {
+      ...ADDONS,
+      options: [{ id: 'add-chicken', name: 'Extra beef', priceAdjustment: 900, active: false }],
+    })
+    await deleteModifierGroup(groupId)
+    expect((await getDoc(doc(db, 'modifierGroups', groupId))).exists()).toBe(false)
+
+    const after = (await getDoc(doc(db, 'orders', created.id))).get('lines') as Record<
+      string,
+      unknown
+    >[]
+    // Byte for byte what was sold: the receipt still reads "Extra chicken +RM3.00".
+    expect(after).toEqual(before)
+    const modifiers = after[0]?.modifiers as Record<string, unknown>[]
+    expect(modifiers[0]?.optionName).toBe('Extra chicken')
+    expect(modifiers[0]?.priceAdjustment).toBe(300)
+    expect(after[0]?.unitPrice).toBe(1100)
+  })
+
+  it('takes an item’s groups with it when the item is deleted', async () => {
+    await signInAs(admin)
+    const groupId = await createModifierGroup(VEG)
+    const otherItemGroup = await createModifierGroup({ ...ADDONS, itemId: 'item-flat-white' })
+
+    await deleteMenuItem(CHICKEN)
+
+    expect((await getDoc(doc(db, 'modifierGroups', groupId))).exists()).toBe(false)
+    // Another item's configuration is untouched.
+    expect((await getDoc(doc(db, 'modifierGroups', otherItemGroup))).exists()).toBe(true)
+  })
+
+  it('does not disturb payment or fulfilment on an order that carries modifiers', async () => {
+    await signInAs(staff)
+    const created = await createOrder({
+      cart: configured([EXTRA_CHICKEN]),
+      placement: TAKEAWAY,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+
+    await recordPayment(created.id, {
+      method: 'cash',
+      amount: 1100,
+      cashTendered: 2000,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+    await setFulfillment(created.id, {
+      from: 'pending',
+      to: 'preparing',
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+
+    const payment = await getDoc(doc(db, 'orderPayments', created.id))
+    expect(payment.get('amount')).toBe(1100)
+    expect(payment.get('changeGiven')).toBe(900)
+    expect((await getDoc(doc(db, 'orderFulfillment', created.id))).get('status')).toBe('preparing')
   })
 })

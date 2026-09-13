@@ -82,9 +82,15 @@ export function Sidebar() {
               'group/nav relative flex h-touch items-center gap-3 rounded-lg text-base font-medium transition-colors',
               'hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
               collapsed ? 'w-touch justify-center px-0' : 'px-3',
+              // The accent bar is the addition: the filled pill alone reads as "a button",
+              // and at a glance in a busy kitchen it was not obvious WHICH section was
+              // open. A bar hard against the sidebar edge is the one shape nothing else in
+              // this column uses. It is drawn with a pseudo-element so it costs no node and
+              // survives the collapsed width, where the pill shrinks to a square.
+              'before:absolute before:top-1/2 before:-left-3 before:h-6 before:w-1 before:-translate-y-1/2 before:rounded-r-full before:transition-colors',
               isActive
-                ? 'bg-primary text-primary-foreground shadow-xs hover:bg-primary/90'
-                : 'text-muted-foreground hover:text-foreground',
+                ? 'bg-primary text-primary-foreground shadow-xs before:bg-primary hover:bg-primary/90'
+                : 'text-muted-foreground before:bg-transparent hover:text-foreground',
             )
           }
         >

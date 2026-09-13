@@ -17,7 +17,16 @@ const order = (over: Partial<Order> = {}): Order => ({
   id: 'o1',
   number: 1,
   businessDate: '2026-09-12',
-  lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 1 }],
+  lines: [
+    {
+      menuItemId: 'i1',
+      name: 'Flat White',
+      basePrice: 1250,
+      unitPrice: 1250,
+      modifiers: [],
+      quantity: 1,
+    },
+  ],
   total: 1250,
   orderType: 'takeaway',
   tableNumber: null,
@@ -41,6 +50,7 @@ const fulfillment = (orderId: string, status: FulfillmentStatus): OrderFulfillme
   updatedByStaffId: 'bob',
   updatedByStaffName: 'Bob',
   readyAt: null,
+  deliveredAt: null,
 })
 
 const payment = (orderId: string, amount: number): OrderPayment => ({

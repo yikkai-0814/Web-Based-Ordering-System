@@ -103,9 +103,13 @@ const transition = (from: string, to: string, orderId: string, uid = STAFF_UID) 
  * compare against `request.time`.
  */
 function preparationFor(from: string, to: string, prior: { readyAt: unknown }) {
-  if (to === 'ready' && from === 'preparing') return { readyAt: serverTimestamp() }
-  if (to === 'ready' || to === 'delivered') return { readyAt: prior.readyAt }
-  return { readyAt: null }
+  // The handover stops the clock and has no "unchanged" case: an order is delivered or not.
+  const deliveredAt = to === 'delivered' ? serverTimestamp() : null
+  if (to === 'ready' && from === 'preparing') {
+    return { readyAt: serverTimestamp(), deliveredAt }
+  }
+  if (to === 'ready' || to === 'delivered') return { readyAt: prior.readyAt, deliveredAt }
+  return { readyAt: null, deliveredAt }
 }
 
 /** `step()` built against what the document currently holds — see preparationFor. */
@@ -205,6 +209,7 @@ async function seed() {
     await setDoc(doc(db, 'orderFulfillment', 'today-1'), {
       ...step('preparing', 'today-1'),
       readyAt: null,
+      deliveredAt: null,
     })
   })
 }

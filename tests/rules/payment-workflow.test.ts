@@ -128,7 +128,16 @@ async function seed() {
 const orderDoc = (over: Record<string, unknown> = {}) => ({
   number: 1,
   businessDate: DATE,
-  lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: TOTAL, quantity: 1 }],
+  lines: [
+    {
+      menuItemId: 'i1',
+      name: 'Flat White',
+      basePrice: TOTAL,
+      unitPrice: TOTAL,
+      modifiers: [],
+      quantity: 1,
+    },
+  ],
   // Phase 7: every order records how it is served. Dine-in carries a table number;
   // a takeaway must not carry the key at all.
   orderType: 'dine_in',
@@ -234,9 +243,13 @@ const stepTrail = (
  * compare against `request.time`.
  */
 function preparationFor(from: string, to: string, prior: { readyAt: unknown }) {
-  if (to === 'ready' && from === 'preparing') return { readyAt: serverTimestamp() }
-  if (to === 'ready' || to === 'delivered') return { readyAt: prior.readyAt }
-  return { readyAt: null }
+  // The handover stops the clock and has no "unchanged" case: an order is delivered or not.
+  const deliveredAt = to === 'delivered' ? serverTimestamp() : null
+  if (to === 'ready' && from === 'preparing') {
+    return { readyAt: serverTimestamp(), deliveredAt }
+  }
+  if (to === 'ready' || to === 'delivered') return { readyAt: prior.readyAt, deliveredAt }
+  return { readyAt: null, deliveredAt }
 }
 
 /**

@@ -8,14 +8,36 @@
  *
  * All amounts are whole sen (see src/lib/money.ts). Because quantities are integers and
  * prices are integers, every total here is exact; there is no rounding step to get wrong.
+ *
+ * **A line is identified by its configuration, not by its menu item.** One order can hold
+ * two of the same dish made differently, so every function here keys on `lineId` — the
+ * item plus exactly which options were chosen (see `lineKeyOf`). Adding the same item with
+ * the same choices increments an existing line; adding it with different choices starts a
+ * new one, and that distinction can never be collapsed.
  */
 
+import {
+  lineKeyOf,
+  modifiersTotal,
+  unitPriceWith,
+  type SelectedModifier,
+} from '@/features/menu/modifiers'
+
 export interface CartLine {
+  /**
+   * Identity of the configured line — see `lineKeyOf`. Derived, never entered, and stable:
+   * the same item with the same options always produces the same value.
+   */
+  lineId: string
   menuItemId: string
   /** Snapshotted at the moment the line was added — see addToCart. */
   name: string
-  /** Whole sen, snapshotted at the moment the line was added. */
+  /** The item's own price, whole sen, snapshotted. Excludes the options. */
+  basePrice: number
+  /** Whole sen: `basePrice` plus every chosen adjustment. What the customer is charged. */
   unitPrice: number
+  /** The chosen options, snapshotted. Empty for an item with no customisation. */
+  modifiers: SelectedModifier[]
   quantity: number
 }
 
@@ -32,24 +54,34 @@ export const MAX_LINE_QUANTITY = 999
 export interface AddToCartItem {
   menuItemId: string
   name: string
-  unitPrice: number
+  /** The item's own price. The options are added on top; see `unitPriceWith`. */
+  basePrice: number
+  /** Omit for an item with no customisation. */
+  modifiers?: readonly SelectedModifier[]
 }
 
 /**
- * Adds one of an item, or increments the existing line for it.
+ * Adds one of an item **as configured**, or increments the matching line.
  *
- * The line keeps the `name` and `unitPrice` captured the first time the item was added. If
- * an admin edits the price on another device while a customer is mid-order, the cart holds
- * the figure the customer was actually quoted — a receipt should never disagree with what
- * was said at the counter.
+ * "Matching" means the same item with exactly the same options, which is what `lineKeyOf`
+ * decides. Two Chicken Chop Rice with no vegetables become one line of two; one with no
+ * vegetables and one with extra egg stay two lines, because the customer ordered two
+ * different things and the kitchen has to be told so.
+ *
+ * The line keeps the `name`, `basePrice` and option adjustments captured the first time it
+ * was added. If an admin edits a price or renames an option on another device while a
+ * customer is mid-order, the cart holds the figures the customer was actually quoted — a
+ * receipt should never disagree with what was said at the counter.
  */
 export function addToCart(cart: Cart, item: AddToCartItem): Cart {
-  const existing = cart.find((line) => line.menuItemId === item.menuItemId)
+  const modifiers = [...(item.modifiers ?? [])]
+  const lineId = lineKeyOf({ menuItemId: item.menuItemId, modifiers })
+  const existing = cart.find((line) => line.lineId === lineId)
 
   if (existing) {
     if (existing.quantity >= MAX_LINE_QUANTITY) return cart
     return cart.map((line) =>
-      line.menuItemId === item.menuItemId ? { ...line, quantity: line.quantity + 1 } : line,
+      line.lineId === lineId ? { ...line, quantity: line.quantity + 1 } : line,
     )
   }
 
@@ -58,44 +90,52 @@ export function addToCart(cart: Cart, item: AddToCartItem): Cart {
   return [
     ...cart,
     {
+      lineId,
       menuItemId: item.menuItemId,
       name: item.name,
-      unitPrice: item.unitPrice,
+      basePrice: item.basePrice,
+      unitPrice: unitPriceWith(item.basePrice, modifiers),
+      modifiers,
       quantity: 1,
     },
   ]
 }
 
 /** Sets an explicit quantity. Zero or less removes the line entirely. */
-export function setQuantity(cart: Cart, menuItemId: string, quantity: number): Cart {
-  if (quantity <= 0) return removeLine(cart, menuItemId)
+export function setQuantity(cart: Cart, lineId: string, quantity: number): Cart {
+  if (quantity <= 0) return removeLine(cart, lineId)
   const capped = Math.min(Math.floor(quantity), MAX_LINE_QUANTITY)
-  return cart.map((line) => (line.menuItemId === menuItemId ? { ...line, quantity: capped } : line))
+  return cart.map((line) => (line.lineId === lineId ? { ...line, quantity: capped } : line))
 }
 
-export function incrementLine(cart: Cart, menuItemId: string): Cart {
-  const line = cart.find((candidate) => candidate.menuItemId === menuItemId)
+export function incrementLine(cart: Cart, lineId: string): Cart {
+  const line = cart.find((candidate) => candidate.lineId === lineId)
   if (!line) return cart
-  return setQuantity(cart, menuItemId, line.quantity + 1)
+  return setQuantity(cart, lineId, line.quantity + 1)
 }
 
 /** Decrements by one; dropping to zero removes the line, which is what a till should do. */
-export function decrementLine(cart: Cart, menuItemId: string): Cart {
-  const line = cart.find((candidate) => candidate.menuItemId === menuItemId)
+export function decrementLine(cart: Cart, lineId: string): Cart {
+  const line = cart.find((candidate) => candidate.lineId === lineId)
   if (!line) return cart
-  return setQuantity(cart, menuItemId, line.quantity - 1)
+  return setQuantity(cart, lineId, line.quantity - 1)
 }
 
-export function removeLine(cart: Cart, menuItemId: string): Cart {
-  return cart.filter((line) => line.menuItemId !== menuItemId)
+export function removeLine(cart: Cart, lineId: string): Cart {
+  return cart.filter((line) => line.lineId !== lineId)
 }
 
 export function clearCart(): Cart {
   return EMPTY_CART
 }
 
-/** Whole sen. Integer maths throughout, so this is exact at any cart size. */
-export function lineTotal(line: CartLine): number {
+/**
+ * Whole sen. Integer maths throughout, so this is exact at any cart size.
+ *
+ * Typed on the two fields it uses rather than on `CartLine`, so an order's line — the same
+ * arithmetic, a different snapshot — can be totalled by the same function.
+ */
+export function lineTotal(line: { unitPrice: number; quantity: number }): number {
   return line.unitPrice * line.quantity
 }
 
@@ -141,8 +181,16 @@ export function validateCart(cart: Cart): CartValidation {
     if (!Number.isInteger(line.unitPrice) || line.unitPrice < 0) {
       return { ok: false, error: `"${line.name}" has an invalid price.` }
     }
+    if (!Number.isInteger(line.basePrice) || line.basePrice < 0) {
+      return { ok: false, error: `"${line.name}" has an invalid price.` }
+    }
     if (!Number.isInteger(line.quantity) || line.quantity < 1) {
       return { ok: false, error: `"${line.name}" has an invalid quantity.` }
+    }
+    // The charged price must be exactly what the recorded options add up to. A line that
+    // disagreed with its own snapshot would produce a receipt the customer could not check.
+    if (line.unitPrice !== Math.max(0, line.basePrice + modifiersTotal(line.modifiers))) {
+      return { ok: false, error: `"${line.name}" has an inconsistent price.` }
     }
   }
   return { ok: true }

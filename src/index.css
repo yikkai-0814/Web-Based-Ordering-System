@@ -40,6 +40,12 @@
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.99 0 0);
+  /* Settled, not celebratory. The one state that means "finished and nothing is owed", so
+     it has to be distinguishable from the amber of work-in-progress and from plain grey —
+     which is what it used to share with "pending". Desaturated well below the destructive
+     red: a completed order should read as quiet, not as an alert. */
+  --success: oklch(0.52 0.11 155);
+  --success-foreground: oklch(0.99 0.01 155);
 
   --sidebar: oklch(0.995 0.002 75);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -97,6 +103,10 @@
   /* Lifted off the light theme's red so it reads as urgent rather than muddy on a dark card. */
   --destructive: oklch(0.68 0.19 25);
   --destructive-foreground: oklch(0.99 0 0);
+  /* Lifted for the same reason: at the light theme's lightness this green disappears into a
+     dark card, and a tinted badge needs the text to carry, not the background. */
+  --success: oklch(0.76 0.13 158);
+  --success-foreground: oklch(0.2 0.03 158);
 
   /* The sidebar sits beside the page rather than on it, so it is a step darker than a card
      — the same relationship the light theme draws, in the other direction. */
@@ -135,6 +145,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);

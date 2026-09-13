@@ -15,7 +15,7 @@ import {
   type FulfillmentStatus,
 } from '@/features/pos/fulfillment'
 import { setFulfillment } from '@/features/pos/fulfillment-api'
-import { PreparationTime } from '@/features/pos/PreparationTime'
+import { OrderElapsedTime } from '@/features/pos/OrderElapsedTime'
 import { ORDER_TYPE_LABELS } from '@/features/pos/order-type'
 import { withManagerAuthorization } from '@/features/pos/manager-authorization'
 import { recordPayment } from '@/features/pos/payment-api'
@@ -37,6 +37,7 @@ import {
 import { useOrderDetail } from '@/features/pos/useOrderDetail'
 import { voidOrder } from '@/features/pos/void-api'
 import { VoidOrderDialog, type ManagerCredentials } from '@/features/pos/VoidOrderDialog'
+import { lineKeyOf } from '@/features/menu/modifiers'
 import { formatMoney } from '@/lib/money'
 
 /**
@@ -296,12 +297,12 @@ export function OrderDetailPage() {
                 </dd>
               </div>
             )}
-            {/* Creation to ready: live while the order is outstanding, then fixed and kept
-                for the rest of its life. Payment has no bearing on it. */}
+            {/* Creation to delivery: live while the customer is still waiting, then fixed
+                and kept for the rest of the order's life. Payment has no bearing on it. */}
             <div className="flex items-center gap-3">
-              <dt className="text-muted-foreground">Preparation</dt>
+              <dt className="text-muted-foreground">Time taken</dt>
               <dd className="ml-auto">
-                <PreparationTime
+                <OrderElapsedTime
                   order={order}
                   fulfillment={fulfillmentRecord}
                   className="text-sm text-foreground"
@@ -325,17 +326,44 @@ export function OrderDetailPage() {
           <ul className="divide-y">
             {order.lines.map((line) => (
               <li
-                key={line.menuItemId}
-                className="flex items-baseline gap-3 py-2"
+                // The item plus exactly which options were chosen. An order may hold the
+                // same dish made two ways, so the menu item id alone is not unique here —
+                // and this is the same identity the cart merged on, not an index.
+                key={lineKeyOf(line)}
+                className="py-2"
                 data-testid="receipt-line"
                 data-item-name={line.name}
               >
-                <span className="w-8 tabular-nums text-muted-foreground">{line.quantity}×</span>
-                <span className="min-w-0 flex-1 truncate">{line.name}</span>
-                <span className="tabular-nums text-muted-foreground">
-                  {formatMoney(line.unitPrice)}
-                </span>
-                <span className="w-24 text-right tabular-nums">{formatMoney(lineTotal(line))}</span>
+                <div className="flex items-baseline gap-3">
+                  <span className="w-8 tabular-nums text-muted-foreground">{line.quantity}×</span>
+                  <span className="min-w-0 flex-1 truncate">{line.name}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {formatMoney(line.unitPrice)}
+                  </span>
+                  <span className="w-24 text-right tabular-nums">
+                    {formatMoney(lineTotal(line))}
+                  </span>
+                </div>
+                {/* What the customer actually ordered, read from the line's own snapshot —
+                    still correct after the option has been renamed, repriced or removed. */}
+                {line.modifiers.length > 0 && (
+                  <ul className="mt-0.5 ml-11 space-y-0.5" data-testid="receipt-line-modifiers">
+                    {line.modifiers.map((modifier) => (
+                      <li
+                        key={modifier.optionId}
+                        className="flex items-baseline gap-2 text-xs text-muted-foreground"
+                      >
+                        <span className="min-w-0 flex-1 truncate">{modifier.optionName}</span>
+                        {modifier.priceAdjustment !== 0 && (
+                          <span className="tabular-nums">
+                            {modifier.priceAdjustment > 0 ? '+' : '−'}
+                            {formatMoney(Math.abs(modifier.priceAdjustment))}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             ))}
           </ul>

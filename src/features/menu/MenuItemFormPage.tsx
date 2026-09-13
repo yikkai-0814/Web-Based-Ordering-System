@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { createMenuItem, updateMenuItem, type CostInput } from '@/features/menu/menu-api'
+import { ModifierGroupsEditor } from '@/features/menu/ModifierGroupsEditor'
 import { useItemCosts } from '@/features/menu/useItemCosts'
 import {
   ITEM_DESCRIPTION_MAX,
@@ -183,133 +184,154 @@ function MenuItemForm({
   }
 
   return (
-    <Card className="w-full max-w-xl">
-      <CardHeader>
-        <CardTitle className="text-xl">{isEditing ? 'Edit item' : 'New item'}</CardTitle>
-        <CardDescription>
-          Prices are entered in {CURRENCY_PREFIX} and stored to the sen.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={(event) => void handleSubmit(event)} noValidate className="grid gap-4">
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle aria-hidden="true" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+    <div className="space-y-6">
+      <Card className="w-full max-w-xl">
+        <CardHeader>
+          <CardTitle className="text-xl">{isEditing ? 'Edit item' : 'New item'}</CardTitle>
+          <CardDescription>
+            Prices are entered in {CURRENCY_PREFIX} and stored to the sen.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={(event) => void handleSubmit(event)} noValidate className="grid gap-4">
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle aria-hidden="true" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
 
-          <div className="grid gap-2">
-            <Label htmlFor="name">Name</Label>
-            <Input
-              id="name"
-              className="h-touch text-base"
-              value={name}
-              maxLength={ITEM_NAME_MAX}
-              onChange={(event) => setName(event.target.value)}
-              disabled={pending}
-              autoFocus
-            />
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                className="h-touch text-base"
+                value={name}
+                maxLength={ITEM_NAME_MAX}
+                onChange={(event) => setName(event.target.value)}
+                disabled={pending}
+                autoFocus
+              />
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="description">Description (optional)</Label>
-            <Input
-              id="description"
-              className="h-touch text-base"
-              value={description}
-              maxLength={ITEM_DESCRIPTION_MAX}
-              onChange={(event) => setDescription(event.target.value)}
-              disabled={pending}
-            />
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="description">Description (optional)</Label>
+              <Input
+                id="description"
+                className="h-touch text-base"
+                value={description}
+                maxLength={ITEM_DESCRIPTION_MAX}
+                onChange={(event) => setDescription(event.target.value)}
+                disabled={pending}
+              />
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="categoryId">Category</Label>
-            {/* A native select: on a touch screen the OS picker beats a custom listbox. */}
-            <select
-              id="categoryId"
-              className={SELECT_CLASS}
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
-              disabled={pending}
-            >
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                  {category.active ? '' : ' (hidden)'}
-                </option>
-              ))}
-            </select>
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="categoryId">Category</Label>
+              {/* A native select: on a touch screen the OS picker beats a custom listbox. */}
+              <select
+                id="categoryId"
+                className={SELECT_CLASS}
+                value={categoryId}
+                onChange={(event) => setCategoryId(event.target.value)}
+                disabled={pending}
+              >
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                    {category.active ? '' : ' (hidden)'}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="price">Price ({CURRENCY_PREFIX})</Label>
-            <Input
-              id="price"
-              inputMode="decimal"
-              placeholder="12.50"
-              className="h-touch text-base"
-              value={priceText}
-              onChange={(event) => setPriceText(event.target.value)}
-              disabled={pending}
-            />
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="price">Price ({CURRENCY_PREFIX})</Label>
+              <Input
+                id="price"
+                inputMode="decimal"
+                placeholder="12.50"
+                className="h-touch text-base"
+                value={priceText}
+                onChange={(event) => setPriceText(event.target.value)}
+                disabled={pending}
+              />
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="cost">Cost ({CURRENCY_PREFIX})</Label>
-            <Input
-              id="cost"
-              inputMode="decimal"
-              placeholder="Leave blank if not recorded"
-              className="h-touch text-base"
-              value={costText}
-              onChange={(event) => setCostText(event.target.value)}
-              disabled={pending}
-            />
-            <p className="text-xs text-muted-foreground">
-              What the café pays for this item. Visible to administrators only — staff accounts
-              cannot read it. Leave blank if you have not recorded it; that is not the same as zero.
-            </p>
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="cost">Cost ({CURRENCY_PREFIX})</Label>
+              <Input
+                id="cost"
+                inputMode="decimal"
+                placeholder="Leave blank if not recorded"
+                className="h-touch text-base"
+                value={costText}
+                onChange={(event) => setCostText(event.target.value)}
+                disabled={pending}
+              />
+              <p className="text-xs text-muted-foreground">
+                What the café pays for this item. Visible to administrators only — staff accounts
+                cannot read it. Leave blank if you have not recorded it; that is not the same as
+                zero.
+              </p>
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="sortOrder">Sort order</Label>
-            <Input
-              id="sortOrder"
-              inputMode="numeric"
-              className="h-touch text-base"
-              value={sortOrder}
-              onChange={(event) => setSortOrder(event.target.value)}
-              disabled={pending}
-            />
-            <p className="text-xs text-muted-foreground">
-              Lower numbers appear first. Items with the same number are sorted by name.
-            </p>
-          </div>
+            <div className="grid gap-2">
+              <Label htmlFor="sortOrder">Sort order</Label>
+              <Input
+                id="sortOrder"
+                inputMode="numeric"
+                className="h-touch text-base"
+                value={sortOrder}
+                onChange={(event) => setSortOrder(event.target.value)}
+                disabled={pending}
+              />
+              <p className="text-xs text-muted-foreground">
+                Lower numbers appear first. Items with the same number are sorted by name.
+              </p>
+            </div>
 
-          <label className="flex items-center gap-3 text-sm">
-            <input
-              id="active"
-              type="checkbox"
-              className="size-5"
-              checked={active}
-              onChange={(event) => setActive(event.target.checked)}
-              disabled={pending}
-            />
-            Available for sale
-          </label>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                id="active"
+                type="checkbox"
+                className="size-5"
+                checked={active}
+                onChange={(event) => setActive(event.target.checked)}
+                disabled={pending}
+              />
+              Available for sale
+            </label>
 
-          <div className="flex gap-3">
-            <Button type="submit" size="lg" className="h-touch text-base" disabled={pending}>
-              {pending ? 'Saving…' : isEditing ? 'Save changes' : 'Create item'}
-            </Button>
-            <Button asChild type="button" variant="outline" size="lg" className="h-touch text-base">
-              <Link to="/menu">Cancel</Link>
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+            <div className="flex gap-3">
+              <Button type="submit" size="lg" className="h-touch text-base" disabled={pending}>
+                {pending ? 'Saving…' : isEditing ? 'Save changes' : 'Create item'}
+              </Button>
+              <Button
+                asChild
+                type="button"
+                variant="outline"
+                size="lg"
+                className="h-touch text-base"
+              >
+                <Link to="/menu">Cancel</Link>
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Only once the item exists: a group is keyed to an item id, and there is none to key
+          it to until the item has been created. Saving first is one extra step on the rarer
+          action, which is better than holding groups in memory and writing them in a second
+          batch that could half-fail. */}
+      {isEditing && itemId ? (
+        <ModifierGroupsEditor itemId={itemId} />
+      ) : (
+        <p className="max-w-xl text-sm text-muted-foreground">
+          Save the item first to add customisation options to it.
+        </p>
+      )}
+    </div>
   )
 }

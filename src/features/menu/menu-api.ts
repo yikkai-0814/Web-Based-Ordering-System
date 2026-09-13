@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore'
 
 import { openingEntryFrom, type OpeningEntry } from '@/features/menu/cost-history'
+import type { SelectionMode } from '@/features/menu/modifiers'
 import { auth, db } from '@/lib/firebase'
 
 /**
@@ -202,9 +203,21 @@ export async function updateMenuItem(
 
 /** Removes the item and its cost together — a stray cost document would outlive its item. */
 export async function deleteMenuItem(id: string): Promise<void> {
+  // Its customisation goes with it. Nothing would ever show an orphaned group again — it is
+  // keyed to an item that no longer exists — and leaving one behind would be a document the
+  // admin can neither see nor remove. Past orders are untouched: their selections are
+  // snapshots and never read this collection.
+  //
+  // Note the limit, which mirrors the one on the cost document: the rules can require that
+  // the cost is gone with `existsAfter`, because there is exactly one of it. A variable
+  // number of groups cannot be expressed that way, so this batch is the guarantee — deleting
+  // an item straight from the Firebase console would still strand its groups.
+  const groupIds = await modifierGroupIdsFor(id)
+
   const batch = writeBatch(db)
   batch.delete(doc(db, 'menuItems', id))
   batch.delete(doc(db, 'menuItemCosts', id))
+  for (const groupId of groupIds) batch.delete(doc(db, 'modifierGroups', groupId))
   await batch.commit()
 }
 
@@ -218,4 +231,100 @@ export async function setMenuItemActive(id: string, active: boolean): Promise<vo
 
 export async function setCategoryActive(id: string, active: boolean): Promise<void> {
   await updateDoc(doc(db, 'categories', id), { active, updatedAt: serverTimestamp() })
+}
+
+/* ---------------------------------------------------------------------------
+ * Menu item customisation
+ *
+ * Groups live in their own top-level `modifierGroups` collection, keyed to a menu item by
+ * `itemId`, rather than in a subcollection under the item. The till needs to know which of
+ * the whole menu's items ask a question before anything is tapped, and one collection-wide
+ * subscription answers that the same way `useMenuItems` already answers what is on sale;
+ * a subcollection would mean a listener per item or a collection-group index for no gain.
+ *
+ * Options are stored as an array inside the group. They are few, always read together, and
+ * never queried on their own, so a second collection would buy nothing and would let a
+ * group and its choices disagree.
+ * ------------------------------------------------------------------------- */
+
+export interface ModifierOptionInput {
+  /** Stable within the group. Snapshotted onto order lines, so it must not be reused. */
+  id: string
+  name: string
+  /** Whole sen. May be 0 ("No egg") and is never a float. */
+  priceAdjustment: number
+  active: boolean
+}
+
+export interface ModifierGroupInput {
+  itemId: string
+  name: string
+  selection: SelectionMode
+  required: boolean
+  sortOrder: number
+  active: boolean
+  options: ModifierOptionInput[]
+}
+
+function modifierGroupFields(input: ModifierGroupInput) {
+  return {
+    itemId: input.itemId,
+    name: input.name.trim(),
+    selection: input.selection,
+    required: input.required,
+    sortOrder: input.sortOrder,
+    active: input.active,
+    options: input.options.map((option) => ({
+      id: option.id,
+      name: option.name.trim(),
+      priceAdjustment: option.priceAdjustment,
+      active: option.active,
+    })),
+  }
+}
+
+export async function createModifierGroup(input: ModifierGroupInput): Promise<string> {
+  const created = await addDoc(collection(db, 'modifierGroups'), {
+    ...modifierGroupFields(input),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+  return created.id
+}
+
+/**
+ * Replaces a group's configuration.
+ *
+ * Editing a name, a price or an option's availability changes what the NEXT customer is
+ * offered and nothing else: every order already placed carries its own snapshot of what was
+ * chosen, so no receipt moves. That is the whole reason selections are copied onto the line.
+ */
+export async function updateModifierGroup(id: string, input: ModifierGroupInput): Promise<void> {
+  await updateDoc(doc(db, 'modifierGroups', id), {
+    ...modifierGroupFields(input),
+    updatedAt: serverTimestamp(),
+  })
+}
+
+export async function setModifierGroupActive(id: string, active: boolean): Promise<void> {
+  await updateDoc(doc(db, 'modifierGroups', id), { active, updatedAt: serverTimestamp() })
+}
+
+/**
+ * Removes a group outright.
+ *
+ * Deactivating is the safe everyday action — it stops the group being offered while leaving
+ * it editable — so this is offered only for a group created by mistake. Past orders are
+ * unaffected either way.
+ */
+export async function deleteModifierGroup(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'modifierGroups', id))
+}
+
+/** Every group configured for one item, including inactive ones. Admin screens only. */
+async function modifierGroupIdsFor(itemId: string): Promise<string[]> {
+  const found = await getDocs(
+    query(collection(db, 'modifierGroups'), where('itemId', '==', itemId)),
+  )
+  return found.docs.map((entry) => entry.id)
 }

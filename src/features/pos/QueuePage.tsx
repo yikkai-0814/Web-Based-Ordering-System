@@ -11,10 +11,11 @@ import { useStaffSession } from '@/features/staff/useStaffSession'
 import { BusinessDateBar } from '@/features/pos/BusinessDateBar'
 import type { FulfillmentStatus } from '@/features/pos/fulfillment'
 import { setFulfillment } from '@/features/pos/fulfillment-api'
+import { describeModifiers, lineKeyOf } from '@/features/menu/modifiers'
 import { orderTypeSummaryOf } from '@/features/pos/order-type'
 import type { OrderView } from '@/features/pos/orders-view'
 import { FulfillmentStatusBadge, PaymentStatusBadge } from '@/features/pos/PaymentStatusBadge'
-import { PreparationTime } from '@/features/pos/PreparationTime'
+import { OrderElapsedTime } from '@/features/pos/OrderElapsedTime'
 import {
   groupQueue,
   itemCountOf,
@@ -292,15 +293,24 @@ function QueueCard({
       <ul className="space-y-0.5 text-sm">
         {order.lines.map((line) => (
           <li
-            key={line.menuItemId}
-            className="flex items-baseline gap-2"
+            // Unique per CONFIGURED line: the same dish made two ways is two lines here.
+            key={lineKeyOf(line)}
             data-testid="queue-line"
             data-item-name={line.name}
           >
-            <span className="w-7 shrink-0 tabular-nums text-muted-foreground">
-              {line.quantity}×
-            </span>
-            <span className="min-w-0 flex-1">{line.name}</span>
+            <div className="flex items-baseline gap-2">
+              <span className="w-7 shrink-0 tabular-nums text-muted-foreground">
+                {line.quantity}×
+              </span>
+              <span className="min-w-0 flex-1">{line.name}</span>
+            </div>
+            {/* The kitchen needs this more than anyone: it is the difference between the two
+                otherwise identical lines above and below it. */}
+            {line.modifiers.length > 0 && (
+              <p className="ml-9 text-xs text-muted-foreground" data-testid="queue-line-modifiers">
+                {describeModifiers(line.modifiers)}
+              </p>
+            )}
           </li>
         ))}
       </ul>
@@ -318,11 +328,6 @@ function QueueCard({
         </span>
       </div>
 
-      {/* Runs from the moment the sale was rung up and freezes when it is marked ready.
-          Neither the fulfilment status nor payment has any say in it, and nothing is
-          written per second - see the preparation-timing block in fulfillment.ts. */}
-      <PreparationTime order={order} fulfillment={view.fulfillmentRecord} className="block" />
-
       {/* Who rang it up, and — once somebody has touched it — who moved it last. The second
           line is why operator identities exist: a shared login cannot answer either. */}
       <p className="text-xs text-muted-foreground" data-testid="queue-operator">
@@ -331,6 +336,19 @@ function QueueCard({
           ? ` · last moved by ${fulfillmentOperatorNameOf(view.fulfillmentRecord)}`
           : ''}
       </p>
+
+      {/* The waiting time, directly above the one action that ends it. This is the number a
+          kitchen scans a column for, so it is stated at reading size rather than tucked in
+          with the metadata — and it runs until the order is HANDED OVER, not until it is
+          marked ready. See the elapsed-time block in fulfillment.ts. */}
+      <div className="flex items-center gap-2">
+        <OrderElapsedTime
+          order={order}
+          fulfillment={view.fulfillmentRecord}
+          size="prominent"
+          className="w-full justify-center"
+        />
+      </div>
 
       {action && (
         <Button

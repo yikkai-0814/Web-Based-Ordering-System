@@ -79,11 +79,23 @@ export async function createOrder({
     transaction.set(orderReference, {
       number: next,
       businessDate,
-      // Lines are stored as plain snapshots — no reference back to the menu item.
+      // Lines are stored as plain snapshots — no reference back to the menu item, and none
+      // back to its customisation configuration either. `lineId` is deliberately NOT
+      // written: it is derived from the menu item and the chosen options, so an order that
+      // stored it could disagree with itself. Rendering re-derives it with the same
+      // function the cart merges on (see lineKeyOf).
       lines: cart.map((line) => ({
         menuItemId: line.menuItemId,
         name: line.name,
+        basePrice: line.basePrice,
         unitPrice: line.unitPrice,
+        modifiers: line.modifiers.map((modifier) => ({
+          groupId: modifier.groupId,
+          groupName: modifier.groupName,
+          optionId: modifier.optionId,
+          optionName: modifier.optionName,
+          priceAdjustment: modifier.priceAdjustment,
+        })),
         quantity: line.quantity,
       })),
       total,

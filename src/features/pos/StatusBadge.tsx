@@ -13,8 +13,11 @@ const TONES: Record<StatusTone, string> = {
   neutral: 'bg-muted text-muted-foreground',
   // Work in progress — visible, but not a problem.
   active: 'bg-primary/10 text-primary ring-1 ring-primary/25',
-  // Finished, and nothing is owed.
-  good: 'bg-muted text-muted-foreground',
+  // Finished, and nothing is owed. Green, and until now it was the same grey as `neutral`:
+  // a completed order and an untouched one looked identical, which is the one comparison
+  // this badge exists to make. Tinted at the same weight as the other two rather than a
+  // solid fill — the row is scanned, not celebrated.
+  good: 'bg-success/10 text-success ring-1 ring-success/25',
   // Somebody needs to do something about this.
   warn: 'bg-destructive/10 text-destructive ring-1 ring-destructive/30',
 }

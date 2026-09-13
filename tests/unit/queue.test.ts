@@ -15,7 +15,16 @@ const order = (over: Partial<Order> = {}): Order => ({
   id: 'o1',
   number: 1,
   businessDate: '2026-09-12',
-  lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1595, quantity: 2 }],
+  lines: [
+    {
+      menuItemId: 'i1',
+      name: 'Flat White',
+      basePrice: 1595,
+      unitPrice: 1595,
+      modifiers: [],
+      quantity: 2,
+    },
+  ],
   total: 3190,
   orderType: 'dine_in',
   tableNumber: '5',
@@ -39,6 +48,7 @@ const fulfillment = (orderId: string, status: FulfillmentStatus): OrderFulfillme
   updatedByStaffId: 'bob',
   updatedByStaffName: 'Bob',
   readyAt: null,
+  deliveredAt: null,
 })
 
 const payment = (orderId: string): OrderPayment => ({
@@ -221,8 +231,22 @@ describe('itemCountOf', () => {
   it('counts units, not lines', () => {
     const view = at('pending', {
       lines: [
-        { menuItemId: 'i1', name: 'Flat White', unitPrice: 1595, quantity: 2 },
-        { menuItemId: 'i2', name: 'Croissant', unitPrice: 850, quantity: 3 },
+        {
+          menuItemId: 'i1',
+          name: 'Flat White',
+          basePrice: 1595,
+          unitPrice: 1595,
+          modifiers: [],
+          quantity: 2,
+        },
+        {
+          menuItemId: 'i2',
+          name: 'Croissant',
+          basePrice: 850,
+          unitPrice: 850,
+          modifiers: [],
+          quantity: 3,
+        },
       ],
     })
     expect(itemCountOf(view)).toBe(5)

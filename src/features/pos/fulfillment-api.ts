@@ -4,8 +4,10 @@ import {
   INITIAL_FULFILLMENT,
   isBackwardStep,
   isForwardStep,
+  nextDeliveredAt,
   nextReadyAt,
   type FulfillmentStatus,
+  type TimestampInstruction,
 } from '@/features/pos/fulfillment'
 import { db } from '@/lib/firebase'
 
@@ -52,7 +54,6 @@ async function writeTransition(
   { from, to, user, staff }: SetFulfillmentParams,
 ): Promise<void> {
   const batch = writeBatch(db)
-  const readyAt = nextReadyAt(from, to)
 
   batch.set(
     doc(db, 'orderFulfillment', orderId),
@@ -66,10 +67,11 @@ async function writeTransition(
       // right now — so the snapshot is provably accurate at the moment of the move.
       updatedByStaffId: staff.id,
       updatedByStaffName: staff.name,
-      // Omitted entirely on a step that must preserve it — see the merge note below. The
-      // rules check the same table against the server's own clock, so a client can neither
-      // backdate a finish nor invent one that never happened.
-      ...(readyAt === 'keep' ? {} : { readyAt: readyAt === 'now' ? serverTimestamp() : null }),
+      // Each is omitted entirely on a step that must preserve it — see the merge note
+      // below. The rules check the same tables against the server's own clock, so a client
+      // can neither backdate one nor invent one that never happened.
+      ...stamp('readyAt', nextReadyAt(from, to)),
+      ...stamp('deliveredAt', nextDeliveredAt(from, to)),
     },
     /**
      * Merged rather than replaced, which matters for exactly one reason: a step that must
@@ -103,6 +105,18 @@ async function writeTransition(
   })
 
   await batch.commit()
+}
+
+/**
+ * One instruction as the field it writes, or as nothing at all.
+ *
+ * `'keep'` produces no key: the document is merged rather than replaced, and an unwritten
+ * field is unchanged by definition. That is what lets a step preserve a timestamp without
+ * reading it back first — see the merge note above for why reading it back would be wrong.
+ */
+function stamp(field: string, instruction: TimestampInstruction): Record<string, unknown> {
+  if (instruction === 'keep') return {}
+  return { [field]: instruction === 'now' ? serverTimestamp() : null }
 }
 
 /**

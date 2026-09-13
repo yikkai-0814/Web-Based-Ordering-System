@@ -1,5 +1,6 @@
 import type { Timestamp } from 'firebase/firestore'
 
+import { MAX_MODIFIERS_PER_LINE, type SelectedModifier } from '@/features/menu/modifiers'
 import { isFulfillmentStatus, type FulfillmentStatus } from '@/features/pos/fulfillment'
 import { isOrderType, type OrderType } from '@/features/pos/order-type'
 
@@ -31,14 +32,23 @@ export function isPaymentMethod(value: unknown): value is PaymentMethod {
 /**
  * A line as recorded on the order.
  *
- * `name` and `unitPrice` are **snapshots** taken at the time of sale. The order never
- * dereferences the menu item, which is what lets an item be renamed, repriced or deleted
- * without rewriting past receipts.
+ * `name`, `basePrice`, `unitPrice` and every entry in `modifiers` are **snapshots** taken at
+ * the time of sale. The order never dereferences the menu item or its customisation
+ * configuration, which is what lets an item be renamed, repriced or deleted — and an option
+ * renamed, repriced, deactivated or removed entirely — without rewriting past receipts.
+ *
+ * A line is one CONFIGURED item. The same dish ordered two different ways is two lines, and
+ * `lineKeyOf` is what tells them apart; see cart.ts.
  */
 export interface OrderLine {
   menuItemId: string
   name: string
+  /** The item's own price at the time of sale, whole sen. Excludes the options. */
+  basePrice: number
+  /** Whole sen: `basePrice` plus every chosen adjustment. What the customer was charged. */
   unitPrice: number
+  /** The options chosen for this line, snapshotted. Empty when nothing was customised. */
+  modifiers: SelectedModifier[]
   quantity: number
 }
 
@@ -153,14 +163,64 @@ export function msUntilNextBusinessDate(now: Date): number {
   return nextMidnight.getTime() - now.getTime()
 }
 
+function parseModifier(value: unknown): SelectedModifier | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { groupId, groupName, optionId, optionName, priceAdjustment } = value as Record<
+    string,
+    unknown
+  >
+
+  if (typeof groupId !== 'string' || groupId === '') return null
+  if (typeof optionId !== 'string' || optionId === '') return null
+  if (typeof priceAdjustment !== 'number' || !Number.isInteger(priceAdjustment)) return null
+
+  return {
+    groupId,
+    // The names are what the customer was shown. A snapshot missing one is still a real
+    // choice that was made and charged for, so it is rendered plainly rather than dropped.
+    groupName: typeof groupName === 'string' ? groupName : '',
+    optionId,
+    optionName: typeof optionName === 'string' && optionName !== '' ? optionName : 'Option',
+    priceAdjustment,
+  }
+}
+
 function parseLine(value: unknown): OrderLine | null {
   if (typeof value !== 'object' || value === null) return null
-  const { menuItemId, name, unitPrice, quantity } = value as Record<string, unknown>
+  const { menuItemId, name, basePrice, unitPrice, quantity, modifiers } = value as Record<
+    string,
+    unknown
+  >
   if (typeof menuItemId !== 'string' || menuItemId === '') return null
   if (typeof name !== 'string' || name === '') return null
   if (typeof unitPrice !== 'number' || !Number.isInteger(unitPrice) || unitPrice < 0) return null
   if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity < 1) return null
-  return { menuItemId, name, unitPrice, quantity }
+
+  const parsedModifiers: SelectedModifier[] = []
+  if (Array.isArray(modifiers)) {
+    if (modifiers.length > MAX_MODIFIERS_PER_LINE) return null
+    for (const modifier of modifiers) {
+      const parsed = parseModifier(modifier)
+      // A line whose options cannot be read would render as a price with no explanation of
+      // where it came from, which is worse than refusing the order document outright.
+      if (!parsed) return null
+      parsedModifiers.push(parsed)
+    }
+  }
+
+  return {
+    menuItemId,
+    name,
+    // Absent on every order placed before customisation existed. Those lines were charged
+    // at the item price with nothing added, so the base IS the unit price.
+    basePrice:
+      typeof basePrice === 'number' && Number.isInteger(basePrice) && basePrice >= 0
+        ? basePrice
+        : unitPrice,
+    unitPrice,
+    modifiers: parsedModifiers,
+    quantity,
+  }
 }
 
 /**
@@ -447,16 +507,25 @@ export interface OrderFulfillment {
   updatedByStaffId: string | null
   updatedByStaffName: string | null
   /**
-   * When the order stopped being made.
+   * When the kitchen finished the order.
    *
-   * The other half of the preparation window is the ORDER's `createdAt`, not anything here:
-   * the clock starts when the sale is rung up, so a ticket that waits before anybody starts
-   * on it is still counted as waiting. See the preparation-timing block in fulfillment.ts.
-   *
-   * Null while the order is not yet ready, on a record whose `ready` was corrected back a
-   * step, and on one written before this was recorded at all.
+   * Recorded for the question it answers, and for nothing else: it does NOT stop the
+   * elapsed-time clock, because an order sitting on the pass is still an order the customer
+   * has not been given. Null before the order is ready, and on a record whose `ready` was
+   * corrected back a step.
    */
   readyAt: Timestamp | null
+  /**
+   * When the order was handed over — the one moment that stops the clock.
+   *
+   * The other half of the window is the ORDER's own immutable `createdAt`, not anything
+   * here, so there is no start field on this document. See the elapsed-time block in
+   * fulfillment.ts.
+   *
+   * Null on every order that is not currently delivered, including one an admin has
+   * corrected back out of `delivered`, and on records written before this was captured.
+   */
+  deliveredAt: Timestamp | null
 }
 
 /**
@@ -536,6 +605,7 @@ export function parseOrderFulfillment(
     updatedByStaffId,
     updatedByStaffName,
     readyAt,
+    deliveredAt,
   } = data
 
   // An unrecognised status cannot be placed on the progression, so the record is skipped and
@@ -555,10 +625,11 @@ export function parseOrderFulfillment(
       typeof updatedByStaffName === 'string' && updatedByStaffName !== ''
         ? updatedByStaffName
         : null,
-    // Absent on every record written before this was recorded. Read as "not finished yet"
+    // Absent on every record written before these were captured. Read as "has not happened"
     // rather than as a reason to reject the record: those orders were fulfilled perfectly
     // well and must keep rendering.
     readyAt: (readyAt as Timestamp | undefined) ?? null,
+    deliveredAt: (deliveredAt as Timestamp | undefined) ?? null,
   }
 }
 

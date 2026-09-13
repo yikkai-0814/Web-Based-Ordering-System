@@ -12,12 +12,26 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { CartPanel } from '@/features/pos/CartPanel'
 import type { Cart } from '@/features/pos/cart'
+import { lineKeyOf } from '@/features/menu/modifiers'
 
 import { renderComponent } from './render'
 
+/** A plain line: no customisation, so its identity is just the menu item. */
+function plain(menuItemId: string, name: string, unitPrice: number, quantity: number) {
+  return {
+    lineId: lineKeyOf({ menuItemId, modifiers: [] }),
+    menuItemId,
+    name,
+    basePrice: unitPrice,
+    unitPrice,
+    modifiers: [],
+    quantity,
+  }
+}
+
 const CART: Cart = [
-  { menuItemId: 'flat-white', name: 'Flat White', unitPrice: 1250, quantity: 2 },
-  { menuItemId: 'croissant', name: 'Croissant', unitPrice: 690, quantity: 1 },
+  plain('flat-white', 'Flat White', 1250, 2),
+  plain('croissant', 'Croissant', 690, 1),
 ]
 
 function setup(cart: Cart = CART) {
@@ -47,7 +61,7 @@ describe('CartPanel: what it shows', () => {
   })
 
   it('says “1 item” in the singular', () => {
-    setup([{ menuItemId: 'croissant', name: 'Croissant', unitPrice: 690, quantity: 1 }])
+    setup([plain('croissant', 'Croissant', 690, 1)])
     expect(screen.getByTestId('cart-count').textContent).toBe('1 item')
   })
 
@@ -65,13 +79,13 @@ describe('CartPanel: what it reports back', () => {
     const { user, onIncrement, onDecrement, onRemove } = setup()
 
     await user.click(screen.getByLabelText('Add one Croissant'))
-    expect(onIncrement).toHaveBeenCalledWith('croissant')
+    expect(onIncrement).toHaveBeenCalledWith(lineKeyOf({ menuItemId: 'croissant', modifiers: [] }))
 
     await user.click(screen.getByLabelText('Remove one Flat White'))
-    expect(onDecrement).toHaveBeenCalledWith('flat-white')
+    expect(onDecrement).toHaveBeenCalledWith(lineKeyOf({ menuItemId: 'flat-white', modifiers: [] }))
 
     await user.click(screen.getByLabelText('Remove Flat White from the order'))
-    expect(onRemove).toHaveBeenCalledWith('flat-white')
+    expect(onRemove).toHaveBeenCalledWith(lineKeyOf({ menuItemId: 'flat-white', modifiers: [] }))
   })
 
   it('clears the whole cart on request', async () => {
