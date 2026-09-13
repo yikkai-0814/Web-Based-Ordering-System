@@ -53,6 +53,7 @@ const fulfillment = (orderId: string, status: OrderFulfillment['status']): Order
   updatedByName: 'Shared Till',
   updatedByStaffId: 'bob',
   updatedByStaffName: 'Bob',
+  readyAt: null,
 })
 
 const voided = (orderId: string): OrderVoid => ({

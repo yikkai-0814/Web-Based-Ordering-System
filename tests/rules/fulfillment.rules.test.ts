@@ -13,6 +13,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  serverTimestamp,
   setDoc,
   updateDoc,
   writeBatch,
@@ -66,11 +67,26 @@ const order = (over: Record<string, unknown> = {}) => ({
  * A fulfilment record naming both identities: the shared account that was signed in, and the
  * named operator who made the move.
  */
+/**
+ * The finish a document arriving at `status` should carry, for the many writes that are
+ * built by hand rather than read back first.
+ *
+ * A preserved value uses the constant `seedAt` writes, so any test that seeds a document and
+ * then steps it forward lines up without a read. Sequences that CREATE through the rules —
+ * where the stored value is a server timestamp nobody can predict — use `stepAt` instead.
+ */
+function arrivingAt(status: string): Preparation {
+  if (status === 'ready') return { readyAt: serverTimestamp() }
+  if (status === 'delivered') return { readyAt: SEEDED_READY_AT }
+  return { readyAt: null }
+}
+
 const step = (
   status: string,
   uid = STAFF_UID,
   orderId = ORDER_ID,
   operator: { id: string; name: string } = { id: 'alice', name: 'Alice' },
+  prep: Preparation = arrivingAt(status),
 ) => ({
   orderId,
   status,
@@ -79,7 +95,42 @@ const step = (
   updatedByName: uid === ADMIN_UID ? 'Ada Admin' : 'Shared Till',
   updatedByStaffId: operator.id,
   updatedByStaffName: operator.name,
+  ...prep,
 })
+
+/**
+ * Preparation timing, stated here independently of the app's own copy in fulfillment.ts.
+ *
+ * These suites exist to say what the SERVER accepts. Importing the app's table would make
+ * the two agree by construction, which is exactly the drift this file is meant to catch.
+ *
+ * Only the FINISH lives on this document. The clock's start is the order's own `createdAt`,
+ * which nothing here can write or move, so there is no start field to check.
+ *
+ * `serverTimestamp()` is the only value the rules will take for a finish that must be "now":
+ * they compare against `request.time`, so a client's own `new Date()` is refused however
+ * plausible it looks. That is the forgery defence, and it is asserted directly below.
+ */
+interface Preparation {
+  readyAt: unknown
+}
+
+/** A concrete finish for a document seeded past `ready`, with rules disabled. */
+const SEEDED_READY_AT = new Date('2026-09-11T10:05:00.000Z')
+
+/** What a document seeded at `status` carries, so an update can be checked against it. */
+function seededPrior(status: string): Preparation {
+  return status === 'ready' || status === 'delivered'
+    ? { readyAt: SEEDED_READY_AT }
+    : { readyAt: null }
+}
+
+/** The finish the server will accept for a step out of `from` into `to`. */
+function preparationFor(from: string, to: string, prior: Preparation): Preparation {
+  if (to === 'ready' && from === 'preparing') return { readyAt: serverTimestamp() }
+  if (to === 'ready' || to === 'delivered') return { readyAt: prior.readyAt }
+  return { readyAt: null }
+}
 
 /** The journal entry written alongside it, in the same batch. */
 const transition = (
@@ -103,7 +154,7 @@ const transition = (
  * Writes a move exactly as `fulfillment-api.ts` does: the current-state document and its
  * journal entry in ONE batch, which is what `getAfter` in the rules is there to validate.
  */
-function move(
+async function move(
   db: ReturnType<typeof staffDb>,
   {
     from,
@@ -111,16 +162,30 @@ function move(
     uid = STAFF_UID,
     orderId = ORDER_ID,
     operator = { id: 'alice', name: 'Alice' },
+    prep,
   }: {
     from: string
     to: string
     uid?: string
     orderId?: string
     operator?: { id: string; name: string }
+    /** Override, to send something the server should refuse. */
+    prep?: Preparation
   },
 ) {
+  // The app always has the current record to hand, from the listener that rendered the
+  // button; this reads it for the same reason. A step that must preserve a timestamp has to
+  // resend the one actually stored — the document is written whole.
+  const existing = await getDoc(doc(db, 'orderFulfillment', orderId))
+  const prior: Preparation = existing.exists()
+    ? { readyAt: existing.get('readyAt') ?? null }
+    : { readyAt: null }
+
   const batch = writeBatch(db)
-  batch.set(doc(db, 'orderFulfillment', orderId), step(to, uid, orderId, operator))
+  batch.set(
+    doc(db, 'orderFulfillment', orderId),
+    step(to, uid, orderId, operator, prep ?? preparationFor(from, to, prior)),
+  )
   batch.set(
     doc(collection(db, 'orderFulfillment', orderId, 'transitions')),
     transition(from, to, uid, orderId, operator),
@@ -188,8 +253,50 @@ async function seed({ staffActive = true } = {}) {
 /** Puts an order at a given status without going through the rules. */
 async function seedAt(status: string, orderId = ORDER_ID) {
   await testEnv.withSecurityRulesDisabled(async (context) => {
-    await setDoc(doc(context.firestore(), 'orderFulfillment', orderId), step(status))
+    await setDoc(
+      doc(context.firestore(), 'orderFulfillment', orderId),
+      step(status, STAFF_UID, orderId, { id: 'alice', name: 'Alice' }, seededPrior(status)),
+    )
   })
+}
+
+/**
+ * A document as it was written BEFORE a finish was recorded: the key is not present.
+ *
+ * Used to prove an ordinary step on an old order is still accepted. The rules read the
+ * previous values with get(..., null) precisely so this case does not error the rule.
+ */
+async function seedLegacyAt(status: string, orderId = ORDER_ID) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const legacy: Record<string, unknown> = step(status)
+    delete legacy.readyAt
+    await setDoc(doc(context.firestore(), 'orderFulfillment', orderId), legacy)
+  })
+}
+
+/**
+ * `step()` built against what the document currently holds.
+ *
+ * A step that preserves a timestamp has to resend the one actually stored — the parent is
+ * written whole — so the prior values are read first, exactly as the app has them from the
+ * listener that rendered the button. Tests that mean to send something the server should
+ * refuse pass `prep` explicitly.
+ */
+async function stepAt(
+  db: ReturnType<typeof staffDb>,
+  status: string,
+  uid = STAFF_UID,
+  orderId = ORDER_ID,
+  operator: { id: string; name: string } = { id: 'alice', name: 'Alice' },
+  prep?: Preparation,
+) {
+  const existing = await getDoc(doc(db, 'orderFulfillment', orderId))
+  const from = existing.exists() ? (existing.get('status') as string) : 'pending'
+  const prior: Preparation = existing.exists()
+    ? { readyAt: existing.get('readyAt') ?? null }
+    : { readyAt: null }
+
+  return step(status, uid, orderId, operator, prep ?? preparationFor(from, status, prior))
 }
 
 const staffDb = () => testEnv.authenticatedContext(STAFF_UID).firestore()
@@ -199,29 +306,61 @@ describe('fulfilment rules: the forward path', () => {
   // Test 2. `pending` is the absence of the document, so the first move is a create.
   it('lets staff start preparing a newly placed order', async () => {
     await seed()
-    await assertSucceeds(setDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('preparing')))
+    await assertSucceeds(
+      setDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'preparing', STAFF_UID, ORDER_ID),
+      ),
+    )
   })
 
   // Test 3.
   it('lets staff move preparing → ready', async () => {
     await seed()
     await seedAt('preparing')
-    await assertSucceeds(updateDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('ready')))
+    await assertSucceeds(
+      updateDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'ready', STAFF_UID, ORDER_ID),
+      ),
+    )
   })
 
   // Test 4.
   it('lets staff move ready → delivered', async () => {
     await seed()
     await seedAt('ready')
-    await assertSucceeds(updateDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('delivered')))
+    await assertSucceeds(
+      updateDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'delivered', STAFF_UID, ORDER_ID),
+      ),
+    )
   })
 
   it('walks the whole progression one step at a time', async () => {
     await seed()
     const db = staffDb()
-    await assertSucceeds(setDoc(doc(db, 'orderFulfillment', ORDER_ID), step('preparing')))
-    await assertSucceeds(updateDoc(doc(db, 'orderFulfillment', ORDER_ID), step('ready')))
-    await assertSucceeds(updateDoc(doc(db, 'orderFulfillment', ORDER_ID), step('delivered')))
+    await assertSucceeds(
+      setDoc(
+        doc(db, 'orderFulfillment', ORDER_ID),
+        // Built without reading first: these callers may not read either, and the refusal
+        // would then land outside assertFails.
+        step('preparing', STAFF_UID, ORDER_ID),
+      ),
+    )
+    await assertSucceeds(
+      updateDoc(
+        doc(db, 'orderFulfillment', ORDER_ID),
+        await stepAt(db, 'ready', STAFF_UID, ORDER_ID),
+      ),
+    )
+    await assertSucceeds(
+      updateDoc(
+        doc(db, 'orderFulfillment', ORDER_ID),
+        await stepAt(db, 'delivered', STAFF_UID, ORDER_ID),
+      ),
+    )
 
     const final = await getDoc(doc(db, 'orderFulfillment', ORDER_ID))
     expect(final.data()?.status).toBe('delivered')
@@ -230,7 +369,10 @@ describe('fulfilment rules: the forward path', () => {
   it('lets an admin drive the workflow too', async () => {
     await seed()
     await assertSucceeds(
-      setDoc(doc(adminDb(), 'orderFulfillment', ORDER_ID), step('preparing', ADMIN_UID)),
+      setDoc(
+        doc(adminDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(adminDb(), 'preparing', ADMIN_UID, ORDER_ID),
+      ),
     )
   })
 
@@ -251,7 +393,12 @@ describe('fulfilment rules: invalid transitions are rejected', () => {
     const db = staffDb()
     // An order cannot be born part-way through the workflow.
     for (const status of ['ready', 'delivered', 'pending']) {
-      await assertFails(setDoc(doc(db, 'orderFulfillment', ORDER_ID), step(status)))
+      await assertFails(
+        setDoc(
+          doc(db, 'orderFulfillment', ORDER_ID),
+          await stepAt(db, status, STAFF_UID, ORDER_ID),
+        ),
+      )
     }
   })
 
@@ -259,35 +406,72 @@ describe('fulfilment rules: invalid transitions are rejected', () => {
     await seed()
     await seedAt('preparing')
     // preparing → delivered jumps over ready.
-    await assertFails(updateDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('delivered')))
+    await assertFails(
+      updateDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'delivered', STAFF_UID, ORDER_ID),
+      ),
+    )
   })
 
   it('refuses standing still', async () => {
     await seed()
     await seedAt('ready')
-    await assertFails(updateDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('ready')))
+    await assertFails(
+      updateDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'ready', STAFF_UID, ORDER_ID),
+      ),
+    )
   })
 
   it('refuses STAFF moving an order backward', async () => {
     await seed()
     await seedAt('delivered')
     const db = staffDb()
-    await assertFails(updateDoc(doc(db, 'orderFulfillment', ORDER_ID), step('ready')))
-    await assertFails(updateDoc(doc(db, 'orderFulfillment', ORDER_ID), step('preparing')))
-    await assertFails(updateDoc(doc(db, 'orderFulfillment', ORDER_ID), step('pending')))
+    await assertFails(
+      updateDoc(
+        doc(db, 'orderFulfillment', ORDER_ID),
+        await stepAt(db, 'ready', STAFF_UID, ORDER_ID),
+      ),
+    )
+    await assertFails(
+      updateDoc(
+        doc(db, 'orderFulfillment', ORDER_ID),
+        // Built without reading first: these callers may not read either, and the refusal
+        // would then land outside assertFails.
+        step('preparing', STAFF_UID, ORDER_ID),
+      ),
+    )
+    await assertFails(
+      updateDoc(
+        doc(db, 'orderFulfillment', ORDER_ID),
+        await stepAt(db, 'pending', STAFF_UID, ORDER_ID),
+      ),
+    )
   })
 
   it('refuses moving on from delivered — there is nowhere further to go', async () => {
     await seed()
     await seedAt('delivered')
-    await assertFails(updateDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('collected')))
+    await assertFails(
+      updateDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'collected', STAFF_UID, ORDER_ID),
+      ),
+    )
   })
 
   it('refuses a status that is not on the progression', async () => {
     await seed()
     const db = staffDb()
     for (const status of ['collected', 'cancelled', 'complete', 'paid', '']) {
-      await assertFails(setDoc(doc(db, 'orderFulfillment', ORDER_ID), step(status)))
+      await assertFails(
+        setDoc(
+          doc(db, 'orderFulfillment', ORDER_ID),
+          await stepAt(db, status, STAFF_UID, ORDER_ID),
+        ),
+      )
     }
   })
 
@@ -295,7 +479,7 @@ describe('fulfilment rules: invalid transitions are rejected', () => {
     await seed()
     await assertFails(
       setDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), {
-        ...step('preparing'),
+        ...(await stepAt(staffDb(), 'preparing')),
         orderId: 'somewhere-else',
       }),
     )
@@ -306,7 +490,7 @@ describe('fulfilment rules: invalid transitions are rejected', () => {
     await assertFails(
       setDoc(
         doc(staffDb(), 'orderFulfillment', 'no-such-order'),
-        step('preparing', STAFF_UID, 'no-such-order'),
+        await stepAt(staffDb(), 'preparing', STAFF_UID, 'no-such-order'),
       ),
     )
   })
@@ -315,7 +499,7 @@ describe('fulfilment rules: invalid transitions are rejected', () => {
     await seed()
     await assertFails(
       setDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), {
-        ...step('preparing'),
+        ...(await stepAt(staffDb(), 'preparing')),
         updatedAt: 'just now',
       }),
     )
@@ -327,20 +511,37 @@ describe('fulfilment rules: unauthorised manipulation is rejected', () => {
   it('denies an anonymous caller', async () => {
     await seed()
     const db = testEnv.unauthenticatedContext().firestore()
-    await assertFails(setDoc(doc(db, 'orderFulfillment', ORDER_ID), step('preparing')))
+    await assertFails(
+      setDoc(
+        doc(db, 'orderFulfillment', ORDER_ID),
+        // Built without reading first: these callers may not read either, and the refusal
+        // would then land outside assertFails.
+        step('preparing', STAFF_UID, ORDER_ID),
+      ),
+    )
     await assertFails(getDoc(doc(db, 'orderFulfillment', ORDER_ID)))
   })
 
   it('denies a deactivated staff account', async () => {
     await seed({ staffActive: false })
-    await assertFails(setDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('preparing')))
+    await assertFails(
+      setDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        // Built without reading first: a deactivated account may not read either, and the
+        // refusal would then land outside assertFails.
+        step('preparing', STAFF_UID, ORDER_ID),
+      ),
+    )
     await assertFails(getDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID)))
   })
 
   it('denies attributing a step to somebody else', async () => {
     await seed()
     await assertFails(
-      setDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('preparing', OTHER_UID)),
+      setDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'preparing', OTHER_UID, ORDER_ID),
+      ),
     )
   })
 
@@ -353,7 +554,12 @@ describe('fulfilment rules: unauthorised manipulation is rejected', () => {
 
   it('does not let driving fulfilment touch the order, its payment or a void', async () => {
     await seed()
-    await assertSucceeds(setDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('preparing')))
+    await assertSucceeds(
+      setDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'preparing', STAFF_UID, ORDER_ID),
+      ),
+    )
 
     // Moving an order through the kitchen is not a foot in any other door.
     await assertFails(updateDoc(doc(staffDb(), 'orders', ORDER_ID), { total: 1 }))
@@ -381,7 +587,7 @@ describe('fulfilment rules: a voided order stops', () => {
     await assertFails(
       setDoc(
         doc(staffDb(), 'orderFulfillment', VOIDED_ORDER_ID),
-        step('preparing', STAFF_UID, VOIDED_ORDER_ID),
+        await stepAt(staffDb(), 'preparing', STAFF_UID, VOIDED_ORDER_ID),
       ),
     )
   })
@@ -394,7 +600,7 @@ describe('fulfilment rules: a voided order stops', () => {
     await assertFails(
       updateDoc(
         doc(staffDb(), 'orderFulfillment', VOIDED_ORDER_ID),
-        step('ready', STAFF_UID, VOIDED_ORDER_ID),
+        await stepAt(staffDb(), 'ready', STAFF_UID, VOIDED_ORDER_ID),
       ),
     )
   })
@@ -404,7 +610,7 @@ describe('fulfilment rules: a voided order stops', () => {
     await assertFails(
       setDoc(
         doc(adminDb(), 'orderFulfillment', VOIDED_ORDER_ID),
-        step('preparing', ADMIN_UID, VOIDED_ORDER_ID),
+        await stepAt(adminDb(), 'preparing', ADMIN_UID, VOIDED_ORDER_ID),
       ),
     )
   })
@@ -416,7 +622,10 @@ describe('fulfilment rules: an admin may correct a mis-tap', () => {
     await seed()
     await seedAt('delivered')
     await assertSucceeds(
-      updateDoc(doc(adminDb(), 'orderFulfillment', ORDER_ID), step('ready', ADMIN_UID)),
+      updateDoc(
+        doc(adminDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(adminDb(), 'ready', ADMIN_UID, ORDER_ID),
+      ),
     )
   })
 
@@ -424,10 +633,16 @@ describe('fulfilment rules: an admin may correct a mis-tap', () => {
     await seed()
     await seedAt('delivered')
     await assertFails(
-      updateDoc(doc(adminDb(), 'orderFulfillment', ORDER_ID), step('preparing', ADMIN_UID)),
+      updateDoc(
+        doc(adminDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(adminDb(), 'preparing', ADMIN_UID, ORDER_ID),
+      ),
     )
     await assertFails(
-      updateDoc(doc(adminDb(), 'orderFulfillment', ORDER_ID), step('pending', ADMIN_UID)),
+      updateDoc(
+        doc(adminDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(adminDb(), 'pending', ADMIN_UID, ORDER_ID),
+      ),
     )
   })
 
@@ -437,7 +652,7 @@ describe('fulfilment rules: an admin may correct a mis-tap', () => {
     await assertFails(
       updateDoc(
         doc(adminDb(), 'orderFulfillment', VOIDED_ORDER_ID),
-        step('ready', ADMIN_UID, VOIDED_ORDER_ID),
+        await stepAt(adminDb(), 'ready', ADMIN_UID, VOIDED_ORDER_ID),
       ),
     )
   })
@@ -449,7 +664,12 @@ describe('fulfilment rules: who moved it must be a real, active operator', () =>
 
   it('accepts a named, active operator whose name matches the roster', async () => {
     await seed()
-    await assertSucceeds(setDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('preparing')))
+    await assertSucceeds(
+      setDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'preparing', STAFF_UID, ORDER_ID),
+      ),
+    )
   })
 
   it('accepts the signed-in account as its own operator — the shared-till form', async () => {
@@ -598,7 +818,12 @@ describe('fulfilment rules: who moved it must be a real, active operator', () =>
 
   it('does not let moving an order create or alter a staff identity', async () => {
     await seed()
-    await assertSucceeds(setDoc(doc(staffDb(), 'orderFulfillment', ORDER_ID), step('preparing')))
+    await assertSucceeds(
+      setDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'preparing', STAFF_UID, ORDER_ID),
+      ),
+    )
 
     await assertFails(
       setDoc(doc(staffDb(), 'staffMembers', 'alice'), {
@@ -819,5 +1044,206 @@ describe('fulfilment rules: the exact shape of a move', () => {
       transition('pending', 'preparing'),
     )
     await assertFails(batch.commit())
+  })
+})
+
+/**
+ * Preparation timing.
+ *
+ * Only the FINISH is recorded here. The clock starts from the order's own immutable
+ * `createdAt`, so there is no start field on this document for a client to forge, move, or
+ * lose — and payment, which lives in a different document entirely, cannot reach it.
+ *
+ * The finish IS sent by the client, so every value below is checked against `request.time`.
+ * A till cannot backdate a finish to flatter its numbers, claim one for an order it never
+ * completed, or quietly drop one it has already been credited with.
+ */
+describe('fulfilment rules: preparation timing', () => {
+  const ADMIN_OP = { id: ADMIN_UID, name: 'Ada Admin' }
+
+  async function readFulfillment(db: ReturnType<typeof staffDb>, orderId = ORDER_ID) {
+    return getDoc(doc(db, 'orderFulfillment', orderId))
+  }
+
+  it('records no finish when preparation starts', async () => {
+    await seed()
+    const db = staffDb()
+    await assertSucceeds(move(db, { from: 'pending', to: 'preparing' }))
+
+    expect((await readFulfillment(db)).get('readyAt')).toBeNull()
+  })
+
+  it('stamps the finish at ready', async () => {
+    await seed()
+    await seedAt('preparing')
+    const db = staffDb()
+    await assertSucceeds(move(db, { from: 'preparing', to: 'ready' }))
+
+    expect((await readFulfillment(db)).get('readyAt')).not.toBeNull()
+  })
+
+  it('keeps the finish when the order is delivered, so the duration outlives the handover', async () => {
+    await seed()
+    await seedAt('ready')
+    const db = staffDb()
+    await assertSucceeds(move(db, { from: 'ready', to: 'delivered' }))
+
+    expect((await readFulfillment(db)).get('readyAt').toDate()).toEqual(SEEDED_READY_AT)
+  })
+
+  it('keeps it when an admin corrects delivered back to ready', async () => {
+    await seed()
+    await seedAt('delivered')
+    const db = adminDb()
+    await assertSucceeds(
+      move(db, { from: 'delivered', to: 'ready', uid: ADMIN_UID, operator: ADMIN_OP }),
+    )
+
+    // Not a second finish: the order was finished when it was finished.
+    expect((await readFulfillment(db)).get('readyAt').toDate()).toEqual(SEEDED_READY_AT)
+  })
+
+  it('clears the finish when ready is corrected back to preparing', async () => {
+    await seed()
+    await seedAt('ready')
+    const db = adminDb()
+    await assertSucceeds(
+      move(db, { from: 'ready', to: 'preparing', uid: ADMIN_UID, operator: ADMIN_OP }),
+    )
+
+    // The order is being worked on again, so it must stop claiming to be done. The clock
+    // resumes from the order's creation, which nothing here can touch.
+    expect((await readFulfillment(db)).get('readyAt')).toBeNull()
+  })
+
+  it('clears it when the order is corrected all the way back to pending', async () => {
+    await seed()
+    await seedAt('preparing')
+    const db = adminDb()
+    await assertSucceeds(
+      move(db, { from: 'preparing', to: 'pending', uid: ADMIN_UID, operator: ADMIN_OP }),
+    )
+
+    expect((await readFulfillment(db)).get('readyAt')).toBeNull()
+  })
+
+  it('refuses to keep a finish on the way back into the kitchen', async () => {
+    await seed()
+    await seedAt('ready')
+    await assertFails(
+      move(adminDb(), {
+        from: 'ready',
+        to: 'preparing',
+        uid: ADMIN_UID,
+        operator: ADMIN_OP,
+        prep: { readyAt: SEEDED_READY_AT },
+      }),
+    )
+  })
+
+  // ---- Forgery ------------------------------------------------------------
+
+  it('refuses a client-chosen finish, however plausible it looks', async () => {
+    await seed()
+    await seedAt('preparing')
+    await assertFails(
+      move(staffDb(), { from: 'preparing', to: 'ready', prep: { readyAt: new Date() } }),
+    )
+  })
+
+  it('refuses a backdated finish, which would shrink a duration', async () => {
+    await seed()
+    await seedAt('preparing')
+    await assertFails(
+      move(staffDb(), {
+        from: 'preparing',
+        to: 'ready',
+        prep: { readyAt: new Date('2020-01-01T00:00:00.000Z') },
+      }),
+    )
+  })
+
+  it('refuses claiming a finish while merely starting preparation', async () => {
+    await seed()
+    await assertFails(
+      move(staffDb(), { from: 'pending', to: 'preparing', prep: { readyAt: serverTimestamp() } }),
+    )
+  })
+
+  it('refuses dropping a recorded finish on the way to delivered', async () => {
+    await seed()
+    await seedAt('ready')
+    await assertFails(move(staffDb(), { from: 'ready', to: 'delivered', prep: { readyAt: null } }))
+  })
+
+  it('refuses rewriting a recorded finish on the way to delivered', async () => {
+    await seed()
+    await seedAt('ready')
+    await assertFails(
+      move(staffDb(), {
+        from: 'ready',
+        to: 'delivered',
+        prep: { readyAt: new Date('2026-09-11T10:04:00.000Z') },
+      }),
+    )
+  })
+
+  // ---- How the app actually writes it -------------------------------------
+
+  it('accepts a merged step that says nothing about the finish at all', async () => {
+    await seed()
+    await seedAt('ready')
+    const db = staffDb()
+
+    // This is the app's own shape: a step that must preserve readyAt omits the field rather
+    // than reading it back and resending it, which under an optimistic UI could resend the
+    // unresolved local null. An unwritten field is unchanged by definition.
+    const batch = writeBatch(db)
+    const { readyAt: _omitted, ...withoutFinish } = step('delivered')
+    batch.set(doc(db, 'orderFulfillment', ORDER_ID), withoutFinish, { merge: true })
+    batch.set(
+      doc(collection(db, 'orderFulfillment', ORDER_ID, 'transitions')),
+      transition('ready', 'delivered'),
+    )
+    await assertSucceeds(batch.commit())
+
+    const record = await getDoc(doc(db, 'orderFulfillment', ORDER_ID))
+    expect(record.get('status')).toBe('delivered')
+    expect(record.get('readyAt').toDate()).toEqual(SEEDED_READY_AT)
+  })
+
+  // ---- Records written before this feature existed ------------------------
+
+  it('still lets an ordinary step move a legacy record with no finish field', async () => {
+    await seed()
+    await seedLegacyAt('preparing')
+    const db = staffDb()
+
+    // The rules read the previous value behind an `in` guard precisely so this works: a bare
+    // field access on a document without the key would error and deny the step.
+    await assertSucceeds(move(db, { from: 'preparing', to: 'ready' }))
+    expect((await readFulfillment(db)).get('readyAt')).not.toBeNull()
+  })
+
+  it('lets a legacy record be corrected backward too', async () => {
+    await seed()
+    await seedLegacyAt('ready')
+    await assertSucceeds(
+      move(adminDb(), { from: 'ready', to: 'preparing', uid: ADMIN_UID, operator: ADMIN_OP }),
+    )
+  })
+
+  it('tolerates a stale preparingAt left behind by an earlier version', async () => {
+    await seed()
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'orderFulfillment', ORDER_ID), {
+        ...step('preparing'),
+        // Written by a version that recorded a start here. Nothing reads it any more, but a
+        // merged update still carries the key, so the field list must not reject it.
+        preparingAt: new Date('2026-09-11T10:00:00.000Z'),
+      })
+    })
+
+    await assertSucceeds(move(staffDb(), { from: 'preparing', to: 'ready' }))
   })
 })

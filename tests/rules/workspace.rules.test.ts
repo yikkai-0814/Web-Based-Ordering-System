@@ -7,7 +7,17 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing'
-import { collection, doc, getDocs, query, setDoc, where, writeBatch } from 'firebase/firestore'
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+  writeBatch,
+} from 'firebase/firestore'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 /**
@@ -83,8 +93,37 @@ const transition = (from: string, to: string, orderId: string, uid = STAFF_UID) 
   updatedByStaffName: 'Alice',
 })
 
+/**
+ * The finish timestamp the rules will accept for a step into `to`. The clock's START is the
+ * order's own createdAt, which no fulfilment write can touch.
+ *
+ * Kept alongside this file's other write helpers rather than imported from the app: these
+ * suites exist to state what the SERVER accepts, and sharing the app's table would make the
+ * two agree by construction. `serverTimestamp()` is the only value accepted where the rules
+ * compare against `request.time`.
+ */
+function preparationFor(from: string, to: string, prior: { readyAt: unknown }) {
+  if (to === 'ready' && from === 'preparing') return { readyAt: serverTimestamp() }
+  if (to === 'ready' || to === 'delivered') return { readyAt: prior.readyAt }
+  return { readyAt: null }
+}
+
+/** `step()` built against what the document currently holds — see preparationFor. */
+async function stepAt(
+  db: ReturnType<typeof staffDb>,
+  status: string,
+  orderId: string,
+  uid = STAFF_UID,
+) {
+  const existing = await getDoc(doc(db, 'orderFulfillment', orderId))
+  const from = existing.exists() ? (existing.get('status') as string) : 'pending'
+  const prior = existing.exists() ? { readyAt: existing.get('readyAt') ?? null } : { readyAt: null }
+
+  return { ...step(status, orderId, uid), ...preparationFor(from, status, prior) }
+}
+
 /** A move written exactly as fulfillment-api.ts writes it: parent and journal in one batch. */
-function move(
+async function move(
   db: ReturnType<typeof staffDb>,
   {
     from,
@@ -94,7 +133,7 @@ function move(
   }: { from: string; to: string; orderId: string; uid?: string },
 ) {
   const batch = writeBatch(db)
-  batch.set(doc(db, 'orderFulfillment', orderId), step(to, orderId, uid))
+  batch.set(doc(db, 'orderFulfillment', orderId), await stepAt(db, to, orderId, uid))
   batch.set(
     doc(collection(db, 'orderFulfillment', orderId, 'transitions')),
     transition(from, to, orderId, uid),
@@ -163,7 +202,10 @@ async function seed() {
       initiatedByStaffName: 'Ada Admin',
     })
 
-    await setDoc(doc(db, 'orderFulfillment', 'today-1'), step('preparing', 'today-1'))
+    await setDoc(doc(db, 'orderFulfillment', 'today-1'), {
+      ...step('preparing', 'today-1'),
+      readyAt: null,
+    })
   })
 }
 
@@ -322,7 +364,7 @@ describe('fulfilment moved from the queue', () => {
     const db = staffDb()
     const batch = writeBatch(db)
     batch.set(doc(db, 'orderFulfillment', 'today-2'), {
-      ...step('preparing', 'today-2'),
+      ...(await stepAt(db, 'preparing', 'today-2')),
       updatedByStaffName: 'Someone Else',
     })
     batch.set(doc(collection(db, 'orderFulfillment', 'today-2', 'transitions')), {

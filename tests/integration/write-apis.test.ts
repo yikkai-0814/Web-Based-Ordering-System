@@ -13,6 +13,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { createMenuItem, deleteMenuItem, updateMenuItem } from '@/features/menu/menu-api'
 import type { Cart } from '@/features/pos/cart'
+import type { FulfillmentStatus } from '@/features/pos/fulfillment'
 import {
   correctFulfillment,
   FULFILLMENT_ORIGIN,
@@ -300,7 +301,12 @@ describe('setFulfillment moves an order and journals every step', () => {
     ] as const
 
     for (const [from, to] of steps) {
-      await setFulfillment(orderId, { from, to, user: asUser(staff), staff: asOperator(staff) })
+      await setFulfillment(orderId, {
+        from,
+        to,
+        user: asUser(staff),
+        staff: asOperator(staff),
+      })
     }
 
     const record = await getDoc(doc(db, 'orderFulfillment', orderId))
@@ -362,6 +368,162 @@ describe('setFulfillment moves an order and journals every step', () => {
         staff: asOperator(staff),
       }),
     ).rejects.toThrow()
+  })
+
+  // ---- Preparation timing -------------------------------------------------
+  // The app's own write path, against the real rules. The clock starts at the ORDER's
+  // createdAt, so what is checked here is the finish — and that a fulfilment step never
+  // touches the order document the start lives on.
+
+  async function finishOf(orderId: string) {
+    const snapshot = await getDoc(doc(db, 'orderFulfillment', orderId))
+    return snapshot.exists() ? (snapshot.get('readyAt') ?? null) : null
+  }
+
+  async function createdAtOf(orderId: string) {
+    return (await getDoc(doc(db, 'orders', orderId))).get('createdAt')
+  }
+
+  async function advance(orderId: string, from: FulfillmentStatus, to: FulfillmentStatus) {
+    await setFulfillment(orderId, {
+      from,
+      to,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+  }
+
+  it('gives a brand-new order a start the moment it is rung up', async () => {
+    const orderId = await placeOrder()
+
+    // No fulfilment document, no payment, nothing started — and the clock already has a
+    // start, because the order itself is the start.
+    expect(await createdAtOf(orderId)).not.toBeNull()
+    expect((await getDoc(doc(db, 'orderFulfillment', orderId))).exists()).toBe(false)
+  })
+
+  it('records no finish when preparation begins', async () => {
+    const orderId = await placeOrder()
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+
+    expect(await finishOf(orderId)).toBeNull()
+  })
+
+  it('stamps the finish at ready, and leaves the order untouched', async () => {
+    const orderId = await placeOrder()
+    const created = await createdAtOf(orderId)
+
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+    await advance(orderId, 'preparing', 'ready')
+
+    const readyAt = await finishOf(orderId)
+    expect(readyAt).not.toBeNull()
+    expect(readyAt.toMillis()).toBeGreaterThanOrEqual(created.toMillis())
+    // Orders are immutable: the start cannot have moved, whatever the kitchen did.
+    expect((await createdAtOf(orderId)).isEqual(created)).toBe(true)
+  })
+
+  it('keeps the finished duration available after delivery', async () => {
+    const orderId = await placeOrder()
+    const created = await createdAtOf(orderId)
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+    await advance(orderId, 'preparing', 'ready')
+    const atReady = await finishOf(orderId)
+
+    await advance(orderId, 'ready', 'delivered')
+
+    // Both ends of the window are exactly as they were, so the duration is too.
+    expect((await finishOf(orderId)).isEqual(atReady)).toBe(true)
+    expect((await createdAtOf(orderId)).isEqual(created)).toBe(true)
+  })
+
+  it('clears the finish when an admin corrects ready back to preparing', async () => {
+    const orderId = await placeOrder()
+    const created = await createdAtOf(orderId)
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+    await advance(orderId, 'preparing', 'ready')
+
+    await signInAs(admin)
+    await correctFulfillment(orderId, {
+      from: 'ready',
+      to: 'preparing',
+      user: asUser(admin),
+      staff: asOperator(admin),
+    })
+
+    // Not finished any more, so the timer runs again — from the original start, which the
+    // correction had no way of touching.
+    expect(await finishOf(orderId)).toBeNull()
+    expect((await createdAtOf(orderId)).isEqual(created)).toBe(true)
+
+    // The abandoned attempt is not lost: the journal still records every step.
+    const journal = await getDocs(collection(db, 'orderFulfillment', orderId, 'transitions'))
+    expect(journal.size).toBe(3)
+  })
+
+  it('clears it when an admin corrects preparing back to pending', async () => {
+    const orderId = await placeOrder()
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+
+    await signInAs(admin)
+    await correctFulfillment(orderId, {
+      from: 'preparing',
+      to: FULFILLMENT_ORIGIN,
+      user: asUser(admin),
+      staff: asOperator(admin),
+    })
+
+    expect(await finishOf(orderId)).toBeNull()
+  })
+
+  it('is unaffected by payment, taken at any point in the workflow', async () => {
+    const orderId = await placeOrder()
+    const created = await createdAtOf(orderId)
+
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+
+    // The customer pays mid-preparation, which is the normal case for a pay-later stall.
+    await recordPayment(orderId, {
+      method: 'cash',
+      amount: CART_TOTAL,
+      cashTendered: CART_TOTAL,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+
+    await advance(orderId, 'preparing', 'ready')
+
+    // Neither end of the window moved, and the payment lives in its own document.
+    expect((await createdAtOf(orderId)).isEqual(created)).toBe(true)
+    expect(await finishOf(orderId)).not.toBeNull()
+    const payment = await getDoc(doc(db, 'orderPayments', orderId))
+    expect(payment.exists()).toBe(true)
+  })
+
+  it('lets a second step be taken before the first is acknowledged', async () => {
+    // What an optimistic UI does: two writes queued back to back. The second must not send
+    // back a finish it read from the local cache before the server resolved it.
+    const orderId = await placeOrder()
+    await advance(orderId, FULFILLMENT_ORIGIN, 'preparing')
+
+    const finishing = setFulfillment(orderId, {
+      from: 'preparing',
+      to: 'ready',
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+    const delivering = setFulfillment(orderId, {
+      from: 'ready',
+      to: 'delivered',
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+    await Promise.all([finishing, delivering])
+
+    const record = await getDoc(doc(db, 'orderFulfillment', orderId))
+    expect(record.get('status')).toBe('delivered')
+    // The finish recorded by the first write survived the second, which said nothing about it.
+    expect(record.get('readyAt')).not.toBeNull()
   })
 })
 

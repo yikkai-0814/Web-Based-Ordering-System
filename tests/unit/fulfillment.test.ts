@@ -3,6 +3,12 @@ import { describe, expect, it } from 'vitest'
 import {
   canAdvanceFulfillment,
   FINAL_FULFILLMENT,
+  formatDuration,
+  isPreparationFinished,
+  nextReadyAt,
+  preparationElapsedMs,
+  preparationWindowOf,
+  PREPARATION_LABEL,
   FULFILLMENT_ACTIONS,
   FULFILLMENT_LABELS,
   FULFILLMENT_STATUSES,
@@ -253,7 +259,38 @@ describe('parseOrderFulfillment', () => {
       // ...and the person who actually made the move.
       updatedByStaffId: 'alice',
       updatedByStaffName: 'Alice',
+      // `base` has no readyAt, exactly as a record written before it was captured. It reads
+      // as "not finished", not as a reason to reject the record.
+      readyAt: null,
     })
+  })
+
+  it('keeps a legacy record readable, and reads it as simply not finished', () => {
+    // The pre-feature shape: a real, valid fulfilment with no readyAt at all. The order
+    // still has a createdAt, so the timer runs — it just never stops until one is recorded.
+    const parsed = parseOrderFulfillment('o1', { ...base })
+    const order = { createdAt: { toDate: () => new Date('2026-09-13T10:00:00.000Z') } }
+
+    expect(parsed).not.toBeNull()
+    expect(parsed?.status).toBe('ready')
+    const window = preparationWindowOf(order, parsed)
+    expect(isPreparationFinished(window)).toBe(false)
+    expect(preparationElapsedMs(window, new Date('2026-09-13T10:01:00.000Z').getTime())).toBe(
+      60_000,
+    )
+  })
+
+  it('ignores a stale preparingAt left on a record by an earlier version', () => {
+    // The field is no longer written or read; a document still carrying one must not change
+    // what the timer reports.
+    const preparingAt = { toDate: () => new Date('2026-09-13T10:04:00.000Z') }
+    const readyAt = { toDate: () => new Date('2026-09-13T10:05:00.000Z') }
+    const parsed = parseOrderFulfillment('o1', { ...base, preparingAt, readyAt })
+    const order = { createdAt: { toDate: () => new Date('2026-09-13T10:00:00.000Z') } }
+
+    expect('preparingAt' in (parsed ?? {})).toBe(false)
+    // Five minutes from creation, not one minute from the stale start.
+    expect(preparationElapsedMs(preparationWindowOf(order, parsed), 0)).toBe(300_000)
   })
 
   it('reads a missing or blank operator as absent rather than an empty name', () => {
@@ -402,5 +439,150 @@ describe('parseFulfillmentTransition', () => {
     expect(parsed?.updatedByName).toBe('Unknown')
     expect(parsed?.updatedByStaffId).toBeNull()
     expect(parsed?.updatedByStaffName).toBeNull()
+  })
+})
+
+/**
+ * Preparation timing.
+ *
+ * The thing under test throughout is that preparation means the ORDER'S OWN `createdAt` to
+ * `readyAt`. Not the moment somebody pressed "Start preparing", and above all not anything
+ * to do with payment: a ticket that waits before the kitchen picks it up has still kept the
+ * customer waiting, and that wait is the number being shown.
+ */
+describe('nextReadyAt decides what each step does to the finish time', () => {
+  it('does not record a finish when preparation begins', () => {
+    expect(nextReadyAt('pending', 'preparing')).toBeNull()
+  })
+
+  it('records the finish at ready — the one moment being measured', () => {
+    expect(nextReadyAt('preparing', 'ready')).toBe('now')
+  })
+
+  it('leaves a recorded finish alone when the order is handed over', () => {
+    expect(nextReadyAt('ready', 'delivered')).toBe('keep')
+  })
+
+  it('leaves it alone again when an admin corrects delivered back to ready', () => {
+    // A fulfilment correction, not the order being finished a second time.
+    expect(nextReadyAt('delivered', 'ready')).toBe('keep')
+  })
+
+  it('clears the finish when ready is corrected back to preparing', () => {
+    // The order is being worked on again, so it must stop claiming to be done — and the
+    // timer starts running again from the order's creation, which never moved.
+    expect(nextReadyAt('ready', 'preparing')).toBeNull()
+  })
+
+  it('clears it when the order is corrected all the way back to pending', () => {
+    expect(nextReadyAt('preparing', 'pending')).toBeNull()
+  })
+
+  it('never has anything to say about a start, because it does not own one', () => {
+    // Every step is covered by the table above; none of them can move the clock's start,
+    // which lives on the immutable order document.
+    const steps = [
+      ['pending', 'preparing'],
+      ['preparing', 'ready'],
+      ['ready', 'delivered'],
+      ['delivered', 'ready'],
+      ['ready', 'preparing'],
+      ['preparing', 'pending'],
+    ] as const
+    for (const [from, to] of steps) {
+      expect(['now', 'keep', null]).toContain(nextReadyAt(from, to))
+    }
+  })
+})
+
+describe('preparation duration runs from the order, not from the kitchen', () => {
+  const at = (iso: string) => ({ toDate: () => new Date(iso) })
+  const CREATED = '2026-09-13T19:30:00.000Z'
+  const createdMs = new Date(CREATED).getTime()
+  const order = { createdAt: at(CREATED) }
+
+  it('is the worked example: created 7:30:00, ready 7:42:30, so 12m 30s', () => {
+    const window = preparationWindowOf(order, { readyAt: at('2026-09-13T19:42:30.000Z') })
+    expect(preparationElapsedMs(window, 0)).toBe(750_000)
+    expect(formatDuration(preparationElapsedMs(window, 0) ?? 0)).toBe('12:30')
+  })
+
+  it('starts immediately on a brand-new order, with no fulfilment record at all', () => {
+    // Nothing has happened to this order yet: not paid, not started, no sidecar.
+    const window = preparationWindowOf(order, null)
+    expect(preparationElapsedMs(window, createdMs + 3_000)).toBe(3_000)
+    expect(isPreparationFinished(window)).toBe(false)
+  })
+
+  it('keeps counting while the order is pending, unpaid and untouched', () => {
+    const window = preparationWindowOf(order, null)
+    expect(preparationElapsedMs(window, createdMs + 60_000)).toBe(60_000)
+    expect(preparationElapsedMs(window, createdMs + 300_000)).toBe(300_000)
+  })
+
+  it('keeps counting once it is preparing, from the SAME start', () => {
+    // The fulfilment record exists now, and it changes nothing about where the clock began.
+    const window = preparationWindowOf(order, { readyAt: null })
+    expect(preparationElapsedMs(window, createdMs + 420_000)).toBe(420_000)
+  })
+
+  it('freezes at readyAt, and ignores the clock entirely once it has', () => {
+    const window = preparationWindowOf(order, { readyAt: at('2026-09-13T19:42:30.000Z') })
+    expect(isPreparationFinished(window)).toBe(true)
+    // An hour later the answer is the same: the duration is history, not a running total.
+    expect(preparationElapsedMs(window, createdMs + 3_600_000)).toBe(750_000)
+    expect(preparationElapsedMs(window, createdMs)).toBe(750_000)
+  })
+
+  it('is unchanged by delivery, which touches neither timestamp', () => {
+    const atReady = preparationWindowOf(order, { readyAt: at('2026-09-13T19:42:30.000Z') })
+    const atDelivered = preparationWindowOf(order, { readyAt: at('2026-09-13T19:42:30.000Z') })
+    expect(preparationElapsedMs(atDelivered, 0)).toBe(preparationElapsedMs(atReady, 0))
+  })
+
+  it('runs again from the original start when ready is corrected back to preparing', () => {
+    // readyAt is cleared by that step; createdAt was never touched, so the timer simply
+    // resumes counting the order's whole life rather than starting a second stopwatch.
+    const window = preparationWindowOf(order, { readyAt: null })
+    expect(isPreparationFinished(window)).toBe(false)
+    expect(preparationElapsedMs(window, createdMs + 900_000)).toBe(900_000)
+  })
+
+  it('has nothing to report before the order has a resolved creation time', () => {
+    // A just-written order whose serverTimestamp has not come back from the server yet.
+    expect(preparationElapsedMs(preparationWindowOf({ createdAt: null }, null), 0)).toBeNull()
+    expect(preparationElapsedMs(preparationWindowOf(null, null), 0)).toBeNull()
+  })
+
+  it('never reports a negative duration', () => {
+    const window = preparationWindowOf(order, { readyAt: at('2026-09-13T19:29:00.000Z') })
+    expect(preparationElapsedMs(window, createdMs)).toBe(0)
+  })
+})
+
+describe('formatDuration reads like a counter', () => {
+  it('shows minutes and seconds, seconds always two digits', () => {
+    expect(formatDuration(0)).toBe('0:00')
+    expect(formatDuration(9_000)).toBe('0:09')
+    expect(formatDuration(65_000)).toBe('1:05')
+    expect(formatDuration(750_000)).toBe('12:30')
+  })
+
+  it('grows an hours field only once it needs one', () => {
+    expect(formatDuration(3_599_000)).toBe('59:59')
+    expect(formatDuration(3_600_000)).toBe('1:00:00')
+    expect(formatDuration(3_827_000)).toBe('1:03:47')
+  })
+
+  it('floors rather than rounds, so no second is shown before it has passed', () => {
+    expect(formatDuration(1_999)).toBe('0:01')
+  })
+
+  it('clamps below zero', () => {
+    expect(formatDuration(-5_000)).toBe('0:00')
+  })
+
+  it('labels the number so it cannot be read as something else', () => {
+    expect(PREPARATION_LABEL).toBe('Prep time')
   })
 })

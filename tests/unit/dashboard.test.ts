@@ -40,6 +40,7 @@ const fulfillment = (orderId: string, status: FulfillmentStatus): OrderFulfillme
   updatedByName: 'Shared Till',
   updatedByStaffId: 'bob',
   updatedByStaffName: 'Bob',
+  readyAt: null,
 })
 
 const payment = (orderId: string, amount: number): OrderPayment => ({

@@ -536,13 +536,19 @@ service cloud.firestore {
       // Key set from writeTransition in src/features/pos/fulfillment-api.ts. It writes this
       // document with set() rather than update(), so it is always replaced whole — there is
       // no earlier key merged back in that this list would have to tolerate.
+      // `preparingAt` is listed as OPTIONAL, not required: it is never written any more —
+      // the preparation clock starts from the order's own createdAt — but documents written
+      // while it was are still out there, and a merged update still carries the key. It is
+      // tolerated so those orders keep moving, and read by nothing.
       return hasFields(
           ['orderId', 'status', 'updatedAt', 'updatedBy', 'updatedByName', 'updatedByStaffId',
-           'updatedByStaffName'], [])
+           'updatedByStaffName', 'readyAt'], ['preparingAt'])
         && d.orderId == orderId
         && d.status is string
         && fulfillmentIndex(d.status) >= 0
         && d.updatedAt is timestamp
+        // Either a real instant or explicitly nothing.
+        && (d.readyAt == null || d.readyAt is timestamp)
         && validMover(d)
         && exists(/databases/$(database)/documents/orders/$(orderId))
         // A voided sale is cancelled; it must not continue through the kitchen.
@@ -554,6 +560,48 @@ service cloud.firestore {
       return request.resource.data.status == 'preparing';
     }
 
+    // ---- Preparation timing ------------------------------------------------
+    // How long an order took, measured from when the SALE WAS RUNG UP to when it was marked
+    // ready. The start is the order's own immutable `createdAt`, so nothing here records it
+    // and nothing here can move it: a ticket that waits before anybody starts on it has
+    // still been waiting, and payment has no bearing on any of it.
+    //
+    // Only the finish lives on this document, and the client sends it, so it is checked
+    // against `request.time` — the server's own clock for this write, which is what
+    // serverTimestamp() resolves to. That is what stops a till backdating a finish to
+    // flatter its numbers, or claiming one for an order it never completed. The same table
+    // lives in `nextReadyAt` (fulfillment.ts) so the app knows what to send; neither is the
+    // other's enforcement.
+    //
+    // A step that PRESERVES the finish does not write the field at all — the app merges
+    // rather than replacing — so `readyAt` on such a request is the stored value itself and
+    // the comparison below is trivially satisfied. Reading it behind an `in` guard still
+    // matters for documents written before this field existed, where a bare
+    // `resource.data.readyAt` would error the rule and deny an ordinary step.
+
+    function priorReadyAt() {
+      return 'readyAt' in resource.data ? resource.data.readyAt : null;
+    }
+
+    // A first move is always pending -> preparing, so nothing can have finished yet.
+    function validPreparationCreate() {
+      return request.resource.data.readyAt == null;
+    }
+
+    function validPreparationUpdate() {
+      let d = request.resource.data;
+      let to = d.status;
+      let from = resource.data.status;
+      // Finishing: the one moment being measured.
+      return (to == 'ready' && from == 'preparing') ? d.readyAt == request.time
+        // Handing over, and the admin correction back out of it. A recorded finish stays
+        // exactly as it was and remains readable for the rest of the order's life.
+        : (to == 'delivered' || to == 'ready') ? d.readyAt == priorReadyAt()
+        // Back into the kitchen, or all the way back to the start: the order is not
+        // finished, so it must not claim to be.
+        : d.readyAt == null;
+    }
+
     function fulfillmentStepChange() {
       return fulfillmentIndex(request.resource.data.status)
         - fulfillmentIndex(resource.data.status);
@@ -561,9 +609,13 @@ service cloud.firestore {
 
     match /orderFulfillment/{orderId} {
       allow read: if isActive();
-      allow create: if isActive() && validFulfillmentFields(orderId) && validFulfillmentStart();
+      allow create: if isActive()
+        && validFulfillmentFields(orderId)
+        && validFulfillmentStart()
+        && validPreparationCreate();
       allow update: if isActive()
         && validFulfillmentFields(orderId)
+        && validPreparationUpdate()
         && (fulfillmentStepChange() == 1 || (isAdmin() && fulfillmentStepChange() == -1));
       // A record of how an order progressed is not something to erase.
       allow delete: if false;

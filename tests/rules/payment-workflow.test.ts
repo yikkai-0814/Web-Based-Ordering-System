@@ -7,7 +7,16 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing'
-import { collection, doc, getDoc, getDocs, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { changeDue } from '@/features/pos/cart'
@@ -215,8 +224,40 @@ const stepTrail = (
   updatedByStaffName: operator.name,
 })
 
+/**
+ * The finish timestamp the rules will accept for a step into `to`. The clock's START is the
+ * order's own createdAt, which no fulfilment write can touch.
+ *
+ * Kept alongside this file's other write helpers rather than imported from the app: these
+ * suites exist to state what the SERVER accepts, and sharing the app's table would make the
+ * two agree by construction. `serverTimestamp()` is the only value accepted where the rules
+ * compare against `request.time`.
+ */
+function preparationFor(from: string, to: string, prior: { readyAt: unknown }) {
+  if (to === 'ready' && from === 'preparing') return { readyAt: serverTimestamp() }
+  if (to === 'ready' || to === 'delivered') return { readyAt: prior.readyAt }
+  return { readyAt: null }
+}
+
+/**
+ * `stepDoc()` built against what the document currently holds, since a preserved timestamp
+ * must be resent exactly — the parent is written whole.
+ */
+async function stepDocAt(
+  db: ReturnType<typeof staffDb>,
+  orderId: string,
+  to: FulfillmentStatus,
+  operator: { id: string; name: string } = { id: 'alice', name: 'Alice' },
+) {
+  const existing = await getDoc(doc(db, 'orderFulfillment', orderId))
+  const from = existing.exists() ? (existing.get('status') as string) : 'pending'
+  const prior = existing.exists() ? { readyAt: existing.get('readyAt') ?? null } : { readyAt: null }
+
+  return { ...stepDoc(orderId, to, operator), ...preparationFor(from, to, prior) }
+}
+
 /** One move, written the way fulfillment-api.ts writes it: both documents, one batch. */
-function moveOrder(
+async function moveOrder(
   db: ReturnType<typeof staffDb>,
   orderId: string,
   from: FulfillmentStatus,
@@ -224,7 +265,7 @@ function moveOrder(
   operator: { id: string; name: string } = { id: 'alice', name: 'Alice' },
 ) {
   const batch = writeBatch(db)
-  batch.set(doc(db, 'orderFulfillment', orderId), stepDoc(orderId, to, operator))
+  batch.set(doc(db, 'orderFulfillment', orderId), await stepDocAt(db, orderId, to, operator))
   batch.set(
     doc(collection(db, 'orderFulfillment', orderId, 'transitions')),
     stepTrail(orderId, from, to, operator),
@@ -629,15 +670,21 @@ describe('Test 8 - the whole pay-later journey, against the live rules', () => {
     expect(now.overall).toBe('pending')
 
     // The food is made. Each step is a separate, individually validated write.
-    await assertSucceeds(setDoc(doc(db, 'orderFulfillment', 'o1'), stepDoc('o1', 'preparing')))
+    await assertSucceeds(
+      setDoc(doc(db, 'orderFulfillment', 'o1'), await stepDocAt(db, 'o1', 'preparing')),
+    )
     now = await stateOf('o1')
     expect(now.overall).toBe('preparing')
 
-    await assertSucceeds(updateDoc(doc(db, 'orderFulfillment', 'o1'), stepDoc('o1', 'ready')))
+    await assertSucceeds(
+      updateDoc(doc(db, 'orderFulfillment', 'o1'), await stepDocAt(db, 'o1', 'ready')),
+    )
     now = await stateOf('o1')
     expect(now.overall).toBe('ready')
 
-    await assertSucceeds(updateDoc(doc(db, 'orderFulfillment', 'o1'), stepDoc('o1', 'delivered')))
+    await assertSucceeds(
+      updateDoc(doc(db, 'orderFulfillment', 'o1'), await stepDocAt(db, 'o1', 'delivered')),
+    )
 
     // Handed over, and the customer has not paid. The state this feature exists for: it must
     // not read as finished, and the money must still show as owed.
@@ -664,8 +711,12 @@ describe('Test 8 - the whole pay-later journey, against the live rules', () => {
     await seed()
     const db = staffDb()
     await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), orderDoc()))
-    await assertSucceeds(setDoc(doc(db, 'orderFulfillment', 'o1'), stepDoc('o1', 'preparing')))
-    await assertSucceeds(updateDoc(doc(db, 'orderFulfillment', 'o1'), stepDoc('o1', 'ready')))
+    await assertSucceeds(
+      setDoc(doc(db, 'orderFulfillment', 'o1'), await stepDocAt(db, 'o1', 'preparing')),
+    )
+    await assertSucceeds(
+      updateDoc(doc(db, 'orderFulfillment', 'o1'), await stepDocAt(db, 'o1', 'ready')),
+    )
 
     // Paying early is ordinary at a counter, and it does not finish the order.
     await assertSucceeds(setDoc(doc(db, 'orderPayments', 'o1'), paymentDoc('o1')))
@@ -677,7 +728,9 @@ describe('Test 8 - the whole pay-later journey, against the live rules', () => {
     expect(isCompleted(now.overall)).toBe(false)
 
     // Handing it over is what completes it.
-    await assertSucceeds(updateDoc(doc(db, 'orderFulfillment', 'o1'), stepDoc('o1', 'delivered')))
+    await assertSucceeds(
+      updateDoc(doc(db, 'orderFulfillment', 'o1'), await stepDocAt(db, 'o1', 'delivered')),
+    )
     expect((await stateOf('o1')).overall).toBe('completed')
   })
 
@@ -685,7 +738,9 @@ describe('Test 8 - the whole pay-later journey, against the live rules', () => {
     await seed()
     const db = staffDb()
     await assertSucceeds(setDoc(doc(db, 'orders', 'o1'), orderDoc()))
-    await assertSucceeds(setDoc(doc(db, 'orderFulfillment', 'o1'), stepDoc('o1', 'preparing')))
+    await assertSucceeds(
+      setDoc(doc(db, 'orderFulfillment', 'o1'), await stepDocAt(db, 'o1', 'preparing')),
+    )
 
     await assertSucceeds(
       setDoc(doc(adminDb(), 'orderVoids', 'o1'), {
@@ -701,7 +756,9 @@ describe('Test 8 - the whole pay-later journey, against the live rules', () => {
     )
 
     // The kitchen cannot carry on with a cancelled sale.
-    await assertFails(updateDoc(doc(db, 'orderFulfillment', 'o1'), stepDoc('o1', 'ready')))
+    await assertFails(
+      updateDoc(doc(db, 'orderFulfillment', 'o1'), await stepDocAt(db, 'o1', 'ready')),
+    )
 
     const now = await stateOf('o1')
     expect(now.overall).toBe('voided')

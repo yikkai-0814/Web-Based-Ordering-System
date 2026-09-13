@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { AlertCircle, ChefHat } from 'lucide-react'
 
@@ -14,6 +14,7 @@ import { setFulfillment } from '@/features/pos/fulfillment-api'
 import { orderTypeSummaryOf } from '@/features/pos/order-type'
 import type { OrderView } from '@/features/pos/orders-view'
 import { FulfillmentStatusBadge, PaymentStatusBadge } from '@/features/pos/PaymentStatusBadge'
+import { PreparationTime } from '@/features/pos/PreparationTime'
 import {
   groupQueue,
   itemCountOf,
@@ -51,9 +52,31 @@ export function QueuePage() {
   const { profile } = useAuth()
   const { operator } = useStaffSession()
 
-  /** Which card is mid-write, so its button can be disabled without freezing the board. */
-  const [moving, setMoving] = useState<string | null>(null)
+  /**
+   * The step each card currently has in flight, keyed by order id.
+   *
+   * The VALUE matters as much as the key. Firestore applies a write to its local cache
+   * before the server has acknowledged it, so the listener moves the card to its new column
+   * within a frame or two - at which point the card offers the NEXT step. Keying only by
+   * order id would leave that next button greyed out until the acknowledgement came back,
+   * which is precisely what made the board feel slow: the state was already correct on
+   * screen and the button was still refusing to be pressed. Keyed by target, a card is busy
+   * only for the exact step still in flight, and the step after it is available at once.
+   *
+   * It is still a guard: pressing the same button twice cannot send the same step twice.
+   */
+  const [inFlight, setInFlight] = useState<ReadonlyMap<string, FulfillmentStatus>>(() => new Map())
   const [moveError, setMoveError] = useState<string | null>(null)
+
+  /**
+   * The same map, kept in a ref because the guard has to be answered SYNCHRONOUSLY.
+   *
+   * A state updater is not guaranteed to run during the event that queued it, so deciding
+   * "is this step already in flight?" from inside `setInFlight` would sometimes decide it
+   * after the second click had already been let through. The ref is the authority; the
+   * state exists only to re-render the button.
+   */
+  const inFlightRef = useRef<ReadonlyMap<string, FulfillmentStatus>>(inFlight)
 
   const columns = useMemo(() => groupQueue(views), [views])
   const queued = columns.reduce((count, column) => count + column.views.length, 0)
@@ -66,10 +89,45 @@ export function QueuePage() {
    */
   const mover = operator ?? (profile ? { id: profile.uid, name: profile.displayName } : null)
 
+  /** Marks a step in flight, or reports that the identical step already is. */
+  function claim(orderId: string, to: FulfillmentStatus): boolean {
+    if (inFlightRef.current.get(orderId) === to) return false
+    const next = new Map(inFlightRef.current)
+    next.set(orderId, to)
+    inFlightRef.current = next
+    setInFlight(next)
+    return true
+  }
+
+  function release(orderId: string, to: FulfillmentStatus) {
+    // Only if it is still OUR step: a later one may already have claimed the slot.
+    if (inFlightRef.current.get(orderId) !== to) return
+    const next = new Map(inFlightRef.current)
+    next.delete(orderId)
+    inFlightRef.current = next
+    setInFlight(next)
+  }
+
+  /**
+   * Moves a card, without making the board wait for the server.
+   *
+   * There is no hand-rolled optimistic copy of the queue here, and deliberately so.
+   * Firestore already applies the write to its local cache immediately, so the snapshot
+   * listener behind `useOrdersWorkspace` reports the new status within a frame - and if the
+   * write is later refused, it rolls the local change back and the listener reports THAT
+   * too. A second, hand-maintained copy of the same state could only ever disagree with
+   * that rollback; the fix for the delay was to stop blocking the UI on the acknowledgement,
+   * not to duplicate the state.
+   *
+   * So all this does is record the step as in flight, fire the write, and surface a failure.
+   * The revert is Firestore's, and it is the same mechanism whether the refusal comes from
+   * the rules, the network, or somebody else having moved the card first.
+   */
   async function handleAdvance(view: OrderView, to: FulfillmentStatus) {
     if (!profile || !mover) return
+    if (!claim(view.order.id, to)) return
+
     setMoveError(null)
-    setMoving(view.order.id)
     try {
       await setFulfillment(view.order.id, {
         from: view.fulfillment,
@@ -79,7 +137,8 @@ export function QueuePage() {
       })
     } catch (caught) {
       // A rules refusal says only 'permission-denied', which tells the kitchen nothing. On a
-      // shared board the realistic cause is that somebody else moved this card first.
+      // shared board the realistic cause is that somebody else moved this card first. The
+      // card itself has already snapped back by now - this only explains why.
       const denied = typeof caught === 'object' && caught !== null && 'code' in caught
       setMoveError(
         denied
@@ -89,7 +148,7 @@ export function QueuePage() {
             : 'That step could not be saved.',
       )
     } finally {
-      setMoving(null)
+      release(view.order.id, to)
     }
   }
 
@@ -130,7 +189,7 @@ export function QueuePage() {
               key={column.status}
               status={column.status}
               views={column.views}
-              moving={moving}
+              inFlight={inFlight}
               onAdvance={handleAdvance}
             />
           ))}
@@ -143,12 +202,12 @@ export function QueuePage() {
 function QueueColumnPanel({
   status,
   views,
-  moving,
+  inFlight,
   onAdvance,
 }: {
   status: QueueColumn
   views: OrderView[]
-  moving: string | null
+  inFlight: ReadonlyMap<string, FulfillmentStatus>
   onAdvance: (view: OrderView, to: FulfillmentStatus) => Promise<void>
 }) {
   return (
@@ -176,7 +235,11 @@ function QueueColumnPanel({
         <ul className="space-y-3">
           {views.map((view) => (
             <li key={view.order.id}>
-              <QueueCard view={view} busy={moving === view.order.id} onAdvance={onAdvance} />
+              <QueueCard
+                view={view}
+                inFlightTo={inFlight.get(view.order.id) ?? null}
+                onAdvance={onAdvance}
+              />
             </li>
           ))}
         </ul>
@@ -187,15 +250,19 @@ function QueueColumnPanel({
 
 function QueueCard({
   view,
-  busy,
+  inFlightTo,
   onAdvance,
 }: {
   view: OrderView
-  busy: boolean
+  /** The step this card has in flight, if any - see `inFlight` on the page. */
+  inFlightTo: FulfillmentStatus | null
   onAdvance: (view: OrderView, to: FulfillmentStatus) => Promise<void>
 }) {
   const { order } = view
   const action = queueActionFor(view)
+  // Busy only for the step actually in flight. Once the card has moved, the step it now
+  // offers is a different one and is pressable immediately.
+  const busy = action !== null && inFlightTo === action.next
 
   return (
     <article
@@ -250,6 +317,11 @@ function QueueCard({
           {itemCountOf(view)} {itemCountOf(view) === 1 ? 'item' : 'items'}
         </span>
       </div>
+
+      {/* Runs from the moment the sale was rung up and freezes when it is marked ready.
+          Neither the fulfilment status nor payment has any say in it, and nothing is
+          written per second - see the preparation-timing block in fulfillment.ts. */}
+      <PreparationTime order={order} fulfillment={view.fulfillmentRecord} className="block" />
 
       {/* Who rang it up, and — once somebody has touched it — who moved it last. The second
           line is why operator identities exist: a shared login cannot answer either. */}

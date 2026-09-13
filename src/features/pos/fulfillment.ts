@@ -211,3 +211,146 @@ export function indexFulfillmentsByOrderId<T extends { orderId: string }>(
   for (const entry of records) index.set(entry.orderId, entry)
   return index
 }
+
+/* ---------------------------------------------------------------------------
+ * Preparation timing
+ *
+ * The clock starts when the ORDER IS CREATED and stops when it is marked ready:
+ * `order.createdAt` to `readyAt`. Nothing else starts, pauses or resets it — in particular
+ * payment has no bearing on it at all, and neither does the moment somebody presses "Start
+ * preparing". A ticket that sits untouched for ten minutes has still been waiting ten
+ * minutes, and that wait is exactly what this number is for.
+ *
+ * There is therefore **no separate start timestamp**. `order.createdAt` already records when
+ * the clock started, on a document that is immutable, so storing a second one would be a
+ * fact that could disagree with itself. Only the finish is recorded, on the fulfilment
+ * sidecar, because nothing else knows when the order stopped being made.
+ *
+ * Nothing here reads a clock. The elapsed value is derived at render time from the stored
+ * timestamps and a `now` the caller supplies, so a running timer costs no writes — see
+ * `useNow`.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * What a transition should do to `readyAt`.
+ *
+ * `'now'` is the server's own time for this write, `'keep'` leaves the stored value alone,
+ * and `null` clears it. Deliberately a description rather than a value: the API turns it
+ * into `serverTimestamp()` (or into not writing the field at all) and firestore.rules checks
+ * the same table against `request.time`, so the two agree without either trusting the other.
+ */
+export type ReadyAtInstruction = 'now' | 'keep' | null
+
+/**
+ * What each step does to the finish time.
+ *
+ * | Step                   | readyAt | Why                                              |
+ * | ---------------------- | ------- | ------------------------------------------------ |
+ * | pending → preparing    | null    | not finished; the clock has been running already |
+ * | preparing → ready      | now     | this is the moment being measured                |
+ * | ready → delivered      | keep    | handing over is not making                       |
+ * | delivered → ready      | keep    | a fulfilment correction, not a remake            |
+ * | ready → preparing      | null    | it is being worked on again, so it is not done   |
+ * | preparing → pending    | null    | already null; stated so the table is total       |
+ *
+ * Note what is NOT here: no step touches the start, because no step owns it. The order's own
+ * `createdAt` does, and orders are immutable.
+ */
+export function nextReadyAt(from: FulfillmentStatus, to: FulfillmentStatus): ReadyAtInstruction {
+  if (to === 'ready') {
+    // Arriving from `preparing` is the order being finished. Arriving from `delivered` is an
+    // admin undoing a mis-tap, which must not overwrite the time it was really finished.
+    return from === 'preparing' ? 'now' : 'keep'
+  }
+  if (to === 'delivered') return 'keep'
+  return null
+}
+
+/**
+ * Anything that converts to a Date — a Firestore `Timestamp`, or a stand-in in a test.
+ *
+ * Structural on purpose: this module stays free of Firestore imports, exactly as cart.ts,
+ * payments.ts and voids.ts do.
+ */
+export interface DateLike {
+  toDate(): Date
+}
+
+/** The order half of the window: when the clock started. */
+export interface TimeableOrder {
+  createdAt: DateLike | null
+}
+
+/** The fulfilment half: when it stopped, if it has. */
+export interface FinishableFulfillment {
+  readyAt: DateLike | null
+}
+
+/** When preparation started and, if it has, when it finished. */
+export interface PreparationWindow {
+  startedAt: Date | null
+  finishedAt: Date | null
+}
+
+/**
+ * The window for one order: creation to ready.
+ *
+ * `startedAt` is null only while a just-placed order's `createdAt` is still an unresolved
+ * server timestamp in the local cache — a frame or two, after which it fills in.
+ */
+export function preparationWindowOf(
+  order: TimeableOrder | null,
+  fulfillment: FinishableFulfillment | null,
+): PreparationWindow {
+  return {
+    startedAt: order?.createdAt?.toDate() ?? null,
+    finishedAt: fulfillment?.readyAt?.toDate() ?? null,
+  }
+}
+
+/**
+ * How long the order has taken, in milliseconds, or null when the start is not known yet.
+ *
+ * Still running: measured against the `now` the caller passes. Finished: frozen at
+ * `finishedAt`, so the number stops the instant the order is marked ready and stays
+ * available for the rest of the order's life, through `delivered`.
+ *
+ * Clamped at zero. A finish before the start should be impossible — one comes from the
+ * order's own creation and the other from the server's clock — but a negative duration on a
+ * kitchen display would be a worse answer than nothing.
+ */
+export function preparationElapsedMs(window: PreparationWindow, now: number): number | null {
+  if (!window.startedAt) return null
+  const end = window.finishedAt ? window.finishedAt.getTime() : now
+  return Math.max(0, end - window.startedAt.getTime())
+}
+
+/** True once the window has closed — the duration shown is final, not ticking. */
+export function isPreparationFinished(window: PreparationWindow): boolean {
+  return window.startedAt !== null && window.finishedAt !== null
+}
+
+/**
+ * A duration as a counter reads it: `4:12`, or `1:03:47` once it runs past an hour.
+ *
+ * Seconds are floored rather than rounded so a timer never shows a second that has not
+ * elapsed yet, and minutes and seconds are always two digits past their first unit so the
+ * text does not change width while it ticks.
+ */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const seconds = total % 60
+  const minutes = Math.floor(total / 60) % 60
+  const hours = Math.floor(total / 3600)
+
+  const pad = (value: number) => value.toString().padStart(2, '0')
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`
+}
+
+/**
+ * The one wording for this number anywhere in the UI.
+ *
+ * Named rather than inlined because the distinction it draws is the whole point: a reader
+ * seeing a bare duration on an order card would reasonably take it for something else.
+ */
+export const PREPARATION_LABEL = 'Prep time'

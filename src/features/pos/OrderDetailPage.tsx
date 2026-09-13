@@ -15,6 +15,7 @@ import {
   type FulfillmentStatus,
 } from '@/features/pos/fulfillment'
 import { setFulfillment } from '@/features/pos/fulfillment-api'
+import { PreparationTime } from '@/features/pos/PreparationTime'
 import { ORDER_TYPE_LABELS } from '@/features/pos/order-type'
 import { withManagerAuthorization } from '@/features/pos/manager-authorization'
 import { recordPayment } from '@/features/pos/payment-api'
@@ -295,6 +296,18 @@ export function OrderDetailPage() {
                 </dd>
               </div>
             )}
+            {/* Creation to ready: live while the order is outstanding, then fixed and kept
+                for the rest of its life. Payment has no bearing on it. */}
+            <div className="flex items-center gap-3">
+              <dt className="text-muted-foreground">Preparation</dt>
+              <dd className="ml-auto">
+                <PreparationTime
+                  order={order}
+                  fulfillment={fulfillmentRecord}
+                  className="text-sm text-foreground"
+                />
+              </dd>
+            </div>
             <div className="flex items-center gap-3">
               <dt className="text-muted-foreground">Payment</dt>
               <dd className="ml-auto">

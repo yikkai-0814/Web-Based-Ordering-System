@@ -4,6 +4,7 @@ import {
   INITIAL_FULFILLMENT,
   isBackwardStep,
   isForwardStep,
+  nextReadyAt,
   type FulfillmentStatus,
 } from '@/features/pos/fulfillment'
 import { db } from '@/lib/firebase'
@@ -51,19 +52,45 @@ async function writeTransition(
   { from, to, user, staff }: SetFulfillmentParams,
 ): Promise<void> {
   const batch = writeBatch(db)
+  const readyAt = nextReadyAt(from, to)
 
-  batch.set(doc(db, 'orderFulfillment', orderId), {
-    orderId,
-    status: to,
-    updatedAt: serverTimestamp(),
-    updatedBy: user.uid,
-    updatedByName: user.displayName,
-    // The rules check this identity exists, is active, and that the name matches theirs
-    // right now — so the snapshot is provably accurate at the moment of the move.
-    updatedByStaffId: staff.id,
-    updatedByStaffName: staff.name,
-  })
+  batch.set(
+    doc(db, 'orderFulfillment', orderId),
+    {
+      orderId,
+      status: to,
+      updatedAt: serverTimestamp(),
+      updatedBy: user.uid,
+      updatedByName: user.displayName,
+      // The rules check this identity exists, is active, and that the name matches theirs
+      // right now — so the snapshot is provably accurate at the moment of the move.
+      updatedByStaffId: staff.id,
+      updatedByStaffName: staff.name,
+      // Omitted entirely on a step that must preserve it — see the merge note below. The
+      // rules check the same table against the server's own clock, so a client can neither
+      // backdate a finish nor invent one that never happened.
+      ...(readyAt === 'keep' ? {} : { readyAt: readyAt === 'now' ? serverTimestamp() : null }),
+    },
+    /**
+     * Merged rather than replaced, which matters for exactly one reason: a step that must
+     * PRESERVE `readyAt` now says nothing about it at all, instead of reading the stored
+     * value and sending it back.
+     *
+     * Reading it back would be wrong under an optimistic UI. A queued write is applied to
+     * the local cache first, where an unresolved `serverTimestamp()` reads as null — so a
+     * second step taken before the first was acknowledged would resend null for a finish
+     * time the server had already recorded, and the rules would rightly refuse it. Saying
+     * nothing cannot be wrong: an unwritten field is unchanged by definition.
+     *
+     * `merge: true` also creates the document when it does not exist, so the first step out
+     * of the implicit `pending` needs no special case.
+     */
+    { merge: true },
+  )
 
+  // The journal is deliberately untouched by preparation timing: it already records `at` on
+  // every step, and it answers a different question — what happened and who did it, rather
+  // than how long the attempt now underway has been running.
   batch.set(doc(collection(db, 'orderFulfillment', orderId, 'transitions')), {
     orderId,
     from,

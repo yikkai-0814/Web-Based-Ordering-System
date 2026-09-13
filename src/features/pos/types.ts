@@ -446,6 +446,17 @@ export interface OrderFulfillment {
    */
   updatedByStaffId: string | null
   updatedByStaffName: string | null
+  /**
+   * When the order stopped being made.
+   *
+   * The other half of the preparation window is the ORDER's `createdAt`, not anything here:
+   * the clock starts when the sale is rung up, so a ticket that waits before anybody starts
+   * on it is still counted as waiting. See the preparation-timing block in fulfillment.ts.
+   *
+   * Null while the order is not yet ready, on a record whose `ready` was corrected back a
+   * step, and on one written before this was recorded at all.
+   */
+  readyAt: Timestamp | null
 }
 
 /**
@@ -517,7 +528,15 @@ export function parseOrderFulfillment(
   orderId: string,
   data: Record<string, unknown>,
 ): OrderFulfillment | null {
-  const { status, updatedAt, updatedBy, updatedByName, updatedByStaffId, updatedByStaffName } = data
+  const {
+    status,
+    updatedAt,
+    updatedBy,
+    updatedByName,
+    updatedByStaffId,
+    updatedByStaffName,
+    readyAt,
+  } = data
 
   // An unrecognised status cannot be placed on the progression, so the record is skipped and
   // the order falls back to its resolved default rather than rendering a state that is not
@@ -536,6 +555,10 @@ export function parseOrderFulfillment(
       typeof updatedByStaffName === 'string' && updatedByStaffName !== ''
         ? updatedByStaffName
         : null,
+    // Absent on every record written before this was recorded. Read as "not finished yet"
+    // rather than as a reason to reject the record: those orders were fulfilled perfectly
+    // well and must keep rendering.
+    readyAt: (readyAt as Timestamp | undefined) ?? null,
   }
 }
 
