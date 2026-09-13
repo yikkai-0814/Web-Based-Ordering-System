@@ -59,21 +59,31 @@ describe('Sidebar: what each role is offered', () => {
     expect(screen.queryByRole('link', { name: 'Dashboard' })).toBeNull()
   })
 
-  it('keeps the Dashboard for an admin, alongside New Order', () => {
+  it('shows an admin Dashboard, Reports, Orders, Menu and Staff — and nothing else', () => {
     renderSidebar('admin')
-    const names = linkNames()
-    expect(names).toContain('Dashboard')
-    expect(names).toContain('New Order')
-    expect(names).toContain('Reports')
+    expect(linkNames()).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff'])
   })
 
-  it('calls it New Order rather than Till, for both roles', () => {
+  it('does not offer an admin the counter', () => {
+    // The nav is not the control — /pos and /queue are guarded routes — but an admin should
+    // not be invited to a page they will be refused.
+    renderSidebar('admin')
+    expect(screen.queryByRole('link', { name: 'New Order' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Queue' })).toBeNull()
+  })
+
+  it('offers no Admin landing page to either role', () => {
+    // Menu, Staff and Reports are each a link of their own.
+    renderSidebar('admin')
+    expect(screen.queryByRole('link', { name: 'Admin' })).toBeNull()
+    renderSidebar('staff')
+    expect(screen.queryByRole('link', { name: 'Admin' })).toBeNull()
+  })
+
+  it('calls it New Order rather than Till', () => {
     renderSidebar('staff')
     expect(screen.getByRole('link', { name: 'New Order' }).getAttribute('href')).toBe('/pos')
     expect(screen.queryByRole('link', { name: 'Till' })).toBeNull()
-
-    renderSidebar('admin')
-    expect(screen.getAllByRole('link', { name: 'New Order' })[0]).toBeDefined()
   })
 })
 

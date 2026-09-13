@@ -18,7 +18,6 @@ import { OrderDetailPage } from '@/features/pos/OrderDetailPage'
 import { OrdersListPage } from '@/features/pos/OrdersListPage'
 import { QueuePage } from '@/features/pos/QueuePage'
 import { TerminalPage } from '@/features/pos/TerminalPage'
-import { AdminPage } from '@/pages/AdminPage'
 import { ForbiddenPage } from '@/pages/ForbiddenPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
@@ -43,16 +42,20 @@ export function App() {
                   <Route path="/dashboard" element={<DashboardPage />} />
                   {/* The catalog is readable by both roles — staff serve from it. */}
                   <Route path="/menu" element={<MenuListPage />} />
-                  {/* The till and the sales record: both roles, since staff work them. */}
-                  <Route path="/pos" element={<TerminalPage />} />
+                  {/* The sales record: both roles. Staff look up the sale in front of
+                    them; an admin reads the day's history. */}
                   <Route path="/orders" element={<OrdersListPage />} />
-                  {/* The kitchen board. Both roles: whoever is making the food moves it. */}
-                  <Route path="/queue" element={<QueuePage />} />
                   <Route path="/orders/:orderId" element={<OrderDetailPage />} />
+                  {/* Counter-only group. Hiding these from the admin nav would not be a
+                    control — an admin who typed the URL would still be served the page — so
+                    the routes are guarded as well, exactly as the admin ones are. */}
+                  <Route element={<RequireRole allow={['staff']} />}>
+                    <Route path="/pos" element={<TerminalPage />} />
+                    <Route path="/queue" element={<QueuePage />} />
+                  </Route>
                   {/* Admin-only group. Later admin routes nest here rather than
                   repeating the guard. */}
                   <Route element={<RequireRole allow={['admin']} />}>
-                    <Route path="/admin" element={<AdminPage />} />
                     <Route path="/reports" element={<ReportsPage />} />
                     <Route path="/staff" element={<StaffListPage />} />
                     <Route path="/menu/categories" element={<CategoriesPage />} />

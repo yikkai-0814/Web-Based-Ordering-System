@@ -10,45 +10,50 @@ const pathsFor = (role: Parameters<typeof navItemsForRole>[0]) =>
   navItemsForRole(role).map((item) => item.to)
 
 /**
- * Phase 15. Navigation is declared as data, so what each role sees is a property of that
- * data and can be asserted exactly — no rendering required.
+ * Navigation is declared as data, so what each role sees is a property of that data and can
+ * be asserted exactly — no rendering required.
+ *
+ * The two roles are now disjoint apart from Orders: an admin runs the business, a staff
+ * member works the counter. Every assertion below is `toEqual` rather than `toContain`,
+ * because an item creeping into the wrong role's nav is precisely the regression worth
+ * catching and "contains" would not notice it.
  */
 describe('navItemsForRole', () => {
   it('gives staff exactly the three things the counter does, in order', () => {
-    // Exact rather than "contains": an item creeping back into the staff nav is precisely
-    // the regression worth catching, and "contains" would not notice.
     expect(labelsFor('staff')).toEqual(['New Order', 'Orders', 'Queue'])
     expect(pathsFor('staff')).toEqual(['/pos', '/orders', '/queue'])
   })
 
-  it('keeps the Dashboard away from staff', () => {
-    // Not a permission — /dashboard is still reachable by URL and the rules are unchanged.
-    // It is simply not one of the things somebody at the counter is here to do.
-    expect(labelsFor('staff')).not.toContain('Dashboard')
+  it('gives an admin exactly the five things the office does, in order', () => {
+    expect(labelsFor('admin')).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff'])
+    expect(pathsFor('admin')).toEqual(['/dashboard', '/reports', '/orders', '/menu', '/staff'])
   })
 
-  it('keeps the Menu out of the staff nav as well', () => {
-    expect(labelsFor('staff')).not.toContain('Menu')
-  })
-
-  it('gives an admin the Dashboard first and New Order second', () => {
-    expect(labelsFor('admin').slice(0, 2)).toEqual(['Dashboard', 'New Order'])
-  })
-
-  it('keeps every admin-only section for the admin', () => {
+  it('keeps the counter out of the admin nav', () => {
+    // Not merely hidden: /pos and /queue are guarded routes too. See App.tsx and
+    // tests/components/route-access.test.tsx.
     const labels = labelsFor('admin')
-    for (const expected of [
-      'Dashboard',
-      'New Order',
-      'Orders',
-      'Queue',
-      'Menu',
-      'Reports',
-      'Staff',
-      'Admin',
-    ]) {
-      expect(labels).toContain(expected)
+    expect(labels).not.toContain('New Order')
+    expect(labels).not.toContain('Queue')
+  })
+
+  it('keeps the office out of the staff nav', () => {
+    const labels = labelsFor('staff')
+    for (const absent of ['Dashboard', 'Reports', 'Menu', 'Staff']) {
+      expect(labels).not.toContain(absent)
     }
+  })
+
+  it('has no Admin landing page to link to', () => {
+    // Menu, Staff and Reports are each a link of their own; nothing is a page whose only
+    // purpose is to list other pages.
+    expect(NAV_ITEMS.map((item) => item.to)).not.toContain('/admin')
+    expect(NAV_ITEMS.map((item) => item.label)).not.toContain('Admin')
+  })
+
+  it('shares exactly one destination between the two roles', () => {
+    const shared = pathsFor('admin').filter((path) => pathsFor('staff').includes(path))
+    expect(shared).toEqual(['/orders'])
   })
 
   it('shows nobody anything when there is no role', () => {
@@ -68,6 +73,11 @@ describe('navItemsForRole', () => {
       for (const role of item.roles) expect(ROLES).toContain(role)
     }
   })
+
+  it('lists every item exactly once', () => {
+    const paths = NAV_ITEMS.map((item) => item.to)
+    expect(new Set(paths).size).toBe(paths.length)
+  })
 })
 
 describe('landingPathFor', () => {
@@ -86,6 +96,8 @@ describe('landingPathFor', () => {
   })
 
   it('sends every role somewhere that role can actually navigate to', () => {
+    // Load-bearing now that the roles are disjoint: landing an admin on /pos would put them
+    // on a route their own guard refuses.
     for (const role of ROLES) {
       expect(pathsFor(role)).toContain(landingPathFor(role))
     }

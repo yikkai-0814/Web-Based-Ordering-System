@@ -70,14 +70,10 @@ export function DashboardPage() {
         </p>
       </header>
 
+      {/* Only the sales record. This page is the admin's, and an admin works neither the
+          till nor the kitchen board — offering either would be a link to a 403. */}
       <div className="flex flex-wrap gap-2">
         <Button asChild size="lg" className="h-touch text-base">
-          <Link to="/pos">Start a new order</Link>
-        </Button>
-        <Button asChild size="lg" variant="outline" className="h-touch text-base">
-          <Link to="/queue">Go to the queue</Link>
-        </Button>
-        <Button asChild size="lg" variant="outline" className="h-touch text-base">
           <Link to="/orders">See all orders</Link>
         </Button>
       </div>
@@ -170,7 +166,6 @@ export function DashboardPage() {
                   dataStatus={column}
                   variant="quiet"
                   icon={<ChefHat className="size-3.5" aria-hidden="true" />}
-                  to="/queue"
                 />
               ))}
             </div>

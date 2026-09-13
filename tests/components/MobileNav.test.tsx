@@ -47,18 +47,17 @@ describe('MobileNav', () => {
     expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue'])
   })
 
-  it('offers an admin every section, Dashboard first', () => {
+  it('offers an admin exactly the five office sections, Dashboard first', () => {
     renderNav('admin')
-    expect(linkNames()).toEqual([
-      'Dashboard',
-      'New Order',
-      'Orders',
-      'Queue',
-      'Menu',
-      'Reports',
-      'Staff',
-      'Admin',
-    ])
+    expect(linkNames()).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff'])
+  })
+
+  it('does not offer an admin the counter, and offers nobody an Admin page', () => {
+    renderNav('admin')
+    const names = linkNames()
+    for (const absent of ['New Order', 'Queue', 'Admin']) {
+      expect(names).not.toContain(absent)
+    }
   })
 
   it('points each link at the same route the sidebar uses', () => {
