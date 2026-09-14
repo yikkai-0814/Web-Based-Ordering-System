@@ -26,6 +26,7 @@ import {
 } from '@/features/menu/menu-api'
 import { CATEGORY_NAME_MAX, type Category } from '@/features/menu/types'
 import { useCategories } from '@/features/menu/useCategories'
+import { StatusBadge } from '@/features/pos/StatusBadge'
 import { useMenuItems } from '@/features/menu/useMenuItems'
 
 export function CategoriesPage() {
@@ -217,8 +218,13 @@ export function CategoriesPage() {
                       )}
                     </TableCell>
                     <TableCell className="tabular-nums">{count}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {t(category.active ? 'menu.visible' : 'menu.hidden')}
+                    <TableCell>
+                      <StatusBadge
+                        label={t(category.active ? 'menu.visible' : 'menu.hidden')}
+                        tone={category.active ? 'good' : 'warn'}
+                        testId="category-status"
+                        value={category.active ? 'active' : 'inactive'}
+                      />
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       {editing ? (

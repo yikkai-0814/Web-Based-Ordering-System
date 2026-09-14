@@ -8,7 +8,9 @@ import type { Timestamp } from 'firebase/firestore'
  * different things live here and the distinction is the whole design:
  *
  *   * a **`ModifierGroup`** is CONFIGURATION. An admin owns it, it changes over time, and
- *     it lives in its own collection keyed to a menu item.
+ *     it lives in its own collection as a **shared definition**: "Sugar Level" is written
+ *     once and attached to every drink that asks it. Which items offer it is recorded on the
+ *     ITEM, in `modifierGroupIds` — see `groupsForItem` below for why that direction.
  *   * a **`SelectedModifier`** is a SNAPSHOT of one choice, copied onto the order line at
  *     the moment of sale, exactly as `name` and `unitPrice` already are.
  *
@@ -44,11 +46,18 @@ export interface ModifierOption {
   active: boolean
 }
 
-/** A set of choices offered for one menu item — "Vegetables", "Add-ons". */
+/** A set of choices — "Sugar Level", "Add-ons". Shared by every item that attaches it. */
 export interface ModifierGroup {
   id: string
-  /** Which menu item offers this. Groups are per item; two items share nothing. */
-  itemId: string
+  /**
+   * **Legacy.** Before groups were reusable, a group belonged to exactly one item and said so
+   * here. Those documents are still read exactly as they were, so no existing item needed
+   * migrating; `groupsForItem` resolves them alongside the new association.
+   *
+   * `null` on every group written since, because a shared definition has no single owner.
+   * Nothing new should set it.
+   */
+  itemId: string | null
   name: string
   selection: SelectionMode
   /**
@@ -117,7 +126,8 @@ export function parseModifierGroup(
   const { itemId, name, selection, required, sortOrder, active, options, createdAt, updatedAt } =
     data
 
-  if (typeof itemId !== 'string' || itemId === '') return null
+  // Absent is the normal case now: a shared definition belongs to no single item. A present
+  // one is a legacy group and still resolves for the item it names.
   if (typeof name !== 'string' || name.trim() === '') return null
   if (!isSelectionMode(selection)) return null
   if (typeof required !== 'boolean') return null
@@ -135,7 +145,7 @@ export function parseModifierGroup(
 
   return {
     id,
-    itemId,
+    itemId: typeof itemId === 'string' && itemId !== '' ? itemId : null,
     name,
     selection,
     required,
@@ -148,8 +158,72 @@ export function parseModifierGroup(
 }
 
 /**
- * The groups a customer is actually offered for one item: active groups, in order, each
- * carrying only its active options.
+ * Everything needed to work out what one item asks. A `MenuItem` satisfies it.
+ *
+ * Taken as an object rather than an id because the association now lives on the ITEM: which
+ * groups an item offers, and in what order, is the item's own business, so it is the item
+ * that has to be consulted.
+ */
+export interface ItemCustomisation {
+  id: string
+  /** Shared groups attached to this item, in the order the admin arranged them. */
+  modifierGroupIds: readonly string[]
+}
+
+/**
+ * Every group configured for one item — shared and legacy, active or not — in the order it
+ * should be shown.
+ *
+ * **Two sources, deliberately.** `modifierGroupIds` is the association an admin manages
+ * today; `group.itemId` is how the first version of this feature recorded the same fact. Both
+ * are resolved, so an item configured before groups were reusable keeps working with no
+ * migration and no rewrite of its documents.
+ *
+ * **Order comes from the item, never from the group.** `sortOrder` lives on a shared
+ * definition, so it cannot say where "Sugar Level" belongs on one drink versus another —
+ * only the item's own list can. Attached groups therefore appear in array order, and legacy
+ * ones after them by their own sortOrder, which is the order they have always had.
+ *
+ * An id naming a group that has been deleted is skipped rather than reported: detaching is a
+ * write to the item and deleting is a write to the group, so a dangling id is an ordinary
+ * intermediate state, not a fault. An id naming a group owned by a DIFFERENT item is skipped
+ * for a stronger reason — see the guard below.
+ */
+export function groupsForItem(
+  groups: readonly ModifierGroup[],
+  item: ItemCustomisation,
+): ModifierGroup[] {
+  const byId = new Map(groups.map((group) => [group.id, group]))
+  const resolved: ModifierGroup[] = []
+  const taken = new Set<string>()
+
+  // Defensive rather than trusting the type: `parseMenuItem` always supplies the array, but
+  // this runs on the till's hot path and an item assembled some other way must not be able to
+  // throw. Offering no shared group is recoverable; a counter that cannot take an order is not.
+  for (const id of item.modifierGroupIds ?? []) {
+    const group = byId.get(id)
+    if (!group || taken.has(id)) continue
+    // An owned group is reachable only through its owner. A listed id that names one
+    // belonging to a different item is ignored rather than honoured: ownership is the
+    // group's own statement about itself, and a list on some other item must not override
+    // it — otherwise one item could offer, and edit, another item's private customisation.
+    if (group.itemId !== null && group.itemId !== item.id) continue
+    taken.add(id)
+    resolved.push(group)
+  }
+
+  const legacy = groups
+    .filter((group) => group.itemId === item.id && !taken.has(group.id))
+    .sort((a, b) =>
+      a.sortOrder !== b.sortOrder ? a.sortOrder - b.sortOrder : a.name.localeCompare(b.name),
+    )
+
+  return [...resolved, ...legacy]
+}
+
+/**
+ * The groups a customer is actually offered for one item: active groups, in the item's order,
+ * each carrying only its active options.
  *
  * Deactivating rather than deleting is the everyday action here, as it is for menu items and
  * staff — a retired option must not vanish from the receipts that already mention it. A
@@ -157,20 +231,20 @@ export function parseModifierGroup(
  */
 export function offeredGroupsFor(
   groups: readonly ModifierGroup[],
-  itemId: string,
+  item: ItemCustomisation,
 ): ModifierGroup[] {
-  return groups
-    .filter((group) => group.itemId === itemId && group.active)
+  return groupsForItem(groups, item)
+    .filter((group) => group.active)
     .map((group) => ({ ...group, options: group.options.filter((option) => option.active) }))
     .filter((group) => group.options.length > 0)
-    .sort((a, b) =>
-      a.sortOrder !== b.sortOrder ? a.sortOrder - b.sortOrder : a.name.localeCompare(b.name),
-    )
 }
 
 /** Whether tapping this item needs to ask anything at all. */
-export function requiresCustomisation(groups: readonly ModifierGroup[], itemId: string): boolean {
-  return offeredGroupsFor(groups, itemId).length > 0
+export function requiresCustomisation(
+  groups: readonly ModifierGroup[],
+  item: ItemCustomisation,
+): boolean {
+  return offeredGroupsFor(groups, item).length > 0
 }
 
 export type SelectionValidation = { ok: true } | { ok: false; error: Message }

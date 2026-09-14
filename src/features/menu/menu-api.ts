@@ -1,6 +1,8 @@
 import { message, MessageError } from '@/features/i18n/messages'
 import {
   addDoc,
+  arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -44,6 +46,8 @@ export interface MenuItemInput {
   price: number
   sortOrder: number
   active: boolean
+  /** Shared groups attached to this item, in the order they should be asked. */
+  modifierGroupIds: string[]
 }
 
 /**
@@ -179,13 +183,46 @@ export async function deleteCategory(id: string): Promise<void> {
 }
 
 /** `cost` is mandatory: an item cannot be created without one. See `requireCost`. */
-export async function createMenuItem(input: MenuItemInput, cost: number): Promise<string> {
+/**
+ * Creates an item, its cost, and any groups being invented alongside it — in one batch.
+ *
+ * `newGroups` are definitions the admin typed on the create form and that do not exist yet.
+ * They are written here rather than beforehand so that **nothing is orphaned**: a batch is
+ * all-or-nothing, so a refused item cannot leave a set of groups behind that no screen would
+ * ever show. Their ids are generated client-side, exactly as the item's already was, which is
+ * what lets them be listed on the item in the same write that creates them.
+ *
+ * Order is preserved end to end: groups already attached come first, in the order the admin
+ * arranged them, then the newly created ones in the order they were added.
+ */
+export async function createMenuItem(
+  input: MenuItemInput,
+  cost: number,
+  newGroups: readonly ModifierGroupInput[] = [],
+): Promise<string> {
   // The id is generated client-side so the item and its cost can share one, and both go in
   // a single batch.
   const itemReference = doc(collection(db, 'menuItems'))
   const batch = writeBatch(db)
+
+  const createdGroupIds: string[] = []
+  for (const group of newGroups) {
+    const groupReference = doc(collection(db, 'modifierGroups'))
+    batch.set(groupReference, {
+      ...modifierGroupFields(group),
+      // An item-specific group records its owner and is NOT listed on the item: it resolves
+      // through that owner, which is also what makes it disappear with the item. A shared one
+      // records no owner and is listed instead, so it can be listed by other items too.
+      ...(group.shared ? {} : { itemId: itemReference.id }),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    if (group.shared) createdGroupIds.push(groupReference.id)
+  }
+
   batch.set(itemReference, {
     ...input,
+    modifierGroupIds: [...input.modifierGroupIds, ...createdGroupIds],
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })
@@ -220,23 +257,35 @@ export async function updateMenuItem(
   await batch.commit()
 }
 
-/** Removes the item and its cost together — a stray cost document would outlive its item. */
+/**
+ * Removes the item and its cost together — a stray cost document would outlive its item.
+ *
+ * **Only groups this item exclusively owns go with it.** A legacy group names one item in
+ * `itemId` and can be offered by no other, so deleting the item leaves it unreachable and it
+ * is removed — the behaviour this has always had. A SHARED group is a definition in its own
+ * right: "Sugar Level" outlives any one drink, and deleting Milk Tea must not take it away
+ * from Lemon Tea. Those are left alone entirely; the attachment disappears with the item
+ * document that carried it, which is all that has to happen.
+ *
+ * A shared group that no item happens to list any more is not deleted either. It stays in the
+ * reusable pool, which is the point of it being reusable, and an admin who wants it gone can
+ * delete it deliberately.
+ *
+ * Past orders are untouched either way: their selections are snapshots and never read this
+ * collection.
+ *
+ * Note the limit, which mirrors the one on the cost document: the rules can require that the
+ * cost is gone with `existsAfter`, because there is exactly one of it. A variable number of
+ * groups cannot be expressed that way, so this batch is the guarantee — deleting an item
+ * straight from the Firebase console would still strand its legacy groups.
+ */
 export async function deleteMenuItem(id: string): Promise<void> {
-  // Its customisation goes with it. Nothing would ever show an orphaned group again — it is
-  // keyed to an item that no longer exists — and leaving one behind would be a document the
-  // admin can neither see nor remove. Past orders are untouched: their selections are
-  // snapshots and never read this collection.
-  //
-  // Note the limit, which mirrors the one on the cost document: the rules can require that
-  // the cost is gone with `existsAfter`, because there is exactly one of it. A variable
-  // number of groups cannot be expressed that way, so this batch is the guarantee — deleting
-  // an item straight from the Firebase console would still strand its groups.
-  const groupIds = await modifierGroupIdsFor(id)
+  const exclusiveGroupIds = await legacyGroupIdsOwnedBy(id)
 
   const batch = writeBatch(db)
   batch.delete(doc(db, 'menuItems', id))
   batch.delete(doc(db, 'menuItemCosts', id))
-  for (const groupId of groupIds) batch.delete(doc(db, 'modifierGroups', groupId))
+  for (const groupId of exclusiveGroupIds) batch.delete(doc(db, 'modifierGroups', groupId))
   await batch.commit()
 }
 
@@ -276,7 +325,21 @@ export interface ModifierOptionInput {
 }
 
 export interface ModifierGroupInput {
-  itemId: string
+  /**
+   * Whether this definition may be offered by more than one item.
+   *
+   * **Shared** (the default) writes no owner and is attached by listing its id on the item,
+   * so editing it changes every item that offers it. **Item-specific** records the owning
+   * item on the group itself, in `itemId` — the same field the first version of this feature
+   * used, because it already means exactly this: a group belonging to one item and no other.
+   * Legacy groups are therefore not a separate case, they are simply item-specific groups
+   * written before the choice existed, and everything that resolves, deletes or lists them
+   * already works.
+   *
+   * Only read when a group is CREATED. Changing an existing group's sharing would move it
+   * between items, so `updateModifierGroup` deliberately never writes `itemId`.
+   */
+  shared: boolean
   name: string
   selection: SelectionMode
   required: boolean
@@ -285,9 +348,14 @@ export interface ModifierGroupInput {
   options: ModifierOptionInput[]
 }
 
+/**
+ * A group document is a **shared definition** and carries no item of its own. The legacy
+ * `itemId` is deliberately absent from everything written here: a group written today is
+ * attached by listing its id on the item, and writing an owner as well would be a second
+ * record of the same fact that could disagree with the first.
+ */
 function modifierGroupFields(input: ModifierGroupInput) {
   return {
-    itemId: input.itemId,
     name: input.name.trim(),
     selection: input.selection,
     required: input.required,
@@ -302,17 +370,95 @@ function modifierGroupFields(input: ModifierGroupInput) {
   }
 }
 
-export async function createModifierGroup(input: ModifierGroupInput): Promise<string> {
-  const created = await addDoc(collection(db, 'modifierGroups'), {
+/**
+ * Writes a new shared definition and attaches it to one item, in a single batch.
+ *
+ * Used by the editor on an existing item, which saves immediately. Both halves have to land
+ * together: a group written without the attachment would be invisible to the item that was
+ * just configured, and an attachment naming a group that failed to write would be a dangling
+ * id. `arrayUnion` appends, so the item's existing order is untouched and the new group joins
+ * the end — which is where it was added on screen.
+ */
+export async function createModifierGroupForItem(
+  itemId: string,
+  input: ModifierGroupInput,
+): Promise<string> {
+  const groupReference = doc(collection(db, 'modifierGroups'))
+  const batch = writeBatch(db)
+  batch.set(groupReference, {
     ...modifierGroupFields(input),
+    ...(input.shared ? {} : { itemId }),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })
-  return created.id
+  // Only a shared definition is listed on the item. An item-specific one is reached through
+  // its owner, so listing it as well would be the same fact recorded twice.
+  if (input.shared) {
+    batch.update(doc(db, 'menuItems', itemId), {
+      modifierGroupIds: arrayUnion(groupReference.id),
+      updatedAt: serverTimestamp(),
+    })
+  }
+  await batch.commit()
+  return groupReference.id
+}
+
+/**
+ * Attaches a definition that already exists to another item.
+ *
+ * This is the whole of "reuse": one write, to the ITEM, adding an id. The shared definition
+ * is not touched at all, so attaching "Sugar Level" to a fourth drink cannot disturb the
+ * three that already offer it.
+ */
+export async function attachModifierGroup(itemId: string, groupId: string): Promise<void> {
+  await updateDoc(doc(db, 'menuItems', itemId), {
+    modifierGroupIds: arrayUnion(groupId),
+    updatedAt: serverTimestamp(),
+  })
+}
+
+/**
+ * Removes a definition from one item's list.
+ *
+ * **Detaching is not deleting.** The group survives untouched, still attached to every other
+ * item that lists it and still offered in the pool of reusable groups. That distinction is
+ * the point of splitting the definition from the association, and it is enforced here by
+ * this function simply never touching the group document.
+ */
+export async function detachModifierGroup(itemId: string, groupId: string): Promise<void> {
+  await updateDoc(doc(db, 'menuItems', itemId), {
+    modifierGroupIds: arrayRemove(groupId),
+    updatedAt: serverTimestamp(),
+  })
+}
+
+/**
+ * Every menu item that currently offers this group — by attachment or as a legacy owner.
+ *
+ * Asked before a group is deleted, so the admin can be told what else is about to lose it
+ * rather than finding out from a till.
+ */
+export async function itemsUsingGroup(groupId: string): Promise<string[]> {
+  const [attached, legacy] = await Promise.all([
+    getDocs(
+      query(collection(db, 'menuItems'), where('modifierGroupIds', 'array-contains', groupId)),
+    ),
+    getDoc(doc(db, 'modifierGroups', groupId)),
+  ])
+
+  const ids = new Set(attached.docs.map((document) => document.id))
+  const owner = legacy.exists() ? legacy.data().itemId : null
+  if (typeof owner === 'string' && owner !== '') ids.add(owner)
+  return [...ids]
 }
 
 /**
  * Replaces a group's configuration.
+ *
+ * **Never its sharing.** `itemId` is not written here, so an update leaves ownership exactly
+ * as it was: a shared group stays shared for every item offering it, and an item-specific one
+ * stays that item's. Moving a group between those states would move it between items, which
+ * is not an edit.
  *
  * Editing a name, a price or an option's availability changes what the NEXT customer is
  * offered and nothing else: every order already placed carries its own snapshot of what was
@@ -330,18 +476,40 @@ export async function setModifierGroupActive(id: string, active: boolean): Promi
 }
 
 /**
- * Removes a group outright.
+ * Removes a shared definition outright, and takes it off every item that offers it.
  *
  * Deactivating is the safe everyday action — it stops the group being offered while leaving
- * it editable — so this is offered only for a group created by mistake. Past orders are
- * unaffected either way.
+ * it editable — so this is for a group created by mistake. Past orders are unaffected either
+ * way: every selection was snapshotted onto its order line and nothing reads this collection
+ * to render a receipt.
+ *
+ * The detachments are in the same batch as the delete because a group is now shared: deleting
+ * it while three drinks still list its id would leave three dangling references. They would
+ * resolve to nothing and be skipped, so nothing would break — but the item documents would
+ * quietly disagree with the catalogue, and a later group reusing that id is not worth
+ * reasoning about. `itemsUsingGroup` is what the caller should have shown the admin first.
  */
 export async function deleteModifierGroup(id: string): Promise<void> {
-  await deleteDoc(doc(db, 'modifierGroups', id))
+  const usedBy = await itemsUsingGroup(id)
+
+  const batch = writeBatch(db)
+  for (const itemId of usedBy) {
+    batch.update(doc(db, 'menuItems', itemId), {
+      modifierGroupIds: arrayRemove(id),
+      updatedAt: serverTimestamp(),
+    })
+  }
+  batch.delete(doc(db, 'modifierGroups', id))
+  await batch.commit()
 }
 
-/** Every group configured for one item, including inactive ones. Admin screens only. */
-async function modifierGroupIdsFor(itemId: string): Promise<string[]> {
+/**
+ * The legacy groups that name this item as their sole owner.
+ *
+ * Shared definitions are never returned — they carry no `itemId` — which is what keeps
+ * `deleteMenuItem` from taking a reusable group away from the other items that offer it.
+ */
+async function legacyGroupIdsOwnedBy(itemId: string): Promise<string[]> {
   const found = await getDocs(
     query(collection(db, 'modifierGroups'), where('itemId', '==', itemId)),
   )

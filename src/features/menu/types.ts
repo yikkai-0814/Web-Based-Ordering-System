@@ -29,6 +29,19 @@ export interface MenuItem {
   price: number
   sortOrder: number
   active: boolean
+  /**
+   * The shared customisation groups this item offers, in the order they should be asked.
+   *
+   * The association lives here rather than on the group because a group is shared: "Sugar
+   * Level" is one definition attached to many drinks, and only the item can say where it
+   * belongs in ITS list. Attaching and detaching is therefore a write to the item and never
+   * to the shared definition, so two admins configuring two different drinks cannot contend.
+   *
+   * Absent on every item written before groups were reusable, which is why it parses to an
+   * empty array rather than being required: those items resolve their groups through the
+   * legacy `modifierGroups.itemId` instead. See `groupsForItem`.
+   */
+  modifierGroupIds: string[]
   createdAt: Timestamp | null
   updatedAt: Timestamp | null
 }
@@ -84,6 +97,7 @@ export function parseCategory(id: string, data: Record<string, unknown>): Catego
 
 export function parseMenuItem(id: string, data: Record<string, unknown>): MenuItem | null {
   const { name, description, categoryId, price, sortOrder, active, createdAt, updatedAt } = data
+  const { modifierGroupIds } = data
 
   if (typeof name !== 'string' || name.trim() === '') return null
   if (typeof categoryId !== 'string' || categoryId === '') return null
@@ -100,6 +114,13 @@ export function parseMenuItem(id: string, data: Record<string, unknown>): MenuIt
     price,
     sortOrder: typeof sortOrder === 'number' && Number.isFinite(sortOrder) ? sortOrder : 0,
     active,
+    // Anything that is not a usable id is dropped rather than carried: it could only ever
+    // fail to resolve, and a silently shorter list is the honest answer.
+    modifierGroupIds: Array.isArray(modifierGroupIds)
+      ? modifierGroupIds.filter(
+          (value): value is string => typeof value === 'string' && value !== '',
+        )
+      : [],
     createdAt: (createdAt as Timestamp | undefined) ?? null,
     updatedAt: (updatedAt as Timestamp | undefined) ?? null,
   }

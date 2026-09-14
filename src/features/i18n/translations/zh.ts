@@ -340,6 +340,8 @@ export const zh: Dictionary = {
   'menu.costCurrency': '成本（{{currency}}）',
 
   // ---- Item customisation, admin side --------------------------------------------
+  'menu.customisationHeading': '商品定制',
+  'menu.customisationBlurb': '设置下单此商品时需要询问的内容。',
   'modifierAdmin.title': '自定义选项',
   'modifierAdmin.blurb':
     '点这个项目时会询问员工的内容。没有选项组的项目一点即可加入订单。在此处的更改不会影响过往订单。',
@@ -353,6 +355,11 @@ export const zh: Dictionary = {
   'modifierAdmin.adds': '加价（{{currency}}）',
   'modifierAdmin.addsPlaceholder': '0.00',
   'modifierAdmin.options': '选项',
+  'modifierAdmin.sharing': '共用方式',
+  'modifierAdmin.sharingShared': '共用 — 可用于其他商品',
+  'modifierAdmin.sharingItemOnly': '仅此商品',
+  'modifierAdmin.sharingSharedHint': '可加入其他商品。日后修改会影响所有使用它的商品。',
+  'modifierAdmin.sharingItemOnlyHint': '仅属于此商品。修改不影响其他商品，并会随商品一并删除。',
   'modifierAdmin.selection': '选择方式',
   'modifierAdmin.selectionSingle': '单选',
   'modifierAdmin.selectionMultiple': '多选',
@@ -373,6 +380,22 @@ export const zh: Dictionary = {
   'modifierAdmin.needOption': '选项组至少需要一个选项。',
   'modifierAdmin.badSortOrder': '排序必须是整数。',
   'modifierAdmin.deleteGroup': '删除{{name}}',
+  'modifierAdmin.reuseHeading': '复用已有选项组',
+  'modifierAdmin.reusePlaceholder': '选择选项组…',
+  'modifierAdmin.reuseNone': '暂无可复用的其他选项组，请在下方新建。',
+  'modifierAdmin.reuseAdd': '加入',
+  'modifierAdmin.onThisItem': '此商品的选项组',
+  'modifierAdmin.detach': '从此商品移除 {{name}}',
+  'modifierAdmin.detachShort': '移除',
+  'modifierAdmin.badgeNew': '新建',
+  'modifierAdmin.badgeShared': '共用',
+  'modifierAdmin.badgeItemOnly': '仅此商品',
+  'modifierAdmin.createNew': '新建选项组',
+  'modifierAdmin.draftHint': '保存商品时一并创建。',
+  'modifierAdmin.sharedElsewhereOne': '另有 1 个商品在使用。删除后该商品也将失去此选项组。',
+  'modifierAdmin.sharedElsewhereOther':
+    '另有 {{count}} 个商品在使用。删除后这些商品也将失去此选项组。',
+  'modifierAdmin.detachNotDelete': '在此移除不会影响其他商品。',
   'modifierAdmin.removeOption': '移除{{name}}',
 
   // ---- Staff roster --------------------------------------------------------------

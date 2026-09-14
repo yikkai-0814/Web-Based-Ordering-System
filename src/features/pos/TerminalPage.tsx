@@ -144,7 +144,7 @@ export function TerminalPage() {
    * anything without one is still a single tap, which is what keeps the counter quick.
    */
   function addItem(item: MenuItem) {
-    const groups = offeredGroupsFor(modifierGroups, item.id)
+    const groups = offeredGroupsFor(modifierGroups, item)
     if (groups.length > 0) {
       setCustomising(item)
       return
@@ -218,7 +218,7 @@ export function TerminalPage() {
       {customising && (
         <ItemCustomisationDialog
           item={customising}
-          groups={offeredGroupsFor(modifierGroups, customising.id)}
+          groups={offeredGroupsFor(modifierGroups, customising)}
           onCancel={() => setCustomising(null)}
           onAdd={(modifiers) => {
             addConfigured(customising, modifiers)

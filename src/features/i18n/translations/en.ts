@@ -358,6 +358,8 @@ export const en = {
   'menu.costCurrency': 'Cost ({{currency}})',
 
   // ---- Item customisation, admin side --------------------------------------------
+  'menu.customisationHeading': 'Customization',
+  'menu.customisationBlurb': 'Choose what staff are asked when this item is ordered.',
   'modifierAdmin.title': 'Customisation',
   'modifierAdmin.blurb':
     'What staff are asked when this item is ordered. An item with no groups is added to the order in one tap. Changing anything here leaves past orders exactly as they were.',
@@ -371,6 +373,13 @@ export const en = {
   'modifierAdmin.adds': 'Adds ({{currency}})',
   'modifierAdmin.addsPlaceholder': '0.00',
   'modifierAdmin.options': 'Options',
+  'modifierAdmin.sharing': 'Sharing',
+  'modifierAdmin.sharingShared': 'Shared — reuse on other items',
+  'modifierAdmin.sharingItemOnly': 'This item only',
+  'modifierAdmin.sharingSharedHint':
+    'Can be added to other items. Editing it later changes every item using it.',
+  'modifierAdmin.sharingItemOnlyHint':
+    'Belongs to this item alone. Editing it affects nothing else, and it is removed with the item.',
   'modifierAdmin.selection': 'Selection',
   'modifierAdmin.selectionSingle': 'One choice',
   'modifierAdmin.selectionMultiple': 'Several choices',
@@ -391,6 +400,23 @@ export const en = {
   'modifierAdmin.needOption': 'A group needs at least one option.',
   'modifierAdmin.badSortOrder': 'Sort order must be a whole number.',
   'modifierAdmin.deleteGroup': 'Delete {{name}}',
+  'modifierAdmin.reuseHeading': 'Reuse an existing group',
+  'modifierAdmin.reusePlaceholder': 'Choose a group…',
+  'modifierAdmin.reuseNone': 'No other groups to reuse yet. Create one below.',
+  'modifierAdmin.reuseAdd': 'Add',
+  'modifierAdmin.onThisItem': 'On this item',
+  'modifierAdmin.detach': 'Remove {{name}} from this item',
+  'modifierAdmin.detachShort': 'Remove',
+  'modifierAdmin.badgeNew': 'New',
+  'modifierAdmin.badgeShared': 'Shared',
+  'modifierAdmin.badgeItemOnly': 'This item only',
+  'modifierAdmin.createNew': 'Create a new group',
+  'modifierAdmin.draftHint': 'Created when you save the item.',
+  'modifierAdmin.sharedElsewhereOne':
+    'Also used by 1 other item. Deleting it removes it from that item too.',
+  'modifierAdmin.sharedElsewhereOther':
+    'Also used by {{count}} other items. Deleting it removes it from them too.',
+  'modifierAdmin.detachNotDelete': 'Removing it here keeps the group for every other item.',
   'modifierAdmin.removeOption': 'Remove {{name}}',
 
   // ---- Staff roster --------------------------------------------------------------

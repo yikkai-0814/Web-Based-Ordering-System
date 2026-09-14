@@ -56,6 +56,12 @@ const ADDONS = group({
   ],
 })
 
+/**
+ * The bit of a menu item that decides what it asks. Legacy groups name the item in `itemId`
+ * and need nothing here; shared ones are listed by the item, in the order it wants them.
+ */
+const item = (id: string, modifierGroupIds: string[] = []) => ({ id, modifierGroupIds })
+
 const pick = (from: ModifierGroup, optionId: string): SelectedModifier => {
   const option = from.options.find((candidate) => candidate.id === optionId)
   if (!option) throw new Error(`no option ${optionId}`)
@@ -64,24 +70,105 @@ const pick = (from: ModifierGroup, optionId: string): SelectedModifier => {
 
 describe('what an item offers', () => {
   it('offers nothing for an item with no groups, so it stays a one-tap add', () => {
-    expect(offeredGroupsFor([group()], 'milo')).toEqual([])
-    expect(requiresCustomisation([group()], 'milo')).toBe(false)
+    expect(offeredGroupsFor([group()], item('milo'))).toEqual([])
+    expect(requiresCustomisation([group()], item('milo'))).toBe(false)
   })
 
-  it('offers each item its own configuration, never a shared one', () => {
+  it('offers a legacy group only to the item that owns it', () => {
     const ice = group({ id: 'g-ice', itemId: 'milo', name: 'Ice' })
-    const offered = offeredGroupsFor([group(), ADDONS, ice], 'milo')
+    const offered = offeredGroupsFor([group(), ADDONS, ice], item('milo'))
     expect(offered.map((entry) => entry.name)).toEqual(['Ice'])
   })
 
   it('orders groups by sortOrder, so the prompt reads the same way every time', () => {
     const egg = group({ id: 'g-egg', name: 'Egg', sortOrder: 1 })
-    const offered = offeredGroupsFor([ADDONS, egg, group()], 'chicken-chop-rice')
+    const offered = offeredGroupsFor([ADDONS, egg, group()], item('chicken-chop-rice'))
     expect(offered.map((entry) => entry.name)).toEqual(['Vegetables', 'Egg', 'Add-ons'])
   })
 
+  it('offers a shared group to every item that lists it', () => {
+    const sugar = group({ id: 'g-sugar', itemId: null, name: 'Sugar Level' })
+    for (const drink of ['milk-tea', 'lemon-tea', 'coffee']) {
+      const offered = offeredGroupsFor([sugar], item(drink, ['g-sugar']))
+      expect(offered.map((entry) => entry.name)).toEqual(['Sugar Level'])
+    }
+  })
+
+  it('does not offer a shared group to an item that has not attached it', () => {
+    const sugar = group({ id: 'g-sugar', itemId: null, name: 'Sugar Level' })
+    expect(offeredGroupsFor([sugar], item('americano'))).toEqual([])
+  })
+
+  it("takes the order from the item, not from the group's own sortOrder", () => {
+    // Both carry sortOrder 0; only the item can say which comes first on THIS item, and the
+    // two items deliberately disagree.
+    const sugar = group({ id: 'g-sugar', itemId: null, name: 'Sugar Level' })
+    const ice = group({ id: 'g-ice', itemId: null, name: 'Ice Level' })
+
+    expect(
+      offeredGroupsFor([sugar, ice], item('milk-tea', ['g-sugar', 'g-ice'])).map((e) => e.name),
+    ).toEqual(['Sugar Level', 'Ice Level'])
+    expect(
+      offeredGroupsFor([sugar, ice], item('lemon-tea', ['g-ice', 'g-sugar'])).map((e) => e.name),
+    ).toEqual(['Ice Level', 'Sugar Level'])
+  })
+
+  it('hands every attached item the SAME definition, so one edit reaches all of them', () => {
+    // The mechanism behind "editing a shared group changes every item using it": nothing is
+    // copied per item, so there is only ever one thing to edit.
+    const sugar = group({ id: 'g-sugar', itemId: null, name: 'Sugar Level' })
+    const onCoffee = offeredGroupsFor([sugar], item('iced-coffee', ['g-sugar']))[0]
+    const onTea = offeredGroupsFor([sugar], item('milk-tea', ['g-sugar']))[0]
+
+    expect(onCoffee?.name).toBe('Sugar Level')
+    expect(onTea?.name).toBe(onCoffee?.name)
+    expect(onTea?.id).toBe(onCoffee?.id)
+
+    // Edit the one definition; both items resolve to the new wording.
+    const renamed = { ...sugar, name: 'Sweetness' }
+    expect(offeredGroupsFor([renamed], item('iced-coffee', ['g-sugar']))[0]?.name).toBe('Sweetness')
+    expect(offeredGroupsFor([renamed], item('milk-tea', ['g-sugar']))[0]?.name).toBe('Sweetness')
+  })
+
+  it('keeps an item-specific group to its own item, however another item is configured', () => {
+    // An owned group is reachable only through its owner. Even an item that somehow lists its
+    // id is not offered it — which is what stops one item editing another item's private
+    // customisation by attaching it.
+    const patty = group({ id: 'g-patty', itemId: 'burger', name: 'Patty Cooking Level' })
+
+    expect(offeredGroupsFor([patty], item('burger')).map((e) => e.name)).toEqual([
+      'Patty Cooking Level',
+    ])
+    expect(offeredGroupsFor([patty], item('hot-dog')).map((e) => e.name)).toEqual([])
+    // Even listing its id does not get it: ownership is the group's own statement and a list
+    // on another item cannot override it.
+    expect(offeredGroupsFor([patty], item('hot-dog', ['g-patty'])).map((e) => e.name)).toEqual([])
+    // Its owner still reaches it when it is listed as well, rather than being locked out.
+    expect(offeredGroupsFor([patty], item('burger', ['g-patty'])).map((e) => e.name)).toEqual([
+      'Patty Cooking Level',
+    ])
+  })
+
+  it('resolves legacy and shared groups together, legacy last', () => {
+    const legacy = group({ id: 'g-veg', itemId: 'rice', name: 'Vegetables' })
+    const sugar = group({ id: 'g-sugar', itemId: null, name: 'Sugar Level' })
+    const offered = offeredGroupsFor([legacy, sugar], item('rice', ['g-sugar']))
+    expect(offered.map((entry) => entry.name)).toEqual(['Sugar Level', 'Vegetables'])
+  })
+
+  it('skips an id whose group has been deleted rather than reporting a fault', () => {
+    const sugar = group({ id: 'g-sugar', itemId: null, name: 'Sugar Level' })
+    const offered = offeredGroupsFor([sugar], item('milk-tea', ['g-gone', 'g-sugar']))
+    expect(offered.map((entry) => entry.name)).toEqual(['Sugar Level'])
+  })
+
+  it('never offers the same group twice, however it is reached', () => {
+    const both = group({ id: 'g-veg', itemId: 'rice', name: 'Vegetables' })
+    expect(offeredGroupsFor([both], item('rice', ['g-veg', 'g-veg']))).toHaveLength(1)
+  })
+
   it('hides a deactivated group without touching the receipts that mention it', () => {
-    expect(offeredGroupsFor([group({ active: false })], 'chicken-chop-rice')).toEqual([])
+    expect(offeredGroupsFor([group({ active: false })], item('chicken-chop-rice'))).toEqual([])
   })
 
   it('hides a deactivated option, and the whole group once none are left', () => {
@@ -91,12 +178,12 @@ describe('what an item offers', () => {
         { id: 'veg-none', name: 'No vegetables', priceAdjustment: 0, active: false },
       ],
     })
-    expect(offeredGroupsFor([partly], 'chicken-chop-rice')[0]?.options).toHaveLength(1)
+    expect(offeredGroupsFor([partly], item('chicken-chop-rice'))[0]?.options).toHaveLength(1)
 
     const emptied = group({
       options: [{ id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: false }],
     })
-    expect(offeredGroupsFor([emptied], 'chicken-chop-rice')).toEqual([])
+    expect(offeredGroupsFor([emptied], item('chicken-chop-rice'))).toEqual([])
   })
 })
 
@@ -297,8 +384,18 @@ describe('parseModifierGroup refuses what it cannot render', () => {
     expect(parseModifierGroup('g1', { ...raw, options })).toBeNull()
   })
 
-  it('refuses a group with no item', () => {
-    expect(parseModifierGroup('g1', { ...raw, itemId: '' })).toBeNull()
+  /**
+   * The contract changed deliberately when groups became reusable: a shared definition has no
+   * single owner, so an absent `itemId` is the normal case rather than a malformed document.
+   * A blank one is read the same way — as "no owner" — because the only thing it could
+   * otherwise do is name an item that cannot exist.
+   */
+  it('reads a group with no item as a shared definition', () => {
+    const shared = parseModifierGroup('g1', { ...raw, itemId: '' })
+    expect(shared?.itemId).toBeNull()
+
+    const { itemId: _omitted, ...withoutItemId } = raw
+    expect(parseModifierGroup('g2', withoutItemId)?.itemId).toBeNull()
   })
 })
 

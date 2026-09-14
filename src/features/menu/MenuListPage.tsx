@@ -23,6 +23,7 @@ import { useCategories } from '@/features/menu/useCategories'
 import { useItemCosts } from '@/features/menu/useItemCosts'
 import { useMenuItems } from '@/features/menu/useMenuItems'
 import { useAuth } from '@/features/auth/useAuth'
+import { StatusBadge } from '@/features/pos/StatusBadge'
 import { formatMoney } from '@/lib/money'
 
 interface Group {
@@ -131,9 +132,7 @@ export function MenuListPage() {
               {/* The category name is the vendor's own; only the stand-in is translated. */}
               {category?.name ?? t('menu.uncategorised')}
               {category && !category.active && (
-                <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                  {t('menu.hidden')}
-                </span>
+                <StatusBadge label={t('menu.hidden')} tone="warn" value="hidden" />
               )}
             </h2>
 
@@ -199,15 +198,14 @@ export function MenuListPage() {
                           </TableCell>
                         )}
                         <TableCell>
-                          <span
-                            className={
-                              item.active
-                                ? 'text-sm text-foreground'
-                                : 'text-sm text-muted-foreground'
-                            }
-                          >
-                            {t(item.active ? 'menu.available' : 'menu.archived')}
-                          </span>
+                          {/* Grey-versus-darker-grey was the only difference here, which is
+                              not a difference you can see while scanning a long catalogue. */}
+                          <StatusBadge
+                            label={t(item.active ? 'menu.available' : 'menu.archived')}
+                            tone={item.active ? 'good' : 'warn'}
+                            testId="item-status"
+                            value={item.active ? 'active' : 'inactive'}
+                          />
                         </TableCell>
                         {isAdmin && (
                           <TableCell className="text-right whitespace-nowrap">

@@ -15,7 +15,7 @@ import { createMenuItem, deleteMenuItem, updateMenuItem } from '@/features/menu/
 import type { Cart } from '@/features/pos/cart'
 import { lineKeyOf } from '@/features/menu/modifiers'
 import {
-  createModifierGroup,
+  createModifierGroupForItem,
   deleteModifierGroup,
   updateModifierGroup,
 } from '@/features/menu/menu-api'
@@ -814,6 +814,7 @@ describe('the menu write API keeps cost and its journal in step', () => {
     price: 990,
     sortOrder: 2,
     active: true,
+    modifierGroupIds: [],
   }
 
   it('creates an item and its cost in one batch', async () => {
@@ -947,7 +948,7 @@ describe('menu item customisation, through the app’s own writes', () => {
   const CHICKEN = 'item-chicken-chop-rice'
 
   const VEG = {
-    itemId: CHICKEN,
+    shared: true,
     name: 'Vegetables',
     selection: 'single' as const,
     required: true,
@@ -960,7 +961,7 @@ describe('menu item customisation, through the app’s own writes', () => {
   }
 
   const ADDONS = {
-    itemId: CHICKEN,
+    shared: true,
     name: 'Add-ons',
     selection: 'multiple' as const,
     required: false,
@@ -1010,14 +1011,14 @@ describe('menu item customisation, through the app’s own writes', () => {
 
   it('lets an admin create and update a group, and refuses a staff account both', async () => {
     await signInAs(admin)
-    const groupId = await createModifierGroup(VEG)
+    const groupId = await createModifierGroupForItem(CHICKEN, VEG)
     expect((await getDoc(doc(db, 'modifierGroups', groupId))).get('name')).toBe('Vegetables')
 
     await updateModifierGroup(groupId, { ...VEG, name: 'Veg' })
     expect((await getDoc(doc(db, 'modifierGroups', groupId))).get('name')).toBe('Veg')
 
     await signInAs(staff)
-    await expect(createModifierGroup(ADDONS)).rejects.toThrow()
+    await expect(createModifierGroupForItem(CHICKEN, ADDONS)).rejects.toThrow()
     await expect(updateModifierGroup(groupId, { ...VEG, name: 'Hacked' })).rejects.toThrow()
     // ...and the till can still read what it needs to take an order.
     expect((await getDoc(doc(db, 'modifierGroups', groupId))).get('name')).toBe('Veg')
@@ -1076,7 +1077,7 @@ describe('menu item customisation, through the app’s own writes', () => {
 
   it('leaves a placed order alone when the admin edits the configuration afterwards', async () => {
     await signInAs(admin)
-    const groupId = await createModifierGroup(ADDONS)
+    const groupId = await createModifierGroupForItem(CHICKEN, ADDONS)
 
     await signInAs(staff)
     const created = await createOrder({
@@ -1109,16 +1110,113 @@ describe('menu item customisation, through the app’s own writes', () => {
     expect(after[0]?.unitPrice).toBe(1100)
   })
 
-  it('takes an item’s groups with it when the item is deleted', async () => {
+  /**
+   * The cascade deliberately narrowed when groups became reusable.
+   *
+   * A shared definition outlives any one item: "Sugar Level" is attached to several drinks,
+   * so deleting one of them must not take it away from the rest. A LEGACY group is the
+   * opposite — it names exactly one item in `itemId` and can be offered by no other, so
+   * deleting that item leaves it unreachable and it still goes. Both halves are asserted
+   * because getting either wrong is silent.
+   */
+  it('records a shared group with no owner, and lists it on the item', async () => {
     await signInAs(admin)
-    const groupId = await createModifierGroup(VEG)
-    const otherItemGroup = await createModifierGroup({ ...ADDONS, itemId: 'item-flat-white' })
+    const id = await createModifierGroupForItem(CHICKEN, VEG)
+
+    const group = await getDoc(doc(db, 'modifierGroups', id))
+    // No owner: that is what makes it attachable to other items.
+    expect(group.data()?.itemId).toBeUndefined()
+    expect((await getDoc(doc(db, 'menuItems', CHICKEN))).data()?.modifierGroupIds).toEqual([id])
+  })
+
+  it('records an item-specific group against its owner, and does NOT list it', async () => {
+    await signInAs(admin)
+    const id = await createModifierGroupForItem(CHICKEN, { ...VEG, shared: false })
+
+    const group = await getDoc(doc(db, 'modifierGroups', id))
+    // The owner is the association. Listing it as well would record the same fact twice.
+    expect(group.data()?.itemId).toBe(CHICKEN)
+    expect((await getDoc(doc(db, 'menuItems', CHICKEN))).data()?.modifierGroupIds ?? []).toEqual([])
+  })
+
+  it('creates an item and its item-specific group in one batch', async () => {
+    await signInAs(admin)
+    // The owner does not exist when the rules see the group — they ask `existsAfter`, so the
+    // whole batch is judged on the state it leaves behind.
+    const itemId = await createMenuItem(
+      {
+        name: 'Nasi Lemak',
+        description: '',
+        categoryId: 'cat-mains',
+        price: 700,
+        sortOrder: 3,
+        active: true,
+        modifierGroupIds: [],
+      },
+      300,
+      [{ ...VEG, shared: false }],
+    )
+
+    const all = await getDocs(collection(db, 'modifierGroups'))
+    const owned = all.docs.filter((entry) => entry.data().itemId === itemId)
+    expect(owned).toHaveLength(1)
+    expect((await getDoc(doc(db, 'menuItems', itemId))).data()?.modifierGroupIds).toEqual([])
+  })
+
+  it('takes an item-specific group with the item, and never a shared one', async () => {
+    await signInAs(admin)
+    const owned = await createModifierGroupForItem(CHICKEN, { ...VEG, shared: false })
+    const shared = await createModifierGroupForItem(CHICKEN, ADDONS)
 
     await deleteMenuItem(CHICKEN)
 
-    expect((await getDoc(doc(db, 'modifierGroups', groupId))).exists()).toBe(false)
-    // Another item's configuration is untouched.
-    expect((await getDoc(doc(db, 'modifierGroups', otherItemGroup))).exists()).toBe(true)
+    expect((await getDoc(doc(db, 'modifierGroups', owned))).exists()).toBe(false)
+    expect((await getDoc(doc(db, 'modifierGroups', shared))).exists()).toBe(true)
+  })
+
+  it('leaves a shared group alone when an item using it is deleted', async () => {
+    await signInAs(admin)
+    const shared = await createModifierGroupForItem(CHICKEN, VEG)
+
+    await deleteMenuItem(CHICKEN)
+
+    expect((await getDoc(doc(db, 'modifierGroups', shared))).exists()).toBe(true)
+    expect((await getDoc(doc(db, 'menuItems', CHICKEN))).exists()).toBe(false)
+  })
+
+  it('still takes a legacy item-owned group with it when the item is deleted', async () => {
+    // Written the way the first version of this feature wrote them: an owner, and no entry
+    // on the item. Nothing in the app writes this shape any more, which is why it is seeded.
+    await seed(async (context) => {
+      await setDoc(doc(context.firestore(), 'modifierGroups', 'legacy-veg'), {
+        itemId: CHICKEN,
+        name: 'Vegetables',
+        selection: 'single',
+        required: true,
+        sortOrder: 0,
+        active: true,
+        options: [{ id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: true }],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    })
+
+    await signInAs(admin)
+    await deleteMenuItem(CHICKEN)
+
+    expect((await getDoc(doc(db, 'modifierGroups', 'legacy-veg'))).exists()).toBe(false)
+  })
+
+  it('detaches a shared group from every item when the group itself is deleted', async () => {
+    await signInAs(admin)
+    const shared = await createModifierGroupForItem(CHICKEN, VEG)
+    expect((await getDoc(doc(db, 'menuItems', CHICKEN))).data()?.modifierGroupIds).toEqual([shared])
+
+    await deleteModifierGroup(shared)
+
+    expect((await getDoc(doc(db, 'modifierGroups', shared))).exists()).toBe(false)
+    // The item survives, and no longer claims a group that is gone.
+    expect((await getDoc(doc(db, 'menuItems', CHICKEN))).data()?.modifierGroupIds).toEqual([])
   })
 
   it('does not disturb payment or fulfilment on an order that carries modifiers', async () => {

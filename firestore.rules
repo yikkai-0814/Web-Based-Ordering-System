@@ -139,9 +139,16 @@ service cloud.firestore {
       // Key set from createMenuItem/updateMenuItem in src/features/menu/menu-api.ts.
       // `description` is optional: the form always sends one, but an item written without
       // it is legitimate and the check below already tolerates its absence.
+      // `modifierGroupIds` is optional because every item written before groups became
+      // reusable has none, and those documents are still valid. Its contents cannot be
+      // checked here — rules cannot iterate a list — so a stale id is tolerated and resolved
+      // away at read time; what IS checked is that it is a list, and that it stays the size
+      // of a screen rather than a catalogue.
       return hasFields(
           ['name', 'categoryId', 'price', 'sortOrder', 'active', 'createdAt', 'updatedAt'],
-          ['description'])
+          ['description', 'modifierGroupIds'])
+        && (!('modifierGroupIds' in d.keys())
+            || (d.modifierGroupIds is list && d.modifierGroupIds.size() <= 30))
         && d.createdAt is timestamp
         && d.updatedAt is timestamp
         && d.name is string && d.name.size() > 0 && d.name.size() <= 80
@@ -197,13 +204,25 @@ service cloud.firestore {
     function validModifierGroup() {
       let d = request.resource.data;
       // Key set from createModifierGroup/updateModifierGroup in src/features/menu/menu-api.ts.
+      // `itemId` is LEGACY and therefore optional. A group written today is a shared
+      // definition with no owner: which items offer it is recorded on the ITEM, in
+      // `modifierGroupIds`, so that attaching "Sugar Level" to a fourth drink is a write to
+      // that drink and never to the definition three others depend on. Documents from before
+      // that still name their one item here and must keep validating — which is why this is
+      // tolerated rather than forbidden, and why, when it IS present, it must still name a
+      // real item so a stray document cannot be created against a typo.
       return hasFields(
-          ['itemId', 'name', 'selection', 'required', 'sortOrder', 'active', 'options',
-           'createdAt', 'updatedAt'], [])
-        && d.itemId is string && d.itemId.size() > 0
-        // The group must belong to an item that exists, so a stray document cannot be
-        // created against a typo and then surface on no screen at all.
-        && exists(/databases/$(database)/documents/menuItems/$(d.itemId))
+          ['name', 'selection', 'required', 'sortOrder', 'active', 'options',
+           'createdAt', 'updatedAt'], ['itemId'])
+        // `existsAfter` rather than `exists`, for the same reason the menu item's cost uses
+        // it: an item-specific group is written in the SAME batch as the item that owns it,
+        // and a batch's own writes are not visible to `exists`. The question actually being
+        // asked is whether the owner is there once the batch has landed — which still refuses
+        // a group created against an item id that does not and will not exist.
+        && (!('itemId' in d.keys())
+            || (d.itemId is string
+                && d.itemId.size() > 0
+                && existsAfter(/databases/$(database)/documents/menuItems/$(d.itemId))))
         && d.name is string && d.name.size() > 0 && d.name.size() <= 60
         && (d.selection == 'single' || d.selection == 'multiple')
         && d.required is bool

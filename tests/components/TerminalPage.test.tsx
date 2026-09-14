@@ -94,6 +94,7 @@ vi.mock('@/features/menu/useMenuItems', () => ({
         price: 1250,
         sortOrder: 1,
         active: true,
+        modifierGroupIds: [],
       },
     ],
     data: [],

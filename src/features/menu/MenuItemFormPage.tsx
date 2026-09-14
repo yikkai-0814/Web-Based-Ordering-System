@@ -9,10 +9,15 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { createMenuItem, updateMenuItem } from '@/features/menu/menu-api'
 import { ModifierGroupsEditor } from '@/features/menu/ModifierGroupsEditor'
+import { EMPTY_CUSTOMISATION, type DraftCustomisation } from '@/features/menu/item-customisation'
+import { NewItemCustomisation } from '@/features/menu/NewItemCustomisation'
+import { useModifierGroups } from '@/features/menu/useModifierGroups'
 import { useItemCosts } from '@/features/menu/useItemCosts'
+import type { ModifierGroup } from '@/features/menu/modifiers'
 import {
   ITEM_DESCRIPTION_MAX,
   ITEM_NAME_MAX,
@@ -22,9 +27,6 @@ import {
 import { useCategories } from '@/features/menu/useCategories'
 import { useMenuItems } from '@/features/menu/useMenuItems'
 import { CURRENCY_PREFIX, parsePriceInput, toPriceInputValue } from '@/lib/money'
-
-const SELECT_CLASS =
-  'h-touch w-full rounded-lg border border-input bg-transparent px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50'
 
 /**
  * Route component for both `/menu/new` and `/menu/:itemId/edit`.
@@ -43,9 +45,12 @@ export function MenuItemFormPage() {
   const { categories, loading: categoriesLoading } = useCategories()
   const { items, loading: itemsLoading } = useMenuItems()
   const { costs, loading: costsLoading } = useItemCosts()
+  // The pool of reusable definitions, offered on the create form. Loaded here rather than
+  // inside the form so the form is still seeded once, from settled props.
+  const { groups, loading: groupsLoading } = useModifierGroups()
 
   const existing = isEditing ? items.find((item) => item.id === itemId) : undefined
-  const loading = categoriesLoading || costsLoading || (isEditing && itemsLoading)
+  const loading = categoriesLoading || costsLoading || groupsLoading || (isEditing && itemsLoading)
 
   if (loading) {
     return <Skeleton className="h-96 w-full max-w-xl" />
@@ -81,6 +86,7 @@ export function MenuItemFormPage() {
       existing={existing}
       existingCost={existing ? (costs.get(existing.id) ?? null) : null}
       categories={categories}
+      reusableGroups={groups}
       itemId={itemId}
     />
   )
@@ -90,11 +96,13 @@ function MenuItemForm({
   existing,
   existingCost,
   categories,
+  reusableGroups,
   itemId,
 }: {
   existing: MenuItem | undefined
   existingCost: number | null
   categories: Category[]
+  reusableGroups: ModifierGroup[]
   itemId: string | undefined
 }) {
   const { t } = useTranslation()
@@ -116,6 +124,14 @@ function MenuItemForm({
   )
   const [sortOrder, setSortOrder] = useState(String(existing?.sortOrder ?? 0))
   const [active, setActive] = useState(existing?.active ?? true)
+
+  /**
+   * Customisation for an item that does not exist yet.
+   *
+   * Only the create path uses this. Editing keeps the immediate-save editor it has always
+   * had, so this state is simply never read there.
+   */
+  const [customisation, setCustomisation] = useState<DraftCustomisation>(EMPTY_CUSTOMISATION)
 
   const [error, setError] = useState<Message | null>(null)
   /**
@@ -193,11 +209,18 @@ function MenuItemForm({
         price: parsedPrice.sen,
         sortOrder: parsedSort,
         active,
+        // Editing never rewrites the attachments from here: the editor below owns them and
+        // has already saved every change. Sending the item's own list back unchanged is what
+        // keeps a save from undoing what was just attached.
+        modifierGroupIds: isEditing
+          ? (existing?.modifierGroupIds ?? [])
+          : customisation.attachedIds,
       }
       if (isEditing && itemId) {
         await updateMenuItem(itemId, input, { next: parsedCost, previous: existingCost })
       } else {
-        await createMenuItem(input, parsedCost)
+        // The item, the groups invented on this form and the attachments, in one batch.
+        await createMenuItem(input, parsedCost, customisation.drafts)
       }
       void navigate('/menu')
     } catch {
@@ -207,8 +230,11 @@ function MenuItemForm({
   }
 
   return (
-    <div className="space-y-6">
-      <Card className="w-full max-w-xl">
+    /* Details on the left, customisation on the right, so the horizontal space is used and
+       the form does not become a very tall single column. One column below `lg`, where two
+       would leave neither enough room. */
+    <div className="grid w-full max-w-6xl items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)]">
+      <Card className="w-full">
         <CardHeader>
           <CardTitle className="text-xl">
             {t(isEditing ? 'menu.editItem' : 'menu.newItem')}
@@ -251,10 +277,8 @@ function MenuItemForm({
 
             <div className="grid gap-2">
               <Label htmlFor="categoryId">{t('menu.category')}</Label>
-              {/* A native select: on a touch screen the OS picker beats a custom listbox. */}
-              <select
+              <NativeSelect
                 id="categoryId"
-                className={SELECT_CLASS}
                 value={categoryId}
                 onChange={(event) => setCategoryId(event.target.value)}
                 disabled={pending}
@@ -265,7 +289,7 @@ function MenuItemForm({
                     {category.active ? '' : t('menu.hiddenSuffix')}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
 
             <div className="grid gap-2">
@@ -369,14 +393,32 @@ function MenuItemForm({
         </CardContent>
       </Card>
 
-      {/* Only once the item exists: a group is keyed to an item id, and there is none to key
-          it to until the item has been created. Saving first is one extra step on the rarer
-          action, which is better than holding groups in memory and writing them in a second
-          batch that could half-fail. */}
-      {isEditing && itemId ? (
-        <ModifierGroupsEditor itemId={itemId} />
+      {/* The right column.
+
+          Editing keeps the editor it has always had, which writes each change immediately —
+          the item exists, so there is an id to attach things to and no reason to defer.
+
+          Creating cannot do that, and used to say so ("save the item first"). It now holds
+          the configuration in memory and the form writes item, groups and attachments in one
+          batch, so creating an item with its customisation is a single action. */}
+      {isEditing && existing ? (
+        <ModifierGroupsEditor item={existing} />
       ) : (
-        <p className="max-w-xl text-sm text-muted-foreground">{t('modifierAdmin.saveItemFirst')}</p>
+        <Card className="w-full">
+          <CardHeader>
+            <CardTitle className="text-xl">{t('menu.customisationHeading')}</CardTitle>
+            <CardDescription>{t('menu.customisationBlurb')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <NewItemCustomisation
+              /* Shared definitions only: a group owned by another item is not reusable. */
+              available={reusableGroups.filter((group) => group.itemId === null)}
+              value={customisation}
+              onChange={setCustomisation}
+              disabled={pending}
+            />
+          </CardContent>
+        </Card>
       )}
     </div>
   )

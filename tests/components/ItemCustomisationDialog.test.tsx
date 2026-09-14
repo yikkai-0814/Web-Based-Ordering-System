@@ -24,6 +24,7 @@ const ITEM: MenuItem = {
   price: 800,
   sortOrder: 0,
   active: true,
+  modifierGroupIds: [],
   createdAt: null,
   updatedAt: null,
 }

@@ -356,6 +356,9 @@ export const ms: Dictionary = {
   'menu.costCurrency': 'Kos ({{currency}})',
 
   // ---- Item customisation, admin side --------------------------------------------
+  'menu.customisationHeading': 'Penyesuaian',
+  'menu.customisationBlurb':
+    'Pilih apa yang perlu ditanya kepada kakitangan apabila item ini dipesan.',
   'modifierAdmin.title': 'Pilihan Item',
   'modifierAdmin.blurb':
     'Apa yang ditanya kepada kakitangan apabila item ini dipesan. Item tanpa kumpulan ditambah ke pesanan dengan satu ketikan. Perubahan di sini tidak menjejaskan pesanan lepas.',
@@ -369,6 +372,13 @@ export const ms: Dictionary = {
   'modifierAdmin.adds': 'Tambahan ({{currency}})',
   'modifierAdmin.addsPlaceholder': '0.00',
   'modifierAdmin.options': 'Pilihan',
+  'modifierAdmin.sharing': 'Perkongsian',
+  'modifierAdmin.sharingShared': 'Dikongsi — guna semula pada item lain',
+  'modifierAdmin.sharingItemOnly': 'Item ini sahaja',
+  'modifierAdmin.sharingSharedHint':
+    'Boleh ditambah pada item lain. Menyuntingnya kemudian mengubah setiap item yang menggunakannya.',
+  'modifierAdmin.sharingItemOnlyHint':
+    'Milik item ini sahaja. Menyuntingnya tidak menjejaskan item lain, dan ia dibuang bersama item itu.',
   'modifierAdmin.selection': 'Pemilihan',
   'modifierAdmin.selectionSingle': 'Satu pilihan',
   'modifierAdmin.selectionMultiple': 'Beberapa pilihan',
@@ -389,6 +399,23 @@ export const ms: Dictionary = {
   'modifierAdmin.needOption': 'Kumpulan perlukan sekurang-kurangnya satu pilihan.',
   'modifierAdmin.badSortOrder': 'Susunan mesti nombor bulat.',
   'modifierAdmin.deleteGroup': 'Padam {{name}}',
+  'modifierAdmin.reuseHeading': 'Guna semula kumpulan sedia ada',
+  'modifierAdmin.reusePlaceholder': 'Pilih kumpulan…',
+  'modifierAdmin.reuseNone': 'Tiada kumpulan lain untuk diguna semula. Cipta satu di bawah.',
+  'modifierAdmin.reuseAdd': 'Tambah',
+  'modifierAdmin.onThisItem': 'Pada item ini',
+  'modifierAdmin.detach': 'Buang {{name}} daripada item ini',
+  'modifierAdmin.detachShort': 'Buang',
+  'modifierAdmin.badgeNew': 'Baharu',
+  'modifierAdmin.badgeShared': 'Dikongsi',
+  'modifierAdmin.badgeItemOnly': 'Item ini sahaja',
+  'modifierAdmin.createNew': 'Cipta kumpulan baharu',
+  'modifierAdmin.draftHint': 'Dicipta apabila anda menyimpan item.',
+  'modifierAdmin.sharedElsewhereOne':
+    'Turut digunakan oleh 1 item lain. Memadamnya akan membuangnya daripada item itu juga.',
+  'modifierAdmin.sharedElsewhereOther':
+    'Turut digunakan oleh {{count}} item lain. Memadamnya akan membuangnya daripada item tersebut juga.',
+  'modifierAdmin.detachNotDelete': 'Membuangnya di sini mengekalkan kumpulan untuk item lain.',
   'modifierAdmin.removeOption': 'Buang {{name}}',
 
   // ---- Staff roster --------------------------------------------------------------
