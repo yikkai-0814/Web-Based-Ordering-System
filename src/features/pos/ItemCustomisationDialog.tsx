@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 
+import { useTranslation } from '@/features/i18n/useTranslation'
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,6 +21,7 @@ import {
   type SelectedModifier,
 } from '@/features/menu/modifiers'
 import type { MenuItem } from '@/features/menu/types'
+import type { TranslationKey } from '@/features/i18n/translations/en'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
@@ -44,6 +47,7 @@ export function ItemCustomisationDialog({
   onAdd: (selections: SelectedModifier[]) => void
   onCancel: () => void
 }) {
+  const { t } = useTranslation()
   const [chosen, setChosen] = useState<SelectedModifier[]>(() => defaultSelections(groups))
 
   const validation = useMemo(() => validateSelections(groups, chosen), [groups, chosen])
@@ -71,7 +75,7 @@ export function ItemCustomisationDialog({
         <AlertDialogHeader>
           <AlertDialogTitle data-testid="customise-title">{item.name}</AlertDialogTitle>
           <AlertDialogDescription>
-            {formatMoney(item.price)} · choose how it should be made.
+            {t('modifier.chooseHow', { price: formatMoney(item.price) })}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -81,7 +85,7 @@ export function ItemCustomisationDialog({
               <legend className="flex w-full items-baseline gap-2 text-sm font-semibold">
                 {group.name}
                 <span className="text-xs font-normal text-muted-foreground">
-                  {describeRule(group)}
+                  {t(ruleKeyOf(group))}
                 </span>
               </legend>
 
@@ -122,7 +126,7 @@ export function ItemCustomisationDialog({
         </div>
 
         <div className="flex items-baseline justify-between border-t pt-3">
-          <span className="text-sm text-muted-foreground">Price</span>
+          <span className="text-sm text-muted-foreground">{t('common.price')}</span>
           <span className="text-lg font-semibold tabular-nums" data-testid="customise-price">
             {formatMoney(unitPrice)}
           </span>
@@ -132,20 +136,20 @@ export function ItemCustomisationDialog({
             group it has not answered. */}
         {!validation.ok && (
           <p className="text-sm text-destructive" data-testid="customise-error">
-            {validation.error}
+            {t(validation.error)}
           </p>
         )}
 
         <AlertDialogFooter>
           <AlertDialogCancel onClick={onCancel} data-testid="customise-cancel">
-            Cancel
+            {t('common.cancel')}
           </AlertDialogCancel>
           <AlertDialogAction
             disabled={!validation.ok}
             data-testid="customise-add"
             onClick={() => validation.ok && onAdd(chosen)}
           >
-            Add to Order
+            {t('modifier.addToOrder')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -172,7 +176,10 @@ function defaultSelections(groups: readonly ModifierGroup[]): SelectedModifier[]
   return defaults
 }
 
-function describeRule(group: ModifierGroup): string {
-  if (group.selection === 'single') return group.required ? 'Choose one' : 'Choose one, optional'
-  return group.required ? 'Choose one or more' : 'Optional'
+/** Which sentence describes this group's rule. A key, so the prompt follows the language. */
+function ruleKeyOf(group: ModifierGroup): TranslationKey {
+  if (group.selection === 'single') {
+    return group.required ? 'modifier.ruleChooseOne' : 'modifier.ruleChooseOneOptional'
+  }
+  return group.required ? 'modifier.ruleChooseSeveral' : 'modifier.ruleOptional'
 }

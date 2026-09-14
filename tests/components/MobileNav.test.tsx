@@ -44,12 +44,12 @@ const linkNames = () =>
 describe('MobileNav', () => {
   it('offers staff exactly New Order, Orders and Queue, in order', () => {
     renderNav('staff')
-    expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue'])
+    expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue', 'Settings'])
   })
 
   it('offers an admin exactly the five office sections, Dashboard first', () => {
     renderNav('admin')
-    expect(linkNames()).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff'])
+    expect(linkNames()).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff', 'Settings'])
   })
 
   it('does not offer an admin the counter, and offers nobody an Admin page', () => {

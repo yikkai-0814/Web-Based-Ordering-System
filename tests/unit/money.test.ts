@@ -1,3 +1,4 @@
+import { say } from '../say'
 import { describe, expect, it } from 'vitest'
 
 import { formatMoney, parsePriceInput, toPriceInputValue } from '@/lib/money'
@@ -10,10 +11,11 @@ function sen(input: string): number {
 }
 
 /** Convenience: assert a failed parse and return the message. */
+/** The refusal, rendered in English — the rule is the key, the sentence is what it says. */
 function failure(input: string): string {
   const result = parsePriceInput(input)
   if (result.ok) throw new Error(`expected "${input}" to fail, got ${result.sen}`)
-  return result.error
+  return say(result.error)
 }
 
 describe('parsePriceInput', () => {

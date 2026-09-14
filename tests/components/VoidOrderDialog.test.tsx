@@ -10,6 +10,7 @@
  * So these tests assert on exactly that boundary, which is also the boundary Phase 11's
  * security rests on — a staff member reaches `onConfirm` only WITH credentials attached.
  */
+import { message, MessageError } from '@/features/i18n/messages'
 import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -144,11 +145,12 @@ describe('VoidOrderDialog: the reason is required before anything else', () => {
 })
 
 describe('VoidOrderDialog: a refused authorisation', () => {
+  // What withManagerAuthorization actually throws now: a message the dialog translates.
   const REFUSED = 'Those credentials are not allowed to authorise this. Ask an administrator.'
 
   async function refuseOnce() {
     const onConfirm = vi.fn<(reason: string, credentials: unknown) => Promise<void>>(async () => {
-      throw new Error(REFUSED)
+      throw new MessageError(message('void.notAManager'))
     })
     const { user } = setup(true, onConfirm)
     await openAndGiveReason(user)

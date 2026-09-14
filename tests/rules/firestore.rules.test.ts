@@ -111,9 +111,82 @@ describe('firestore rules: users', () => {
     await assertFails(updateDoc(doc(db, 'users', STAFF_UID), { active: true }))
   })
 
-  it('denies a staff member editing even a harmless field of their own profile', async () => {
+  /**
+   * Renaming yourself is the one self-write the rules allow, and the tests below are the
+   * fence around it: the name may change and nothing else may, whatever it is bundled with.
+   */
+  it('lets a signed-in user rename themselves', async () => {
     await seedProfiles()
     const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertSucceeds(updateDoc(doc(db, 'users', STAFF_UID), { displayName: 'Sam Renamed' }))
+  })
+
+  it('denies renaming somebody else', async () => {
+    await seedProfiles()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(updateDoc(doc(db, 'users', OTHER_STAFF_UID), { displayName: 'Not yours' }))
+  })
+
+  it('denies smuggling a promotion in alongside a rename', async () => {
+    await seedProfiles()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(
+      updateDoc(doc(db, 'users', STAFF_UID), { displayName: 'Sam Renamed', role: 'admin' }),
+    )
+  })
+
+  it('denies smuggling a reactivation, an email change or a new uid in alongside a rename', async () => {
+    await seedProfiles()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    for (const extra of [{ active: false }, { email: 'someone@else.test' }, { uid: ADMIN_UID }]) {
+      await assertFails(
+        updateDoc(doc(db, 'users', STAFF_UID), { displayName: 'Sam Renamed', ...extra }),
+      )
+    }
+  })
+
+  it('denies inventing a field alongside a rename', async () => {
+    await seedProfiles()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(
+      updateDoc(doc(db, 'users', STAFF_UID), { displayName: 'Sam Renamed', discount: true }),
+    )
+  })
+
+  it('denies a blank or whitespace-only name', async () => {
+    await seedProfiles()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(updateDoc(doc(db, 'users', STAFF_UID), { displayName: '' }))
+    await assertFails(updateDoc(doc(db, 'users', STAFF_UID), { displayName: '   ' }))
+  })
+
+  it('denies a name longer than the limit, or one that is not a string', async () => {
+    await seedProfiles()
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(updateDoc(doc(db, 'users', STAFF_UID), { displayName: 'x'.repeat(61) }))
+    await assertFails(updateDoc(doc(db, 'users', STAFF_UID), { displayName: 42 }))
+  })
+
+  it('denies a deactivated user renaming themselves', async () => {
+    // Their session is already being rejected by the app; the rules say so too rather than
+    // leaving a deactivated account able to edit anything at all.
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users', STAFF_UID), {
+        uid: STAFF_UID,
+        email: 'staff@example.com',
+        displayName: 'Sam Staff',
+        role: 'staff',
+        active: false,
+        createdAt: new Date(),
+      })
+    })
+    const db = testEnv.authenticatedContext(STAFF_UID).firestore()
+    await assertFails(updateDoc(doc(db, 'users', STAFF_UID), { displayName: 'Sam Renamed' }))
+  })
+
+  it('denies a signed-out visitor renaming anybody', async () => {
+    await seedProfiles()
+    const db = testEnv.unauthenticatedContext().firestore()
     await assertFails(updateDoc(doc(db, 'users', STAFF_UID), { displayName: 'Renamed' }))
   })
 

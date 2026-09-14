@@ -103,7 +103,8 @@ describe('a required group must be answered', () => {
     // A required multi-select has no sensible default, so it starts unanswered.
     const { user } = setup([group({ ...ADDONS, required: true })])
     expect(addButton().disabled).toBe(true)
-    expect(screen.getByTestId('customise-error').textContent).toContain('add-ons')
+    // The vendor's own word, exactly as they typed it rather than case-folded.
+    expect(screen.getByTestId('customise-error').textContent).toContain('Add-ons')
 
     await user.click(optionById('add-egg'))
     expect(addButton().disabled).toBe(false)

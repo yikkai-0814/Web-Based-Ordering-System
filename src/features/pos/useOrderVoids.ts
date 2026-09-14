@@ -1,3 +1,5 @@
+import { message } from '@/features/i18n/messages'
+import type { Message } from '@/features/i18n/messages'
 import { useSidecarDocs } from '@/features/pos/useOrderSidecars'
 import { parseOrderVoid, type OrderVoid } from '@/features/pos/types'
 
@@ -13,13 +15,13 @@ import { parseOrderVoid, type OrderVoid } from '@/features/pos/types'
 export function useOrderVoids(chunks: readonly (readonly string[])[]): {
   voids: Map<string, OrderVoid>
   loading: boolean
-  error: string | null
+  error: Message | null
 } {
   const state = useSidecarDocs<OrderVoid>(
     'orderVoids',
     parseOrderVoid,
     chunks,
-    'Could not load voided sales for this date.',
+    message('load.voidsDate'),
   )
 
   return { voids: state.records, loading: state.loading, error: state.error }

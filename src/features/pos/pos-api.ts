@@ -1,3 +1,4 @@
+import { MessageError } from '@/features/i18n/messages'
 import { collection, doc, runTransaction, serverTimestamp } from 'firebase/firestore'
 
 import { cartTotal, validateCart, type Cart } from '@/features/pos/cart'
@@ -52,12 +53,12 @@ export async function createOrder({
   staff,
 }: CreateOrderParams): Promise<CreatedOrder> {
   const validation = validateCart(cart)
-  if (!validation.ok) throw new Error(validation.error)
+  if (!validation.ok) throw new MessageError(validation.error)
 
   // A dine-in order without a usable table number never reaches Firestore. The rules check
   // it again, independently — this is the message the counter sees, not the enforcement.
   const service = validatePlacement(placement.orderType, placement.tableNumber)
-  if (!service.ok) throw new Error(service.error)
+  if (!service.ok) throw new MessageError(service.error)
 
   const total = cartTotal(cart)
 

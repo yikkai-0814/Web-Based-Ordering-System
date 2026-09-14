@@ -1,3 +1,5 @@
+import { message } from '@/features/i18n/messages'
+import type { Message } from '@/features/i18n/messages'
 import { useMemo } from 'react'
 import { collection, query, where } from 'firebase/firestore'
 
@@ -21,18 +23,14 @@ import { db } from '@/lib/firebase'
 export function useOrders(businessDate: string): {
   orders: Order[]
   loading: boolean
-  error: string | null
+  error: Message | null
 } {
   const ordersQuery = useMemo(
     () => query(collection(db, 'orders'), where('businessDate', '==', businessDate)),
     [businessDate],
   )
 
-  const state = useQueryDocs<Order>(
-    ordersQuery,
-    parseOrder,
-    'Could not load orders. You may not have permission, or you are offline.',
-  )
+  const state = useQueryDocs<Order>(ordersQuery, parseOrder, message('load.orders'))
 
   const orders = useMemo(() => [...state.data].sort(byNumberDescending), [state.data])
 

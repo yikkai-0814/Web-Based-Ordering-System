@@ -170,7 +170,7 @@ describe('changeDue', () => {
   it('refuses an under-payment rather than returning negative change', () => {
     const result = changeDue(3190, 3000)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/less than the total/i)
+    if (!result.ok) expect(result.error.key).toBe('validation.tenderedTooLittle')
   })
 
   it('refuses non-integer amounts', () => {
@@ -188,7 +188,7 @@ describe('validateCart', () => {
   it('refuses an empty cart', () => {
     const result = validateCart(EMPTY_CART)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/at least one item/i)
+    if (!result.ok) expect(result.error.key).toBe('validation.cartEmpty')
   })
 
   it('accepts a normal cart', () => {
@@ -209,7 +209,7 @@ describe('validateCart', () => {
     ]
     const result = validateCart(bad)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/invalid price/i)
+    if (!result.ok) expect(result.error.key).toBe('validation.linePrice')
   })
 
   it('refuses a line with a negative price or zero quantity', () => {

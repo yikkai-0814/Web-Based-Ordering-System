@@ -6,6 +6,8 @@
  * nothing but wire these to `document` and `matchMedia`.
  */
 
+import type { TranslationKey } from '@/features/i18n/translations/en'
+
 /** Per-device, because a theme is about the screen in front of somebody, not their account. */
 export const THEME_STORAGE_KEY = 'ordering-system.theme'
 
@@ -16,10 +18,10 @@ export type ThemePreference = (typeof THEMES)[number]
 /** What the preference actually resolves to once the system has been consulted. */
 export type ResolvedTheme = 'light' | 'dark'
 
-export const THEME_LABELS: Record<ThemePreference, string> = {
-  light: 'Light',
-  dark: 'Dark',
-  system: 'System',
+export const THEME_LABEL_KEYS: Record<ThemePreference, TranslationKey> = {
+  light: 'theme.light',
+  dark: 'theme.dark',
+  system: 'theme.system',
 }
 
 /**

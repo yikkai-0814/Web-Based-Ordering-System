@@ -1,3 +1,5 @@
+import { isMessageError, message, type Message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState } from 'react'
 import { AlertCircle, Ban, ShieldCheck } from 'lucide-react'
 
@@ -55,12 +57,13 @@ export function VoidOrderDialog({
   requiresAuthorization: boolean
   onConfirm: (reason: string, credentials: ManagerCredentials | null) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<'reason' | 'authorize'>('reason')
   const [reason, setReason] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
   const [pending, setPending] = useState(false)
 
   function reset(nextOpen: boolean) {
@@ -121,11 +124,7 @@ export function VoidOrderDialog({
       await onConfirm(validReason, credentials)
       reset(false)
     } catch (caught) {
-      setError(
-        caught instanceof Error && caught.message
-          ? caught.message
-          : 'That sale could not be voided.',
-      )
+      setError(isMessageError(caught) ? caught.detail : message('order.voidFailed'))
       // Keep the reason so nothing has to be retyped, but never keep the password.
       setPassword('')
     } finally {
@@ -143,40 +142,30 @@ export function VoidOrderDialog({
           data-testid="void-order"
         >
           <Ban aria-hidden="true" />
-          Void sale
+          {t('void.action')}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {step === 'reason'
-              ? `Void order #${orderNumber}?`
-              : `Manager authorisation for order #${orderNumber}`}
+            {t(step === 'reason' ? 'void.confirmTitle' : 'void.managerTitle', {
+              number: orderNumber,
+            })}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {step === 'reason' ? (
-              <>
-                This reverses {formatMoney(amount)} and <strong>cannot be undone</strong>. The sale
-                itself stays on the record; this adds a permanent note that it was cancelled, with
-                your name against it.
-              </>
-            ) : (
-              <>
-                A manager must sign in to approve this. Their name is recorded as having authorised
-                it, and yours as having requested it. They are <strong>not</strong> signed in to the
-                till — your session stays exactly as it is.
-              </>
-            )}
+            {step === 'reason'
+              ? t('void.blurb', { amount: formatMoney(amount) })
+              : t('void.managerBlurb')}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         {step === 'reason' ? (
           <div className="grid gap-2">
-            <Label htmlFor="void-reason">Reason</Label>
+            <Label htmlFor="void-reason">{t('void.reason')}</Label>
             <Input
               id="void-reason"
               className="h-touch text-base"
-              placeholder="e.g. Wrong item rung up"
+              placeholder={t('void.reasonPlaceholder')}
               maxLength={VOID_REASON_MAX}
               value={reason}
               onChange={(event) => setReason(event.target.value)}
@@ -187,7 +176,7 @@ export function VoidOrderDialog({
         ) : (
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="manager-email">Manager email</Label>
+              <Label htmlFor="manager-email">{t('void.managerEmail')}</Label>
               <Input
                 id="manager-email"
                 type="email"
@@ -201,7 +190,7 @@ export function VoidOrderDialog({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="manager-password">Manager password</Label>
+              <Label htmlFor="manager-password">{t('void.managerPassword')}</Label>
               <Input
                 id="manager-password"
                 type="password"
@@ -219,12 +208,12 @@ export function VoidOrderDialog({
         {error && (
           <Alert variant="destructive">
             <AlertCircle aria-hidden="true" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{t(error)}</AlertDescription>
           </Alert>
         )}
 
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>{t('common.cancel')}</AlertDialogCancel>
           {step === 'reason' ? (
             <Button
               variant="destructive"
@@ -235,12 +224,12 @@ export function VoidOrderDialog({
               {requiresAuthorization ? (
                 <>
                   <ShieldCheck aria-hidden="true" />
-                  Continue
+                  {t('common.continue')}
                 </>
               ) : pending ? (
-                'Voiding…'
+                t('void.submitting')
               ) : (
-                'Void sale'
+                t('void.action')
               )}
             </Button>
           ) : (
@@ -250,7 +239,7 @@ export function VoidOrderDialog({
               data-testid="confirm-void"
               onClick={() => void handleAuthorizeStep()}
             >
-              {pending ? 'Voiding…' : 'Authorise and void'}
+              {t(pending ? 'void.submitting' : 'void.authoriseAndVoid')}
             </Button>
           )}
         </AlertDialogFooter>

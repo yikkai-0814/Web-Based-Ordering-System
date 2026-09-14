@@ -1,3 +1,4 @@
+import type { Message } from '@/features/i18n/messages'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { collection, onSnapshot, query, where, type Unsubscribe } from 'firebase/firestore'
 
@@ -20,7 +21,7 @@ import { db } from '@/lib/firebase'
 export interface SidecarState<T> {
   records: Map<string, T>
   loading: boolean
-  error: string | null
+  error: Message | null
 }
 
 const EMPTY_RECORDS = new Map<string, never>()
@@ -44,7 +45,7 @@ export function useSidecarDocs<T extends { orderId: string }>(
   path: string,
   parse: ParseDoc<T>,
   chunks: readonly (readonly string[])[],
-  errorMessage: string,
+  errorMessage: Message,
 ): SidecarState<T> {
   const signature = useMemo(
     () =>
@@ -56,7 +57,7 @@ export function useSidecarDocs<T extends { orderId: string }>(
   )
 
   const [pages, setPages] = useState<Map<string, T[]>>(() => new Map())
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
   const subscriptions = useRef(new Map<string, Unsubscribe>())
   /**
    * The chunks currently wanted, read by every snapshot callback.

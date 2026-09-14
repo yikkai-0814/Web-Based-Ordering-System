@@ -1,3 +1,4 @@
+import { message, MessageError } from '@/features/i18n/messages'
 import {
   addDoc,
   collection,
@@ -94,7 +95,7 @@ function writeCost(
   if (cost.next === cost.previous) return
 
   const recordedBy = auth.currentUser?.uid
-  if (!recordedBy) throw new Error('You must be signed in to change a cost.')
+  if (!recordedBy) throw new MessageError(message('validation.signInToChangeCost'))
 
   // Backfill the outgoing value for an item that had a cost but no journal, so this edit
   // does not erase what earlier sales already resolved to. See cost-history.ts. It goes in

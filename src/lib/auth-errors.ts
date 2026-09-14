@@ -1,41 +1,39 @@
 import { FirebaseError } from 'firebase/app'
 
+import { message, type Message } from '@/features/i18n/messages'
+import type { TranslationKey } from '@/features/i18n/translations/en'
+
 /**
- * Firebase auth error codes are not fit to show a cashier standing at a till. This maps
- * the ones a login screen can actually produce to plain language.
+ * Firebase auth error codes are not fit to show a cashier standing at a till. This maps the
+ * ones a login screen can actually produce to a message the interface can say in whatever
+ * language it is set to.
  *
- * Note that `auth/user-not-found`, `auth/wrong-password` and `auth/invalid-credential`
- * all map to the same sentence on purpose: telling an attacker which addresses have
- * accounts is a free user-enumeration oracle.
+ * Note that `auth/user-not-found`, `auth/wrong-password` and `auth/invalid-credential` all
+ * map to the same sentence on purpose: telling an attacker which addresses have accounts is
+ * a free user-enumeration oracle.
  */
-const MESSAGES: Record<string, string> = {
-  'auth/invalid-credential': 'That email or password is not correct.',
-  'auth/invalid-email': 'That email or password is not correct.',
-  'auth/user-not-found': 'That email or password is not correct.',
-  'auth/wrong-password': 'That email or password is not correct.',
-  'auth/missing-password': 'Please enter your password.',
-  'auth/user-disabled': 'This account has been disabled. Ask an administrator for help.',
-  'auth/too-many-requests':
-    'Too many failed attempts. Wait a minute before trying again, or ask an administrator to reset the password.',
-  'auth/network-request-failed': 'Cannot reach the server. Check the network connection.',
-  'auth/internal-error': 'Something went wrong signing in. Please try again.',
+const CODES: Record<string, TranslationKey> = {
+  'auth/invalid-credential': 'auth.error.invalidCredential',
+  'auth/invalid-email': 'auth.error.invalidCredential',
+  'auth/user-not-found': 'auth.error.invalidCredential',
+  'auth/wrong-password': 'auth.error.invalidCredential',
+  'auth/missing-password': 'auth.error.missingPassword',
+  'auth/user-disabled': 'auth.error.userDisabled',
+  'auth/too-many-requests': 'auth.error.tooManyRequests',
+  'auth/network-request-failed': 'auth.error.networkRequestFailed',
+  'auth/internal-error': 'auth.error.internal',
 }
 
-const FALLBACK = 'Something went wrong signing in. Please try again.'
+const FALLBACK: TranslationKey = 'auth.error.internal'
 
-export function authErrorMessage(error: unknown): string {
+export function authErrorMessage(error: unknown): Message {
   if (error instanceof FirebaseError) {
-    return MESSAGES[error.code] ?? FALLBACK
+    return message(CODES[error.code] ?? FALLBACK)
   }
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-  return FALLBACK
+  return message(FALLBACK)
 }
 
 /** Reasons the app itself refuses a session, after Firebase has accepted the credentials. */
-export const NO_PROFILE_MESSAGE =
-  'This account is not set up for the ordering system yet. Ask an administrator to finish creating it.'
+export const NO_PROFILE_MESSAGE: Message = message('auth.error.noProfile')
 
-export const INACTIVE_MESSAGE =
-  'This account has been deactivated. Ask an administrator to reactivate it.'
+export const INACTIVE_MESSAGE: Message = message('auth.error.inactive')

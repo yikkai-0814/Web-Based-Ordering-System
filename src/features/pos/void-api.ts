@@ -1,3 +1,4 @@
+import { MessageError } from '@/features/i18n/messages'
 import { doc, serverTimestamp, setDoc, type Firestore } from 'firebase/firestore'
 
 import { validateVoidReason } from '@/features/pos/voids'
@@ -43,7 +44,7 @@ export async function voidOrder(
   firestore: Firestore = db,
 ): Promise<void> {
   const validated = validateVoidReason(reason)
-  if (!validated.ok) throw new Error(validated.error)
+  if (!validated.ok) throw new MessageError(validated.error)
 
   await setDoc(doc(firestore, 'orderVoids', orderId), {
     orderId,

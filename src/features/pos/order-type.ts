@@ -16,14 +16,17 @@
  * is: void it and ring it again.
  */
 
+import type { TranslationKey } from '@/features/i18n/translations/en'
+import { message, type Message } from '@/features/i18n/messages'
+
 /** The two ways the café serves an order. */
 export const ORDER_TYPES = ['dine_in', 'takeaway'] as const
 
 export type OrderType = (typeof ORDER_TYPES)[number]
 
-export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
-  dine_in: 'Dine-in',
-  takeaway: 'Takeaway',
+export const ORDER_TYPE_LABEL_KEYS: Record<OrderType, TranslationKey> = {
+  dine_in: 'orderType.dineIn',
+  takeaway: 'orderType.takeaway',
 }
 
 export function isOrderType(value: unknown): value is OrderType {
@@ -44,7 +47,7 @@ export const TABLE_NUMBER_MAX = 8
  */
 export const TABLE_NUMBER_PATTERN = /^[A-Za-z0-9]{1,8}$/
 
-export type TableNumberResult = { ok: true; tableNumber: string } | { ok: false; error: string }
+export type TableNumberResult = { ok: true; tableNumber: string } | { ok: false; error: Message }
 
 /**
  * Validates what somebody typed into the table field.
@@ -57,16 +60,16 @@ export function validateTableNumber(input: string): TableNumberResult {
   const trimmed = input.trim()
 
   if (trimmed === '') {
-    return { ok: false, error: 'Enter a table number for a dine-in order.' }
+    return { ok: false, error: message('validation.tableRequired') }
   }
   if (trimmed.length > TABLE_NUMBER_MAX) {
     return {
       ok: false,
-      error: `Table numbers can be at most ${TABLE_NUMBER_MAX} characters.`,
+      error: message('validation.tableTooLong', { max: TABLE_NUMBER_MAX }),
     }
   }
   if (!TABLE_NUMBER_PATTERN.test(trimmed)) {
-    return { ok: false, error: 'Use letters and numbers only, for example 5 or A3.' }
+    return { ok: false, error: message('validation.tableCharacters') }
   }
 
   return { ok: true, tableNumber: trimmed }
@@ -82,7 +85,7 @@ export function validateTableNumber(input: string): TableNumberResult {
 export type PlacementResult =
   | { ok: true; orderType: 'dine_in'; tableNumber: string }
   | { ok: true; orderType: 'takeaway'; tableNumber: null }
-  | { ok: false; error: string }
+  | { ok: false; error: Message }
 
 /**
  * Guards the place-order button.
@@ -114,10 +117,11 @@ export function validatePlacement(orderType: OrderType, tableInput: string): Pla
 export function orderTypeSummaryOf(order: {
   orderType: OrderType | null
   tableNumber: string | null
-}): string {
-  if (order.orderType === null) return 'Not recorded'
-  if (order.orderType === 'takeaway') return ORDER_TYPE_LABELS.takeaway
-  return order.tableNumber === null
-    ? ORDER_TYPE_LABELS.dine_in
-    : `${ORDER_TYPE_LABELS.dine_in} · Table ${order.tableNumber}`
+}): Message {
+  if (order.orderType === null) return message('common.notRecorded')
+  if (order.orderType === 'takeaway') return message(ORDER_TYPE_LABEL_KEYS.takeaway)
+  if (order.tableNumber === null) return message(ORDER_TYPE_LABEL_KEYS.dine_in)
+  // The table is the vendor's own identifier — "5", "A3", "Bar 2" — so it is a parameter
+  // spliced in as typed, never something looked up.
+  return message('orderType.dineInWithTable', { table: order.tableNumber })
 }

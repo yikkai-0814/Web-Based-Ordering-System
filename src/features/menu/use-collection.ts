@@ -1,3 +1,4 @@
+import { message, type Message } from '@/features/i18n/messages'
 import { useEffect, useMemo, useState } from 'react'
 import { collection, onSnapshot } from 'firebase/firestore'
 
@@ -6,7 +7,7 @@ import { db } from '@/lib/firebase'
 export interface CollectionState<T> {
   data: T[]
   loading: boolean
-  error: string | null
+  error: Message | null
 }
 
 /**
@@ -60,7 +61,7 @@ export function useCollectionDocs<T>(
         setState({
           data: [],
           loading: false,
-          error: 'Could not load the menu. You may not have permission, or you are offline.',
+          error: message('validation.menuLoadError'),
         })
       },
     )

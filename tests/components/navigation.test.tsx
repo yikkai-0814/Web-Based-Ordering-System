@@ -11,6 +11,7 @@
  * `useAuth` is stubbed, which is the only mock this file needs — neither component touches
  * Firestore.
  */
+import { LanguageProvider } from '@/features/i18n/LanguageProvider'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -49,9 +50,9 @@ const linkNames = () =>
     .filter(Boolean)
 
 describe('Sidebar: what each role is offered', () => {
-  it('shows staff New Order, Orders and Queue — and nothing else', () => {
+  it('shows staff New Order, Orders, Queue and Settings — and nothing else', () => {
     renderSidebar('staff')
-    expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue'])
+    expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue', 'Settings'])
   })
 
   it('does not offer staff the Dashboard', () => {
@@ -59,9 +60,19 @@ describe('Sidebar: what each role is offered', () => {
     expect(screen.queryByRole('link', { name: 'Dashboard' })).toBeNull()
   })
 
-  it('shows an admin Dashboard, Reports, Orders, Menu and Staff — and nothing else', () => {
+  it('shows an admin Dashboard, Reports, Orders, Menu, Staff and Settings — and nothing else', () => {
     renderSidebar('admin')
-    expect(linkNames()).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff'])
+    expect(linkNames()).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff', 'Settings'])
+  })
+
+  it('offers an admin Settings', () => {
+    renderSidebar('admin')
+    expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('href')).toBe('/settings')
+  })
+
+  it('offers staff Settings too — it belongs to neither job', () => {
+    renderSidebar('staff')
+    expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('href')).toBe('/settings')
   })
 
   it('does not offer an admin the counter', () => {
@@ -94,14 +105,17 @@ describe('Sidebar: what each role is offered', () => {
 function renderLanding(role: Role | null, status: AuthStatus = 'authenticated') {
   currentRole = role
   currentStatus = status
+  // The loading state renders FullPageSkeleton, which names itself through `t`.
   return render(
-    <MemoryRouter initialEntries={['/']}>
-      <Routes>
-        <Route index element={<LandingRedirect />} />
-        <Route path="/pos" element={<span data-testid="page">New Order</span>} />
-        <Route path="/dashboard" element={<span data-testid="page">Dashboard</span>} />
-      </Routes>
-    </MemoryRouter>,
+    <LanguageProvider>
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route index element={<LandingRedirect />} />
+          <Route path="/pos" element={<span data-testid="page">New Order</span>} />
+          <Route path="/dashboard" element={<span data-testid="page">Dashboard</span>} />
+        </Routes>
+      </MemoryRouter>
+    </LanguageProvider>,
   )
 }
 

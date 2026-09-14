@@ -1,10 +1,11 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { AlertCircle } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  ORDER_TYPE_LABELS,
+  ORDER_TYPE_LABEL_KEYS,
   ORDER_TYPES,
   TABLE_NUMBER_MAX,
   validateTableNumber,
@@ -34,6 +35,7 @@ export function OrderTypePanel({
   onOrderTypeChange: (next: OrderType) => void
   onTableNumberChange: (next: string) => void
 }) {
+  const { t } = useTranslation()
   // Shown only once something has actually been typed — an empty field on a fresh order is
   // not yet a mistake, and greeting the operator with an error would be nagging, not help.
   const typed = tableNumber.trim() !== ''
@@ -43,8 +45,8 @@ export function OrderTypePanel({
   return (
     <div className="space-y-3 border-t p-4">
       <div className="grid gap-2">
-        <Label>Order type</Label>
-        <div className="grid grid-cols-2 gap-2" role="group" aria-label="Order type">
+        <Label>{t('orderType.label')}</Label>
+        <div className="grid grid-cols-2 gap-2" role="group" aria-label={t('orderType.label')}>
           {ORDER_TYPES.map((candidate) => (
             <Button
               key={candidate}
@@ -57,7 +59,7 @@ export function OrderTypePanel({
               disabled={disabled}
               onClick={() => onOrderTypeChange(candidate)}
             >
-              {ORDER_TYPE_LABELS[candidate]}
+              {t(ORDER_TYPE_LABEL_KEYS[candidate])}
             </Button>
           ))}
         </div>
@@ -65,11 +67,11 @@ export function OrderTypePanel({
 
       {orderType === 'dine_in' && (
         <div className="grid gap-2">
-          <Label htmlFor="table-number">Table number</Label>
+          <Label htmlFor="table-number">{t('orderType.tableNumber')}</Label>
           <Input
             id="table-number"
             className="h-touch text-base"
-            placeholder="e.g. 5 or A3"
+            placeholder={t('orderType.tablePlaceholder')}
             /* A convenience, not the guard — validateTableNumber and the rules are that. */
             maxLength={TABLE_NUMBER_MAX}
             autoComplete="off"
@@ -82,7 +84,7 @@ export function OrderTypePanel({
           {error && (
             <p className="flex items-center gap-1.5 text-sm text-destructive">
               <AlertCircle aria-hidden="true" className="size-4 shrink-0" />
-              {error}
+              {t(error)}
             </p>
           )}
         </div>

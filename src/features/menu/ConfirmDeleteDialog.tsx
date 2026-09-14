@@ -1,3 +1,4 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState, type ReactNode } from 'react'
 
 import {
@@ -27,6 +28,7 @@ export function ConfirmDeleteDialog({
   onConfirm: () => Promise<void>
   children: ReactNode
 }) {
+  const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
 
   async function handleConfirm() {
@@ -47,13 +49,13 @@ export function ConfirmDeleteDialog({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy}>{t('common.cancel')}</AlertDialogCancel>
           <AlertDialogAction
             data-testid="confirm-delete"
             disabled={busy}
             onClick={() => void handleConfirm()}
           >
-            {busy ? 'Deleting…' : 'Delete'}
+            {t(busy ? 'common.deleting' : 'common.delete')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

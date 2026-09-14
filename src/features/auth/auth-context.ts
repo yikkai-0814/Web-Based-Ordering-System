@@ -1,3 +1,4 @@
+import type { Message } from '@/features/i18n/messages'
 import { createContext } from 'react'
 import type { User } from 'firebase/auth'
 
@@ -14,7 +15,7 @@ export interface AuthContextValue {
    * document or a deactivated account. The login screen shows this so the user is not
    * bounced back to a blank form with no explanation.
    */
-  rejectionMessage: string | null
+  rejectionMessage: Message | null
   signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
 }

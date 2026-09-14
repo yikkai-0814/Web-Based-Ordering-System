@@ -1,3 +1,4 @@
+import type { TranslationKey } from '@/features/i18n/translations/en'
 import type { Timestamp } from 'firebase/firestore'
 
 import { MAX_MODIFIERS_PER_LINE, type SelectedModifier } from '@/features/menu/modifiers'
@@ -20,9 +21,9 @@ export const PAYMENT_METHODS = ['cash', 'ewallet'] as const
 
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
 
-export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
-  cash: 'Cash',
-  ewallet: 'E-Wallet',
+export const PAYMENT_LABEL_KEYS: Record<PaymentMethod, TranslationKey> = {
+  cash: 'payment.cash',
+  ewallet: 'payment.ewallet',
 }
 
 export function isPaymentMethod(value: unknown): value is PaymentMethod {

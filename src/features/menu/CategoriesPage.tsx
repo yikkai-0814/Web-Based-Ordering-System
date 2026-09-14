@@ -1,3 +1,5 @@
+import { message, type Message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { AlertCircle, Check, Pencil, Plus, X } from 'lucide-react'
@@ -27,6 +29,7 @@ import { useCategories } from '@/features/menu/useCategories'
 import { useMenuItems } from '@/features/menu/useMenuItems'
 
 export function CategoriesPage() {
+  const { t } = useTranslation()
   const { categories, loading, error: loadError } = useCategories()
   const { items } = useMenuItems()
 
@@ -35,10 +38,10 @@ export function CategoriesPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editSortOrder, setEditSortOrder] = useState('0')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
   const [pending, setPending] = useState(false)
 
-  const message = loadError ?? error
+  const banner = loadError ?? error
 
   async function run(action: () => Promise<void>) {
     setError(null)
@@ -46,16 +49,17 @@ export function CategoriesPage() {
     try {
       await action()
     } catch {
-      setError('That change was refused. Your account may not have permission.')
+      setError(message('menu.writeRefusedShort'))
     } finally {
       setPending(false)
     }
   }
 
-  function validateName(value: string): string | null {
-    if (value.trim() === '') return 'Enter a category name.'
-    if (value.trim().length > CATEGORY_NAME_MAX)
-      return `Names can be at most ${CATEGORY_NAME_MAX} characters.`
+  function validateName(value: string): Message | null {
+    if (value.trim() === '') return message('validation.categoryNameRequired')
+    if (value.trim().length > CATEGORY_NAME_MAX) {
+      return message('validation.itemNameTooLong', { max: CATEGORY_NAME_MAX })
+    }
     return null
   }
 
@@ -68,7 +72,7 @@ export function CategoriesPage() {
     }
     const sort = Number(newSortOrder)
     if (!Number.isInteger(sort)) {
-      setError('Sort order must be a whole number.')
+      setError(message('modifierAdmin.badSortOrder'))
       return
     }
     await run(async () => {
@@ -93,7 +97,7 @@ export function CategoriesPage() {
     }
     const sort = Number(editSortOrder)
     if (!Number.isInteger(sort)) {
-      setError('Sort order must be a whole number.')
+      setError(message('modifierAdmin.badSortOrder'))
       return
     }
     await run(async () => {
@@ -117,20 +121,18 @@ export function CategoriesPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start gap-3">
         <div className="mr-auto">
-          <h1 className="text-2xl font-semibold tracking-tight">Categories</h1>
-          <p className="text-muted-foreground">
-            How the menu is grouped. Lower sort orders appear first.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t('menu.categories')}</h1>
+          <p className="text-muted-foreground">{t('menu.categoriesBlurb')}</p>
         </div>
         <Button asChild variant="outline" size="lg" className="h-touch text-base">
-          <Link to="/menu">Back to the menu</Link>
+          <Link to="/menu">{t('menu.backToMenu')}</Link>
         </Button>
       </div>
 
-      {message && (
+      {banner && (
         <Alert variant="destructive">
           <AlertCircle aria-hidden="true" />
-          <AlertDescription>{message}</AlertDescription>
+          <AlertDescription>{t(banner)}</AlertDescription>
         </Alert>
       )}
 
@@ -140,11 +142,11 @@ export function CategoriesPage() {
         className="flex flex-wrap items-end gap-3 rounded-lg border p-4"
       >
         <div className="grid min-w-48 flex-1 gap-2">
-          <Label htmlFor="new-category-name">New category</Label>
+          <Label htmlFor="new-category-name">{t('menu.newCategory')}</Label>
           <Input
             id="new-category-name"
             className="h-touch text-base"
-            placeholder="Coffee"
+            placeholder={t('menu.categoryPlaceholder')}
             maxLength={CATEGORY_NAME_MAX}
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
@@ -152,7 +154,7 @@ export function CategoriesPage() {
           />
         </div>
         <div className="grid w-32 gap-2">
-          <Label htmlFor="new-category-sort">Sort order</Label>
+          <Label htmlFor="new-category-sort">{t('common.sortOrder')}</Label>
           <Input
             id="new-category-sort"
             inputMode="numeric"
@@ -164,22 +166,22 @@ export function CategoriesPage() {
         </div>
         <Button type="submit" size="lg" className="h-touch text-base" disabled={pending}>
           <Plus aria-hidden="true" />
-          Add
+          {t('common.add')}
         </Button>
       </form>
 
       {categories.length === 0 ? (
-        <p className="text-muted-foreground">No categories yet. Add the first one above.</p>
+        <p className="text-muted-foreground">{t('menu.noCategories')}</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead className="w-28">Sort order</TableHead>
-                <TableHead className="w-24">Items</TableHead>
-                <TableHead className="w-28">Status</TableHead>
-                <TableHead className="w-72 text-right">Actions</TableHead>
+                <TableHead>{t('common.name')}</TableHead>
+                <TableHead className="w-28">{t('common.sortOrder')}</TableHead>
+                <TableHead className="w-24">{t('orders.column.items')}</TableHead>
+                <TableHead className="w-28">{t('menu.columnStatus')}</TableHead>
+                <TableHead className="w-72 text-right">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -191,7 +193,7 @@ export function CategoriesPage() {
                     <TableCell>
                       {editing ? (
                         <Input
-                          aria-label="Category name"
+                          aria-label={t('menu.categoryName')}
                           className="h-touch text-base"
                           value={editName}
                           maxLength={CATEGORY_NAME_MAX}
@@ -204,7 +206,7 @@ export function CategoriesPage() {
                     <TableCell>
                       {editing ? (
                         <Input
-                          aria-label="Category sort order"
+                          aria-label={t('menu.categorySortOrder')}
                           inputMode="numeric"
                           className="h-touch text-base"
                           value={editSortOrder}
@@ -216,7 +218,7 @@ export function CategoriesPage() {
                     </TableCell>
                     <TableCell className="tabular-nums">{count}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {category.active ? 'Visible' : 'Hidden'}
+                      {t(category.active ? 'menu.visible' : 'menu.hidden')}
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       {editing ? (
@@ -228,7 +230,7 @@ export function CategoriesPage() {
                             onClick={() => void saveEdit(category)}
                           >
                             <Check aria-hidden="true" />
-                            Save
+                            {t('common.save')}
                           </Button>
                           <Button
                             variant="ghost"
@@ -237,7 +239,7 @@ export function CategoriesPage() {
                             onClick={() => setEditingId(null)}
                           >
                             <X aria-hidden="true" />
-                            Cancel
+                            {t('common.cancel')}
                           </Button>
                         </>
                       ) : (
@@ -245,11 +247,11 @@ export function CategoriesPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            aria-label={`Rename ${category.name}`}
+                            aria-label={t('common.renameNamed', { name: category.name })}
                             onClick={() => startEditing(category)}
                           >
                             <Pencil aria-hidden="true" />
-                            Rename
+                            {t('common.rename')}
                           </Button>
                           <Button
                             variant="ghost"
@@ -259,19 +261,24 @@ export function CategoriesPage() {
                               void run(() => setCategoryActive(category.id, !category.active))
                             }
                           >
-                            {category.active ? 'Hide' : 'Show'}
+                            {t(category.active ? 'menu.hide' : 'menu.show')}
                           </Button>
                           <ConfirmDeleteDialog
-                            title={`Delete ${category.name}?`}
+                            title={t('menu.deleteTitle', { name: category.name })}
                             description={
                               count > 0
-                                ? `${count} item${count === 1 ? '' : 's'} still belong to this category. They will not be deleted, but they will show as Uncategorised until you move them.`
-                                : 'This category has no items. Deleting it cannot be undone.'
+                                ? t(
+                                    count === 1
+                                      ? 'menu.deleteCategoryInUseOne'
+                                      : 'menu.deleteCategoryInUseOther',
+                                    { count },
+                                  )
+                                : t('menu.deleteCategoryEmpty')
                             }
                             onConfirm={() => run(() => deleteCategory(category.id))}
                           >
                             <Button variant="destructive" size="sm">
-                              Delete
+                              {t('common.delete')}
                             </Button>
                           </ConfirmDeleteDialog>
                         </>

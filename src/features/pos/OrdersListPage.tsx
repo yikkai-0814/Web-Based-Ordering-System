@@ -1,3 +1,4 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { AlertCircle, ReceiptText, Search } from 'lucide-react'
@@ -20,7 +21,7 @@ import { BusinessDateBar } from '@/features/pos/BusinessDateBar'
 import { orderTypeSummaryOf } from '@/features/pos/order-type'
 import {
   filterOrders,
-  ORDER_FILTER_LABELS,
+  ORDER_FILTER_LABEL_KEYS,
   ORDER_FILTERS,
   type OrderFilter,
 } from '@/features/pos/orders-view'
@@ -29,7 +30,7 @@ import {
   OverallStatusBadge,
   PaymentStatusBadge,
 } from '@/features/pos/PaymentStatusBadge'
-import { operatorNameOf, PAYMENT_LABELS } from '@/features/pos/types'
+import { operatorNameOf, PAYMENT_LABEL_KEYS } from '@/features/pos/types'
 import { useShownBusinessDate } from '@/features/pos/useBusinessToday'
 import { useOrdersWorkspace } from '@/features/pos/useOrdersWorkspace'
 import { formatMoney } from '@/lib/money'
@@ -44,6 +45,7 @@ import { cn } from '@/lib/utils'
  * day rather than pretending to reach the whole history.
  */
 export function OrdersListPage() {
+  const { t } = useTranslation()
   // Follows today on its own, unless somebody has navigated to another day — see the hook.
   const { businessDate, showDate } = useShownBusinessDate()
   const [filter, setFilter] = useState<OrderFilter>('all')
@@ -56,13 +58,10 @@ export function OrdersListPage() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6">
       <div className="space-y-1">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">Orders</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">
-          One business date at a time, newest first. Fulfilment and payment advance independently —
-          an order is complete only once it has been delivered <em>and</em> paid for. Orders cannot
-          be edited or deleted; a mistake is corrected by voiding, which leaves the original record
-          intact.
-        </p>
+        <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
+          {t('nav.orders')}
+        </h1>
+        <p className="max-w-3xl text-sm text-muted-foreground">{t('orders.blurb')}</p>
       </div>
 
       {/* The controls are one panel, not three rows of loose widgets: choosing a day,
@@ -71,7 +70,7 @@ export function OrdersListPage() {
       <div className="space-y-4 rounded-xl border bg-card p-4 shadow-xs">
         <BusinessDateBar businessDate={businessDate} onChange={showDate}>
           <div className="grid min-w-0 flex-1 gap-1.5 sm:max-w-xs">
-            <Label htmlFor="order-search">Search this date</Label>
+            <Label htmlFor="order-search">{t('orders.search')}</Label>
             <div className="relative">
               <Search
                 aria-hidden="true"
@@ -82,7 +81,7 @@ export function OrdersListPage() {
                 type="search"
                 className="h-touch w-full pl-8 sm:h-10"
                 data-testid="order-search"
-                placeholder="Order number, table, or item"
+                placeholder={t('orders.searchPlaceholder')}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
@@ -96,7 +95,7 @@ export function OrdersListPage() {
         <div
           className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5"
           role="group"
-          aria-label="Filter orders"
+          aria-label={t('orders.filter')}
         >
           {ORDER_FILTERS.map((candidate) => (
             <Button
@@ -110,7 +109,7 @@ export function OrdersListPage() {
               className="shrink-0"
               onClick={() => setFilter(candidate)}
             >
-              {ORDER_FILTER_LABELS[candidate]}
+              {t(ORDER_FILTER_LABEL_KEYS[candidate])}
             </Button>
           ))}
         </div>
@@ -119,7 +118,7 @@ export function OrdersListPage() {
       {error && (
         <Alert variant="destructive">
           <AlertCircle aria-hidden="true" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
@@ -128,16 +127,10 @@ export function OrdersListPage() {
       ) : rows.length === 0 ? (
         <div data-testid="orders-empty">
           <EmptyState
-            title={
-              views.length === 0
-                ? 'No sales recorded on this date'
-                : 'Nothing matches that filter or search'
-            }
-            description={
-              views.length === 0
-                ? 'Orders appear here as they are rung up. Use the date bar to look at another day.'
-                : 'Try clearing the search, or choosing a different filter.'
-            }
+            title={t(views.length === 0 ? 'orders.emptyDate' : 'orders.emptyFilter')}
+            description={t(
+              views.length === 0 ? 'orders.emptyDateBlurb' : 'orders.emptyFilterBlurb',
+            )}
             icon={<ReceiptText className="size-6" aria-hidden="true" />}
           />
         </div>
@@ -146,15 +139,15 @@ export function OrdersListPage() {
           <Table className="min-w-3xl">
             <TableHeader className="bg-muted/50">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-24">Order</TableHead>
-                <TableHead className="w-36">Type</TableHead>
-                <TableHead className="w-20">Items</TableHead>
-                <TableHead className="w-28">Fulfilment</TableHead>
-                <TableHead className="w-32">Payment</TableHead>
-                <TableHead>Served by</TableHead>
-                <TableHead className="w-40">Overall</TableHead>
-                <TableHead className="w-32 text-right">Total</TableHead>
-                <TableHead className="w-28 text-right">Receipt</TableHead>
+                <TableHead className="w-24">{t('orders.column.order')}</TableHead>
+                <TableHead className="w-36">{t('orders.column.type')}</TableHead>
+                <TableHead className="w-20">{t('orders.column.items')}</TableHead>
+                <TableHead className="w-28">{t('orders.column.fulfilment')}</TableHead>
+                <TableHead className="w-32">{t('orders.column.payment')}</TableHead>
+                <TableHead>{t('orders.column.servedBy')}</TableHead>
+                <TableHead className="w-40">{t('orders.column.overall')}</TableHead>
+                <TableHead className="w-32 text-right">{t('orders.column.total')}</TableHead>
+                <TableHead className="w-28 text-right">{t('orders.column.receipt')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -176,7 +169,7 @@ export function OrdersListPage() {
                   </TableCell>
                   {/* "Dine-in · Table 5", "Takeaway", or "Not recorded" for an order placed
                       before order types existed. Never a table for a takeaway. */}
-                  <TableCell data-testid="order-service">{orderTypeSummaryOf(order)}</TableCell>
+                  <TableCell data-testid="order-service">{t(orderTypeSummaryOf(order))}</TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">
                     {order.lines.reduce((count, line) => count + line.quantity, 0)}
                   </TableCell>
@@ -188,7 +181,7 @@ export function OrdersListPage() {
                       <PaymentStatusBadge state={payment} />
                       {payment.status === 'paid' && (
                         <span className="text-xs text-muted-foreground">
-                          {PAYMENT_LABELS[payment.method]}
+                          {t(PAYMENT_LABEL_KEYS[payment.method])}
                         </span>
                       )}
                     </span>
@@ -214,9 +207,9 @@ export function OrdersListPage() {
                     <Button asChild variant="ghost" size="sm">
                       <Link
                         to={`/orders/${order.id}`}
-                        aria-label={`Receipt for order ${order.number}`}
+                        aria-label={t('orders.receiptFor', { number: order.number })}
                       >
-                        View
+                        {t('common.view')}
                       </Link>
                     </Button>
                   </TableCell>
@@ -236,7 +229,7 @@ export function OrdersListPage() {
             <li key={order.id}>
               <Link
                 to={`/orders/${order.id}`}
-                aria-label={`Receipt for order ${order.number}`}
+                aria-label={t('orders.receiptFor', { number: order.number })}
                 className={cn(
                   'block rounded-xl border bg-card p-3 shadow-xs transition-colors',
                   'hover:border-primary/30 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
@@ -248,7 +241,7 @@ export function OrdersListPage() {
                 <div className="flex items-baseline gap-2">
                   <span className="text-base font-semibold tabular-nums">#{order.number}</span>
                   <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                    {orderTypeSummaryOf(order)}
+                    {t(orderTypeSummaryOf(order))}
                   </span>
                   <span
                     className={cn(
@@ -267,8 +260,11 @@ export function OrdersListPage() {
                 </div>
 
                 <p className="mt-2 text-xs text-muted-foreground">
-                  {order.lines.reduce((count, line) => count + line.quantity, 0)} items · served by{' '}
-                  {operatorNameOf(order)}
+                  {/* The operator is the vendor's own name, spliced in unaltered. */}
+                  {t('orders.servedByLine', {
+                    count: order.lines.reduce((count, line) => count + line.quantity, 0),
+                    name: operatorNameOf(order),
+                  })}
                 </p>
               </Link>
             </li>
@@ -278,8 +274,11 @@ export function OrdersListPage() {
 
       {!loading && views.length > 0 && (
         <p className="text-sm text-muted-foreground" data-testid="orders-count">
-          Showing {rows.length} of {views.length} {views.length === 1 ? 'order' : 'orders'} on{' '}
-          {businessDate}.
+          {t(views.length === 1 ? 'orders.countOne' : 'orders.countOther', {
+            shown: rows.length,
+            total: views.length,
+            date: businessDate,
+          })}
         </p>
       )}
     </div>

@@ -277,7 +277,7 @@ describe('recordPayment settles an order without touching it', () => {
         user: asUser(staff),
         staff: asOperator(staff),
       }),
-    ).rejects.toThrow(/less than the total/i)
+    ).rejects.toThrow('validation.tenderedTooLittle')
   })
 })
 
@@ -764,7 +764,7 @@ describe('a staff-initiated void needs a manager to authorise it', () => {
     // feature exists to refuse, and it fails before the write is even attempted.
     await expect(
       voidWithManagerAuthorization(orderId, { email: staff.email, password: ACCOUNT_PASSWORD }),
-    ).rejects.toThrow(NOT_A_MANAGER_MESSAGE)
+    ).rejects.toThrow(NOT_A_MANAGER_MESSAGE.key)
 
     expect((await getDoc(doc(db, 'orderVoids', orderId))).exists()).toBe(false)
   })
@@ -777,7 +777,7 @@ describe('a staff-initiated void needs a manager to authorise it', () => {
 
     await expect(
       voidWithManagerAuthorization(orderId, { email: admin.email, password: ACCOUNT_PASSWORD }),
-    ).rejects.toThrow(NOT_A_MANAGER_MESSAGE)
+    ).rejects.toThrow(NOT_A_MANAGER_MESSAGE.key)
 
     expect((await getDoc(doc(db, 'orderVoids', orderId))).exists()).toBe(false)
   })

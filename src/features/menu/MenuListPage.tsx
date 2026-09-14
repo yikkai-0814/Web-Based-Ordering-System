@@ -1,3 +1,6 @@
+import type { Message } from '@/features/i18n/messages'
+import { message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { AlertCircle, FolderCog, Pencil, Plus } from 'lucide-react'
@@ -28,6 +31,7 @@ interface Group {
 }
 
 export function MenuListPage() {
+  const { t } = useTranslation()
   const { role } = useAuth()
   const isAdmin = role === 'admin'
 
@@ -35,7 +39,7 @@ export function MenuListPage() {
   const { items, loading: itemsLoading, error: itemsError } = useMenuItems()
   // Staff do not subscribe at all — see useItemCosts.
   const { costs } = useItemCosts()
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<Message | null>(null)
 
   const loading = categoriesLoading || itemsLoading
   const error = categoriesError ?? itemsError ?? actionError
@@ -71,7 +75,7 @@ export function MenuListPage() {
     try {
       await action()
     } catch {
-      setActionError('That change was refused. Your account may not have permission.')
+      setActionError(message('menu.writeRefusedShort'))
     }
   }
 
@@ -88,11 +92,9 @@ export function MenuListPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start gap-3">
         <div className="mr-auto">
-          <h1 className="text-2xl font-semibold tracking-tight">Menu</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t('nav.menu')}</h1>
           <p className="text-muted-foreground">
-            {isAdmin
-              ? 'Everything the café sells. Changes appear on every till immediately.'
-              : 'Everything the café sells. Ask an administrator to make changes.'}
+            {t(isAdmin ? 'menu.blurbAdmin' : 'menu.blurbStaff')}
           </p>
         </div>
         {isAdmin && (
@@ -100,13 +102,13 @@ export function MenuListPage() {
             <Button asChild variant="outline" size="lg" className="h-touch text-base">
               <Link to="/menu/categories">
                 <FolderCog aria-hidden="true" />
-                Categories
+                {t('menu.categories')}
               </Link>
             </Button>
             <Button asChild size="lg" className="h-touch text-base">
               <Link to="/menu/new">
                 <Plus aria-hidden="true" />
-                New item
+                {t('menu.newItem')}
               </Link>
             </Button>
           </>
@@ -116,41 +118,42 @@ export function MenuListPage() {
       {error && (
         <Alert variant="destructive">
           <AlertCircle aria-hidden="true" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
       {groups.length === 0 && (
-        <p className="text-muted-foreground">
-          The menu is empty. {isAdmin ? 'Create a category first, then add items to it.' : ''}
-        </p>
+        <p className="text-muted-foreground">{t(isAdmin ? 'menu.isEmptyAdmin' : 'menu.isEmpty')}</p>
       )}
 
       {groups.map(({ category, items: groupItems }) => (
         <section key={category?.id ?? '__uncategorised'} className="space-y-2">
           <h2 className="flex items-center gap-2 text-lg font-medium">
-            {category?.name ?? 'Uncategorised'}
+            {/* The category name is the vendor's own; only the stand-in is translated. */}
+            {category?.name ?? t('menu.uncategorised')}
             {category && !category.active && (
               <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                Hidden
+                {t('menu.hidden')}
               </span>
             )}
           </h2>
 
           {groupItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No items in this category yet.</p>
+            <p className="text-sm text-muted-foreground">{t('menu.noItemsInCategory')}</p>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="w-32 text-right">Price</TableHead>
+                    <TableHead>{t('menu.columnItem')}</TableHead>
+                    <TableHead className="w-32 text-right">{t('common.price')}</TableHead>
                     {/* Cost is admin-only, and enforced as such by firestore.rules —
                         this column simply does not exist for staff. */}
-                    {isAdmin && <TableHead className="w-32 text-right">Cost</TableHead>}
-                    <TableHead className="w-28">Status</TableHead>
-                    {isAdmin && <TableHead className="w-64 text-right">Actions</TableHead>}
+                    {isAdmin && <TableHead className="w-32 text-right">{t('menu.cost')}</TableHead>}
+                    <TableHead className="w-28">{t('menu.columnStatus')}</TableHead>
+                    {isAdmin && (
+                      <TableHead className="w-64 text-right">{t('common.actions')}</TableHead>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -183,15 +186,18 @@ export function MenuListPage() {
                               : 'text-sm text-muted-foreground'
                           }
                         >
-                          {item.active ? 'Available' : 'Archived'}
+                          {t(item.active ? 'menu.available' : 'menu.archived')}
                         </span>
                       </TableCell>
                       {isAdmin && (
                         <TableCell className="text-right whitespace-nowrap">
                           <Button asChild variant="ghost" size="sm">
-                            <Link to={`/menu/${item.id}/edit`} aria-label={`Edit ${item.name}`}>
+                            <Link
+                              to={`/menu/${item.id}/edit`}
+                              aria-label={t('menu.editItemNamed', { name: item.name })}
+                            >
                               <Pencil aria-hidden="true" />
-                              Edit
+                              {t('common.edit')}
                             </Link>
                           </Button>
                           <Button
@@ -199,15 +205,15 @@ export function MenuListPage() {
                             size="sm"
                             onClick={() => void run(() => setMenuItemActive(item.id, !item.active))}
                           >
-                            {item.active ? 'Archive' : 'Restore'}
+                            {t(item.active ? 'menu.archive' : 'menu.restore')}
                           </Button>
                           <ConfirmDeleteDialog
-                            title={`Delete ${item.name}?`}
-                            description="This removes the item from the menu permanently. Past sales are unaffected — they record the name and price at the time of sale. To hide it from service without deleting, use Archive instead."
+                            title={t('menu.deleteTitle', { name: item.name })}
+                            description={t('menu.deleteBlurb')}
                             onConfirm={() => run(() => deleteMenuItem(item.id))}
                           >
                             <Button variant="destructive" size="sm">
-                              Delete
+                              {t('common.delete')}
                             </Button>
                           </ConfirmDeleteDialog>
                         </TableCell>

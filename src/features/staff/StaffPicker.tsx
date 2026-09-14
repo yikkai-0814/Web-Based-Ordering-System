@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/features/i18n/translations/en'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { UserRound } from 'lucide-react'
 
 import { useStaffSession } from '@/features/staff/useStaffSession'
@@ -14,28 +16,34 @@ import { useStaffSession } from '@/features/staff/useStaffSession'
  */
 export function StaffPicker({
   onSelected,
-  heading = 'Who is on the till?',
-  blurb = 'Your name is recorded on every order you take. Tap yours to start.',
+  heading = 'staff.whoIsAtTill',
+  blurb = 'staff.whoIsAtTillBlurb',
 }: {
   onSelected?: () => void
-  /** Overridden by New Order, which asks per order rather than per shift. */
-  heading?: string
-  blurb?: string
+  /**
+   * Overridden by New Order, which asks per order rather than per shift.
+   *
+   * Keys rather than sentences: a caller cannot pass prose through here, so this screen
+   * stays translated whoever renders it.
+   */
+  heading?: TranslationKey
+  blurb?: TranslationKey
 }) {
+  const { t } = useTranslation()
   const { operators, select, loading } = useStaffSession()
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 py-6 sm:py-8">
       <div className="space-y-1 text-center">
         <h1 className="font-heading text-xl font-semibold tracking-tight text-balance sm:text-2xl">
-          {heading}
+          {t(heading)}
         </h1>
-        <p className="text-sm text-balance text-muted-foreground">{blurb}</p>
+        <p className="text-sm text-balance text-muted-foreground">{t(blurb)}</p>
       </div>
 
       {/* The roster arrives asynchronously. Without this, the picker briefly shows only the
           signed-in account and looks as though named staff are missing. */}
-      {loading && <p className="text-center text-sm text-muted-foreground">Loading staff…</p>}
+      {loading && <p className="text-center text-sm text-muted-foreground">{t('staff.loading')}</p>}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {/* Two across even on the narrowest phone: these are names, not paragraphs, and a
@@ -57,7 +65,9 @@ export function StaffPicker({
           >
             <UserRound className="size-5 text-muted-foreground" aria-hidden="true" />
             <span className="line-clamp-2 text-base font-medium">{operator.name}</span>
-            {operator.isSelf && <span className="text-xs text-muted-foreground">This account</span>}
+            {operator.isSelf && (
+              <span className="text-xs text-muted-foreground">{t('staff.thisAccount')}</span>
+            )}
           </button>
         ))}
       </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState, type ReactNode } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 
@@ -34,6 +35,7 @@ export function BusinessDateBar({
   /** Anything the page wants on the same row — a count, a filter, a search box. */
   children?: ReactNode
 }) {
+  const { t } = useTranslation()
   const today = businessDateOf(new Date())
   const isToday = businessDate === today
   const [open, setOpen] = useState(false)
@@ -41,14 +43,14 @@ export function BusinessDateBar({
   return (
     <div className="flex flex-wrap items-end gap-x-3 gap-y-4">
       <div className="grid gap-1.5">
-        <Label htmlFor="business-date">Business date</Label>
+        <Label htmlFor="business-date">{t('date.businessDate')}</Label>
         {/* One bordered group rather than four loose controls: they answer a single question,
             and on a narrow screen a row of separated buttons wraps into nonsense. */}
         <div className="flex items-center gap-1 rounded-lg border bg-card p-1 shadow-xs">
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Previous day"
+            aria-label={t('date.previousDay')}
             data-testid="previous-day"
             onClick={() => onChange(shiftBusinessDate(businessDate, -1))}
           >
@@ -62,7 +64,7 @@ export function BusinessDateBar({
                 variant="ghost"
                 data-testid="business-date"
                 data-value={businessDate}
-                aria-label={`Business date: ${businessDate}. Choose another`}
+                aria-label={t('date.chooseAnother', { date: businessDate })}
                 className="min-w-40 justify-start gap-2 font-medium tabular-nums"
               >
                 <CalendarDays aria-hidden="true" className="text-muted-foreground" />
@@ -84,7 +86,7 @@ export function BusinessDateBar({
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Next day"
+            aria-label={t('date.nextDay')}
             data-testid="next-day"
             disabled={isToday}
             onClick={() => onChange(shiftBusinessDate(businessDate, 1))}
@@ -102,7 +104,7 @@ export function BusinessDateBar({
             className={cn('ml-0.5', isToday && 'disabled:opacity-100')}
             onClick={() => onChange(today)}
           >
-            Today
+            {t('date.today')}
           </Button>
         </div>
       </div>

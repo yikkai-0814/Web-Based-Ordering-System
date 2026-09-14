@@ -1,3 +1,4 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { Minus, Plus, ShoppingBasket, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -20,17 +21,18 @@ export function CartPanel({
   onClear: () => void
   disabled?: boolean
 }) {
+  const { t } = useTranslation()
   const count = cartItemCount(cart)
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-3">
-        <h2 className="font-heading font-medium">Current order</h2>
+        <h2 className="font-heading font-medium">{t('cart.currentOrder')}</h2>
         <span
           className="rounded-full bg-background px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground"
           data-testid="cart-count"
         >
-          {count === 1 ? '1 item' : `${count} items`}
+          {t(count === 1 ? 'cart.itemsOne' : 'cart.itemsOther', { count })}
         </span>
         {cart.length > 0 && (
           <Button
@@ -40,7 +42,7 @@ export function CartPanel({
             onClick={onClear}
             disabled={disabled}
           >
-            Clear
+            {t('cart.clear')}
           </Button>
         )}
       </div>
@@ -49,8 +51,8 @@ export function CartPanel({
         {cart.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
             <ShoppingBasket className="size-6 text-muted-foreground/70" aria-hidden="true" />
-            <p className="text-sm font-medium">No items yet</p>
-            <p className="text-sm text-muted-foreground">Tap an item on the left to add it.</p>
+            <p className="text-sm font-medium">{t('cart.empty')}</p>
+            <p className="text-sm text-muted-foreground">{t('cart.tapToAdd')}</p>
           </div>
         ) : (
           <ul className="divide-y">
@@ -74,7 +76,7 @@ export function CartPanel({
                     </span>
                   )}
                   <span className="block text-xs text-muted-foreground">
-                    {formatMoney(line.unitPrice)} each
+                    {t('cart.each', { price: formatMoney(line.unitPrice) })}
                   </span>
                 </div>
 
@@ -82,7 +84,7 @@ export function CartPanel({
                   <Button
                     variant="outline"
                     size="icon"
-                    aria-label={`Remove one ${line.name}`}
+                    aria-label={t('cart.removeOne', { name: line.name })}
                     onClick={() => onDecrement(line.lineId)}
                     disabled={disabled}
                   >
@@ -91,14 +93,14 @@ export function CartPanel({
                   <span
                     className="w-8 text-center tabular-nums"
                     data-testid="line-quantity"
-                    aria-label={`Quantity of ${line.name}`}
+                    aria-label={t('cart.quantityOf', { name: line.name })}
                   >
                     {line.quantity}
                   </span>
                   <Button
                     variant="outline"
                     size="icon"
-                    aria-label={`Add one ${line.name}`}
+                    aria-label={t('cart.addOne', { name: line.name })}
                     onClick={() => onIncrement(line.lineId)}
                     disabled={disabled}
                   >
@@ -113,7 +115,7 @@ export function CartPanel({
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={`Remove ${line.name} from the order`}
+                  aria-label={t('cart.remove', { name: line.name })}
                   onClick={() => onRemove(line.lineId)}
                   disabled={disabled}
                 >
@@ -126,7 +128,7 @@ export function CartPanel({
       </div>
 
       <div className="flex items-baseline gap-3 border-t bg-muted/40 px-4 py-3">
-        <span className="text-base font-medium">Total</span>
+        <span className="text-base font-medium">{t('common.total')}</span>
         <span
           className="ml-auto text-2xl font-semibold tabular-nums sm:text-3xl"
           data-testid="cart-total"

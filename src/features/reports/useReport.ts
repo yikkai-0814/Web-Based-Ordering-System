@@ -1,3 +1,4 @@
+import { message, type Message } from '@/features/i18n/messages'
 import { useCallback, useEffect, useState } from 'react'
 
 import { buildReport, type Report } from '@/features/reports/aggregate'
@@ -8,7 +9,7 @@ interface Loaded {
   /** Identifies which request produced this result. */
   key: string
   report: Report | null
-  error: string | null
+  error: Message | null
 }
 
 const NOTHING_LOADED: Loaded = { key: '', report: null, error: null }
@@ -27,7 +28,7 @@ const NOTHING_LOADED: Loaded = { key: '', report: null, error: null }
 export function useReport(range: DateRange): {
   report: Report | null
   loading: boolean
-  error: string | null
+  error: Message | null
   refresh: () => void
 } {
   const [nonce, setNonce] = useState(0)
@@ -50,7 +51,7 @@ export function useReport(range: DateRange): {
           setLoaded({
             key,
             report: null,
-            error: 'Could not load the report. You may not have permission, or you may be offline.',
+            error: message('reports.loadError'),
           })
         }
       })

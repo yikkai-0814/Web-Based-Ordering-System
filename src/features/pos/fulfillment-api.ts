@@ -1,3 +1,4 @@
+import { message, MessageError } from '@/features/i18n/messages'
 import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore'
 
 import {
@@ -140,7 +141,7 @@ function stamp(field: string, instruction: TimestampInstruction): Record<string,
  */
 export async function setFulfillment(orderId: string, params: SetFulfillmentParams): Promise<void> {
   if (!isForwardStep(params.from, params.to)) {
-    throw new Error('That is not the next step for this order.')
+    throw new MessageError(message('validation.notNextStep'))
   }
   await writeTransition(orderId, params)
 }
@@ -167,7 +168,7 @@ export async function correctFulfillment(
   params: CorrectFulfillmentParams,
 ): Promise<void> {
   if (!isBackwardStep(params.from, params.to)) {
-    throw new Error('A correction may only step back one place.')
+    throw new MessageError(message('validation.correctionOneStep'))
   }
   await writeTransition(orderId, params)
 }

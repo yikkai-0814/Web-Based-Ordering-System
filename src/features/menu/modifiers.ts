@@ -1,3 +1,4 @@
+import { message, type Message } from '@/features/i18n/messages'
 import type { Timestamp } from 'firebase/firestore'
 
 /**
@@ -172,7 +173,7 @@ export function requiresCustomisation(groups: readonly ModifierGroup[], itemId: 
   return offeredGroupsFor(groups, itemId).length > 0
 }
 
-export type SelectionValidation = { ok: true } | { ok: false; error: string }
+export type SelectionValidation = { ok: true } | { ok: false; error: Message }
 
 /**
  * Whether a set of choices satisfies the groups offered.
@@ -190,14 +191,14 @@ export function validateSelections(
     const chosen = selections.filter((selection) => selection.groupId === group.id)
 
     if (group.selection === 'single' && chosen.length > 1) {
-      return { ok: false, error: `Choose only one ${group.name.toLowerCase()}.` }
+      return { ok: false, error: message('validation.chooseOnlyOne', { group: group.name }) }
     }
     if (group.required && chosen.length === 0) {
-      return { ok: false, error: `Choose ${group.name.toLowerCase()}.` }
+      return { ok: false, error: message('validation.chooseGroup', { group: group.name }) }
     }
     for (const selection of chosen) {
       if (!group.options.some((option) => option.id === selection.optionId)) {
-        return { ok: false, error: `That ${group.name.toLowerCase()} option is no longer offered.` }
+        return { ok: false, error: message('validation.optionWithdrawn', { group: group.name }) }
       }
     }
   }
@@ -206,7 +207,7 @@ export function validateSelections(
   // rather than silently dropped.
   for (const selection of selections) {
     if (!groups.some((group) => group.id === selection.groupId)) {
-      return { ok: false, error: 'That option is no longer offered.' }
+      return { ok: false, error: message('validation.optionUnknown') }
     }
   }
 

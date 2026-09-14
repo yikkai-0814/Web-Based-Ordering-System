@@ -77,13 +77,13 @@ describe('Sidebar: collapsing', () => {
 
     await user.click(toggle())
     expect(linkNames()).toEqual(before)
-    expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue'])
+    expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue', 'Settings'])
   })
 
   it('keeps an admin’s full navigation too', async () => {
     const { user } = renderSidebar('admin')
     await user.click(toggle())
-    expect(linkNames()).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff'])
+    expect(linkNames()).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff', 'Settings'])
   })
 })
 

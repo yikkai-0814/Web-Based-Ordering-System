@@ -1,8 +1,10 @@
-import type { ReactElement } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 
 import { cleanup, render, type RenderResult } from '@testing-library/react'
 import userEvent, { PointerEventsCheckLevel, type UserEvent } from '@testing-library/user-event'
 import { afterEach } from 'vitest'
+
+import { LanguageProvider } from '@/features/i18n/LanguageProvider'
 
 /**
  * The one way this suite puts a component on screen.
@@ -37,5 +39,16 @@ export function renderComponent(ui: ReactElement): RenderedComponent {
     pointerEventsCheck: PointerEventsCheckLevel.Never,
   })
 
-  return { user, ...render(ui) }
+  /**
+   * Wrapped in the language provider because `t` is now how every component gets its words,
+   * and a component rendered outside it throws. English is the default and no test changes
+   * it, so every assertion on English text means exactly what it did before.
+   */
+  const rendered = render(<LanguageProvider>{ui}</LanguageProvider>)
+  return {
+    user,
+    ...rendered,
+    // Re-rendering has to keep the provider, or the component throws on its second render.
+    rerender: (next: ReactNode) => rendered.rerender(<LanguageProvider>{next}</LanguageProvider>),
+  }
 }

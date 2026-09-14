@@ -1,3 +1,6 @@
+import { message, type Message } from '@/features/i18n/messages'
+import type { TranslationKey } from '@/features/i18n/translations/en'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState } from 'react'
 import { AlertCircle, Plus, Trash2 } from 'lucide-react'
 
@@ -41,9 +44,10 @@ const SELECT_CLASS =
  * all rather than only deactivating.
  */
 export function ModifierGroupsEditor({ itemId }: { itemId: string }) {
+  const { t } = useTranslation()
   const { groups, loading } = useModifierGroups()
   const [editing, setEditing] = useState<ModifierGroup | 'new' | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
 
   const forItem = groups
     .filter((group) => group.itemId === itemId)
@@ -57,30 +61,27 @@ export function ModifierGroupsEditor({ itemId }: { itemId: string }) {
       await action()
       setEditing(null)
     } catch {
-      setError('That change was refused. Your account may not have permission to edit the menu.')
+      setError(message('menu.writeRefused'))
     }
   }
 
   return (
     <Card className="w-full max-w-xl" data-testid="modifier-editor">
       <CardHeader>
-        <CardTitle className="text-xl">Customisation</CardTitle>
-        <CardDescription>
-          What staff are asked when this item is ordered. An item with no groups is added to the
-          order in one tap. Changing anything here leaves past orders exactly as they were.
-        </CardDescription>
+        <CardTitle className="text-xl">{t('modifierAdmin.title')}</CardTitle>
+        <CardDescription>{t('modifierAdmin.blurb')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error && (
           <Alert variant="destructive">
             <AlertCircle aria-hidden="true" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{t(error)}</AlertDescription>
           </Alert>
         )}
 
         {!loading && forItem.length === 0 && editing === null && (
           <p className="text-sm text-muted-foreground" data-testid="modifier-empty">
-            No customisation. This item is added straight to the order.
+            {t('modifierAdmin.empty')}
           </p>
         )}
 
@@ -100,16 +101,23 @@ export function ModifierGroupsEditor({ itemId }: { itemId: string }) {
                     <span className="block font-medium">
                       {group.name}
                       {!group.active && (
-                        <span className="ml-2 text-xs text-muted-foreground">Inactive</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {t('common.inactive')}
+                        </span>
                       )}
                     </span>
                     <span className="block text-xs text-muted-foreground">
-                      {describeRule(group)} · {group.options.length}{' '}
-                      {group.options.length === 1 ? 'option' : 'options'}
+                      {t(describeRule(group))} ·{' '}
+                      {t(
+                        group.options.length === 1
+                          ? 'modifierAdmin.optionsCountOne'
+                          : 'modifierAdmin.optionsCountOther',
+                        { count: group.options.length },
+                      )}
                     </span>
                   </div>
                   <Button variant="outline" size="sm" onClick={() => setEditing(group)}>
-                    Edit
+                    {t('common.edit')}
                   </Button>
                   {/* Deactivating is the everyday action; it stops the group being offered
                       without losing the configuration. */}
@@ -119,12 +127,12 @@ export function ModifierGroupsEditor({ itemId }: { itemId: string }) {
                     data-testid="modifier-toggle-active"
                     onClick={() => void run(() => setModifierGroupActive(group.id, !group.active))}
                   >
-                    {group.active ? 'Deactivate' : 'Activate'}
+                    {t(group.active ? 'common.deactivate' : 'common.activate')}
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    aria-label={`Delete ${group.name}`}
+                    aria-label={t('modifierAdmin.deleteGroup', { name: group.name })}
                     onClick={() => void run(() => deleteModifierGroup(group.id))}
                   >
                     <Trash2 aria-hidden="true" />
@@ -150,7 +158,7 @@ export function ModifierGroupsEditor({ itemId }: { itemId: string }) {
             onClick={() => setEditing('new')}
           >
             <Plus aria-hidden="true" />
-            Add a group
+            {t('modifierAdmin.addGroup')}
           </Button>
         )}
       </CardContent>
@@ -181,6 +189,7 @@ function GroupForm({
   onSave: (input: ModifierGroupInput) => void
   onCancel: () => void
 }) {
+  const { t } = useTranslation()
   const [name, setName] = useState(group?.name ?? '')
   const [selection, setSelection] = useState<SelectionMode>(group?.selection ?? 'single')
   const [required, setRequired] = useState(group?.required ?? true)
@@ -197,7 +206,7 @@ function GroupForm({
         }))
       : [blankOption()],
   )
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
 
   function update(index: number, patch: Partial<DraftOption>) {
     setOptions((current) =>
@@ -207,13 +216,13 @@ function GroupForm({
 
   function save() {
     if (name.trim() === '') {
-      setError('Give the group a name.')
+      setError(message('modifierAdmin.needName'))
       return
     }
     const parsed: ModifierOptionInput[] = []
     for (const option of options) {
       if (option.name.trim() === '') {
-        setError('Every option needs a name.')
+        setError(message('modifierAdmin.needOptionName'))
         return
       }
       // Blank means "no change to the price", which is the common case — "Normal", "No egg".
@@ -223,7 +232,12 @@ function GroupForm({
       if (option.priceText.trim() !== '') {
         const result = parsePriceInput(option.priceText)
         if (!result.ok) {
-          setError(`${option.name.trim() || 'Option'}: ${result.error}`)
+          setError(
+            message('validation.optionPrefix', {
+              option: option.name.trim() || t('common.option'),
+              reason: t(result.error),
+            }),
+          )
           return
         }
         adjustment = result.sen
@@ -236,13 +250,13 @@ function GroupForm({
       })
     }
     if (parsed.length === 0) {
-      setError('A group needs at least one option.')
+      setError(message('modifierAdmin.needOption'))
       return
     }
 
     const parsedSort = Number(sortOrder)
     if (!Number.isInteger(parsedSort)) {
-      setError('Sort order must be a whole number.')
+      setError(message('modifierAdmin.badSortOrder'))
       return
     }
 
@@ -255,23 +269,23 @@ function GroupForm({
       {error && (
         <Alert variant="destructive">
           <AlertCircle aria-hidden="true" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-1.5">
-          <Label htmlFor="group-name">Group name</Label>
+          <Label htmlFor="group-name">{t('modifierAdmin.groupName')}</Label>
           <Input
             id="group-name"
             value={name}
             maxLength={MODIFIER_GROUP_NAME_MAX}
-            placeholder="Vegetables"
+            placeholder={t('modifierAdmin.groupNamePlaceholder')}
             onChange={(event) => setName(event.target.value)}
           />
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="group-sort">Sort order</Label>
+          <Label htmlFor="group-sort">{t('common.sortOrder')}</Label>
           <Input
             id="group-sort"
             inputMode="numeric"
@@ -280,56 +294,56 @@ function GroupForm({
           />
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="group-selection">Selection</Label>
+          <Label htmlFor="group-selection">{t('modifierAdmin.selection')}</Label>
           <select
             id="group-selection"
             className={SELECT_CLASS}
             value={selection}
             onChange={(event) => setSelection(event.target.value as SelectionMode)}
           >
-            <option value="single">One choice</option>
-            <option value="multiple">Several choices</option>
+            <option value="single">{t('modifierAdmin.selectionSingle')}</option>
+            <option value="multiple">{t('modifierAdmin.selectionMultiple')}</option>
           </select>
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="group-required">Required</Label>
+          <Label htmlFor="group-required">{t('modifierAdmin.required')}</Label>
           <select
             id="group-required"
             className={SELECT_CLASS}
             value={required ? 'yes' : 'no'}
             onChange={(event) => setRequired(event.target.value === 'yes')}
           >
-            <option value="yes">Staff must choose</option>
-            <option value="no">Staff may skip</option>
+            <option value="yes">{t('modifierAdmin.requiredYes')}</option>
+            <option value="no">{t('modifierAdmin.requiredNo')}</option>
           </select>
         </div>
       </div>
 
       <div className="space-y-2">
-        <span className="text-sm font-medium">Options</span>
+        <span className="text-sm font-medium">{t('modifierAdmin.options')}</span>
         {options.map((option, index) => (
           <div key={option.id} className="flex flex-wrap items-end gap-2" data-testid="option-row">
             <div className="grid min-w-0 flex-1 gap-1.5">
               <Label htmlFor={`option-name-${option.id}`} className="text-xs">
-                Name
+                {t('common.name')}
               </Label>
               <Input
                 id={`option-name-${option.id}`}
                 value={option.name}
                 maxLength={MODIFIER_OPTION_NAME_MAX}
-                placeholder="No vegetables"
+                placeholder={t('modifierAdmin.optionPlaceholder')}
                 onChange={(event) => update(index, { name: event.target.value })}
               />
             </div>
             <div className="grid w-32 gap-1.5">
               <Label htmlFor={`option-price-${option.id}`} className="text-xs">
-                Adds ({CURRENCY_PREFIX})
+                {t('modifierAdmin.adds', { currency: CURRENCY_PREFIX })}
               </Label>
               <Input
                 id={`option-price-${option.id}`}
                 inputMode="decimal"
                 value={option.priceText}
-                placeholder="0.00"
+                placeholder={t('modifierAdmin.addsPlaceholder')}
                 onChange={(event) => update(index, { priceText: event.target.value })}
               />
             </div>
@@ -339,12 +353,14 @@ function GroupForm({
               data-testid="option-toggle-active"
               onClick={() => update(index, { active: !option.active })}
             >
-              {option.active ? 'Active' : 'Inactive'}
+              {t(option.active ? 'common.active' : 'common.inactive')}
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              aria-label={`Remove ${option.name || 'option'}`}
+              aria-label={t('modifierAdmin.removeOption', {
+                name: option.name || t('common.option'),
+              })}
               onClick={() =>
                 setOptions((current) => current.filter((_, position) => position !== index))
               }
@@ -361,20 +377,20 @@ function GroupForm({
             onClick={() => setOptions((current) => [...current, blankOption()])}
           >
             <Plus aria-hidden="true" />
-            Add an option
+            {t('modifierAdmin.addOption')}
           </Button>
         )}
       </div>
 
       <div className="flex flex-wrap gap-2">
         <Button className="h-touch" data-testid="modifier-save-group" onClick={save}>
-          Save group
+          {t('modifierAdmin.saveGroup')}
         </Button>
         <Button variant="outline" className="h-touch" onClick={onCancel}>
-          Cancel
+          {t('common.cancel')}
         </Button>
         <Button variant="outline" className="h-touch" onClick={() => setActive(!active)}>
-          {active ? 'Group active' : 'Group inactive'}
+          {t(active ? 'modifierAdmin.groupActive' : 'modifierAdmin.groupInactive')}
         </Button>
       </div>
     </div>
@@ -398,7 +414,10 @@ function blankOption(): DraftOption {
   }
 }
 
-function describeRule(group: ModifierGroup): string {
-  if (group.selection === 'single') return group.required ? 'Exactly one' : 'At most one'
-  return group.required ? 'One or more' : 'Any number'
+/** The rule in a few words, as a key — the caller translates it. */
+function describeRule(group: ModifierGroup): TranslationKey {
+  if (group.selection === 'single') {
+    return group.required ? 'modifierAdmin.ruleExactlyOne' : 'modifierAdmin.ruleAtMostOne'
+  }
+  return group.required ? 'modifierAdmin.ruleOneOrMore' : 'modifierAdmin.ruleAnyNumber'
 }

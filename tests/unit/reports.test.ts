@@ -1,3 +1,4 @@
+import { say } from '../say'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -517,7 +518,7 @@ describe('validateCustomRange', () => {
   it('rejects a start after the end', () => {
     const result = validateCustomRange('2026-09-10', '2026-09-01')
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/not be after/i)
+    if (!result.ok) expect(say(result.error)).toMatch(/not be after/i)
   })
 
   it('rejects malformed and impossible dates', () => {
@@ -530,7 +531,7 @@ describe('validateCustomRange', () => {
   it('rejects a range longer than the cap', () => {
     const result = validateCustomRange('2025-01-01', '2026-09-10')
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(new RegExp(`${MAX_RANGE_DAYS} days`))
+    if (!result.ok) expect(say(result.error)).toMatch(new RegExp(`${MAX_RANGE_DAYS} days`))
   })
 })
 

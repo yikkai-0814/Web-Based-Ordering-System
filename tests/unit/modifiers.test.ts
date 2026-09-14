@@ -1,3 +1,4 @@
+import { say } from '../say'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -135,7 +136,8 @@ describe('selection rules are data, not per-item code', () => {
   it('names the group that is unanswered, so the counter is not left guessing', () => {
     const result = validateSelections([group()], [])
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toContain('vegetables')
+    // The vendor's own word, spliced in exactly as they typed it rather than case-folded.
+    if (!result.ok) expect(say(result.error)).toContain('Vegetables')
   })
 
   it('refuses a choice that belongs to no offered group', () => {

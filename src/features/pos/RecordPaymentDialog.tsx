@@ -1,3 +1,5 @@
+import { isMessageError, message, type Message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState } from 'react'
 import { AlertCircle, Wallet } from 'lucide-react'
 
@@ -16,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { changeDue } from '@/features/pos/cart'
-import { PAYMENT_LABELS, PAYMENT_METHODS, type PaymentMethod } from '@/features/pos/types'
+import { PAYMENT_LABEL_KEYS, PAYMENT_METHODS, type PaymentMethod } from '@/features/pos/types'
 import { CURRENCY_PREFIX, formatMoney, parsePriceInput } from '@/lib/money'
 
 /**
@@ -39,10 +41,11 @@ export function RecordPaymentDialog({
   total: number
   onConfirm: (method: PaymentMethod, cashTendered: number | null) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [method, setMethod] = useState<PaymentMethod>('cash')
   const [tenderText, setTenderText] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
   const [pending, setPending] = useState(false)
 
   // Live change preview, meaningful only once the entry parses to a sufficient amount.
@@ -65,11 +68,7 @@ export function RecordPaymentDialog({
       await onConfirm(chosen, cashTendered)
       reset(false)
     } catch (caught) {
-      setError(
-        caught instanceof Error && caught.message
-          ? caught.message
-          : 'That payment could not be recorded.',
-      )
+      setError(isMessageError(caught) ? caught.detail : message('payment.failed'))
     } finally {
       setPending(false)
     }
@@ -82,7 +81,7 @@ export function RecordPaymentDialog({
     }
 
     if (tenderText.trim() === '') {
-      setError('Enter the amount received.')
+      setError(message('validation.amountRequired'))
       return
     }
     const parsed = parsePriceInput(tenderText)
@@ -104,21 +103,18 @@ export function RecordPaymentDialog({
       <AlertDialogTrigger asChild>
         <Button size="lg" className="h-touch text-base" data-testid="record-payment">
           <Wallet aria-hidden="true" />
-          Record Payment
+          {t('payment.record')}
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Record payment for order #{orderNumber}</AlertDialogTitle>
-          <AlertDialogDescription>
-            This marks the order paid. It cannot be undone or changed afterwards, so check the
-            amount before confirming.
-          </AlertDialogDescription>
+          <AlertDialogTitle>{t('payment.titleForOrder', { number: orderNumber })}</AlertDialogTitle>
+          <AlertDialogDescription>{t('payment.blurb')}</AlertDialogDescription>
         </AlertDialogHeader>
 
         <div className="space-y-4">
           <div className="flex items-baseline gap-3 rounded-lg border px-3 py-2">
-            <span className="text-sm text-muted-foreground">Order total</span>
+            <span className="text-sm text-muted-foreground">{t('payment.orderTotal')}</span>
             <span
               className="ml-auto text-2xl font-semibold tabular-nums"
               data-testid="payment-total"
@@ -128,8 +124,8 @@ export function RecordPaymentDialog({
           </div>
 
           <div className="grid gap-2">
-            <Label>Payment method</Label>
-            <div className="flex gap-2" role="group" aria-label="Payment method">
+            <Label>{t('payment.method')}</Label>
+            <div className="flex gap-2" role="group" aria-label={t('payment.method')}>
               {PAYMENT_METHODS.map((candidate) => (
                 <Button
                   key={candidate}
@@ -145,7 +141,7 @@ export function RecordPaymentDialog({
                   }}
                   disabled={pending}
                 >
-                  {PAYMENT_LABELS[candidate]}
+                  {t(PAYMENT_LABEL_KEYS[candidate])}
                 </Button>
               ))}
             </div>
@@ -153,7 +149,9 @@ export function RecordPaymentDialog({
 
           {method === 'cash' ? (
             <div className="grid gap-2">
-              <Label htmlFor="cash-received">Cash received ({CURRENCY_PREFIX})</Label>
+              <Label htmlFor="cash-received">
+                {t('payment.cashReceivedCurrency', { currency: CURRENCY_PREFIX })}
+              </Label>
               <Input
                 id="cash-received"
                 inputMode="decimal"
@@ -165,7 +163,7 @@ export function RecordPaymentDialog({
                 autoFocus
               />
               <div className="flex items-baseline gap-2 text-sm">
-                <span className="text-muted-foreground">Change</span>
+                <span className="text-muted-foreground">{t('payment.change')}</span>
                 <span
                   className="ml-auto text-lg font-semibold tabular-nums"
                   data-testid="payment-change"
@@ -175,24 +173,21 @@ export function RecordPaymentDialog({
               </div>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Recorded only — no payment gateway is involved. Confirm once the transfer has been
-              seen to succeed on the customer&rsquo;s phone.
-            </p>
+            <p className="text-sm text-muted-foreground">{t('payment.ewalletNote')}</p>
           )}
 
           {error && (
             <Alert variant="destructive">
               <AlertCircle aria-hidden="true" />
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{t(error)}</AlertDescription>
             </Alert>
           )}
         </div>
 
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>{t('common.cancel')}</AlertDialogCancel>
           <Button disabled={pending} data-testid="confirm-payment" onClick={handleConfirm}>
-            {pending ? 'Recording…' : 'Confirm payment'}
+            {t(pending ? 'payment.recording' : 'payment.confirm')}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

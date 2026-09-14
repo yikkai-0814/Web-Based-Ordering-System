@@ -1,3 +1,4 @@
+import type { TranslationKey } from '@/features/i18n/translations/en'
 import {
   ChartColumn,
   ChefHat,
@@ -6,6 +7,7 @@ import {
   LayoutDashboard,
   ReceiptText,
   ScanBarcode,
+  Settings,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -13,7 +15,8 @@ import { ROLES, type Role } from '@/features/auth/types'
 
 export interface NavItem {
   to: string
-  label: string
+  /** Looked up at render time, so the sidebar follows the chosen language. */
+  labelKey: TranslationKey
   icon: LucideIcon
   /** Which roles see this item at all. */
   roles: readonly Role[]
@@ -25,10 +28,11 @@ export interface NavItem {
  *
  * **The array order is not either role's order — it is the one order that yields both.**
  * Each role sees this list filtered, so the sequence has to satisfy two requirements at
- * once: an admin must read Dashboard, Reports, Orders, Menu, Staff, and a staff member must
- * read New Order, Orders, Queue. `Orders` is the item they share, so everything either role
- * sees above Orders is listed before it and everything below it after — which is why New
- * Order sits between Reports and Orders, and Queue sits last. Both orders are asserted
+ * once: an admin must read Dashboard, Reports, Orders, Menu, Staff, Settings, and a staff
+ * member must read New Order, Orders, Queue, Settings. `Orders` and `Settings` are the items
+ * they share, so everything either role sees above Orders is listed before it and everything
+ * below it after — which is why New Order sits between Reports and Orders, and Queue sits
+ * after Staff. Settings is last because both roles end on it. Both orders are asserted
  * exactly in tests/unit/nav.test.ts; change this array and one of them will tell you.
  *
  * The two roles now share exactly one destination. An admin runs the business — figures,
@@ -40,7 +44,7 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   {
     to: '/dashboard',
-    label: 'Dashboard',
+    labelKey: 'nav.dashboard',
     icon: LayoutDashboard,
     // Admin only. It answers an owner's questions — takings, outstanding money, estimated
     // profit — which is not what somebody standing at the counter needs a link to.
@@ -48,7 +52,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     to: '/reports',
-    label: 'Reports',
+    labelKey: 'nav.reports',
     icon: ChartColumn,
     // Admin only: the page shows cost, estimated profit and margin.
     roles: ['admin'],
@@ -57,7 +61,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     to: '/pos',
     // Named for what it is used for. "Till" described the hardware; this page is where an
     // order is started, served, filled and taken payment for.
-    label: 'New Order',
+    labelKey: 'nav.newOrder',
     icon: ScanBarcode,
     // Staff only, and first for them: taking an order is the job. An admin has no counter
     // to work, and the route refuses them as well — see the guard in App.tsx.
@@ -65,7 +69,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     to: '/orders',
-    label: 'Orders',
+    labelKey: 'nav.orders',
     icon: ReceiptText,
     // The one thing both roles do: staff look up the sale in front of them, an admin reads
     // the day's history.
@@ -73,7 +77,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     to: '/menu',
-    label: 'Menu',
+    labelKey: 'nav.menu',
     icon: CupSoda,
     // Admin only in the nav. The catalog is still readable by staff — the route and the
     // security rules are unchanged — it simply is not one of the three things the counter
@@ -82,18 +86,27 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   {
     to: '/staff',
-    label: 'Staff',
+    labelKey: 'nav.staff',
     icon: IdCard,
     // Admin only: creating and retiring till operators is a management function.
     roles: ['admin'],
   },
   {
     to: '/queue',
-    label: 'Queue',
+    labelKey: 'nav.queue',
     icon: ChefHat,
     // Staff only: the kitchen board is worked by whoever is making the food, and the route
     // refuses an admin as well.
     roles: ['staff'],
+  },
+  {
+    to: '/settings',
+    labelKey: 'nav.settings',
+    icon: Settings,
+    // Both roles, and last for both: it is about the person and the device rather than the
+    // work, so it sits below everything either role came here to do. Reachable from the
+    // account menu too — the same destination, from whichever of the two somebody looks in.
+    roles: ROLES,
   },
 ]
 

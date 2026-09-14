@@ -1,3 +1,5 @@
+import { message } from '@/features/i18n/messages'
+import type { Message } from '@/features/i18n/messages'
 import { useSidecarDocs } from '@/features/pos/useOrderSidecars'
 import { parseOrderPayment, type OrderPayment } from '@/features/pos/types'
 
@@ -13,13 +15,13 @@ import { parseOrderPayment, type OrderPayment } from '@/features/pos/types'
 export function useOrderPayments(chunks: readonly (readonly string[])[]): {
   payments: Map<string, OrderPayment>
   loading: boolean
-  error: string | null
+  error: Message | null
 } {
   const state = useSidecarDocs<OrderPayment>(
     'orderPayments',
     parseOrderPayment,
     chunks,
-    'Could not load payments for this date.',
+    message('load.paymentsDate'),
   )
 
   return { payments: state.records, loading: state.loading, error: state.error }

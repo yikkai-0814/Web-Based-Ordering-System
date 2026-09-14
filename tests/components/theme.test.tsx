@@ -12,7 +12,10 @@
 import { screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { MemoryRouter } from 'react-router'
+
 import { UserMenu } from '@/components/layout/UserMenu'
+import { SettingsPage } from '@/features/settings/SettingsPage'
 import { THEME_STORAGE_KEY } from '@/features/theme/theme'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useTheme } from '@/features/theme/useTheme'
@@ -185,34 +188,50 @@ describe('ThemeProvider: persistence', () => {
   })
 })
 
-describe('the switcher in the user menu', () => {
+describe('the switcher on the Settings page', () => {
   it('changes the palette for the whole document', async () => {
-    // Where it lives matters: the theme is part of somebody's session, not a navigation item,
-    // so it sits with the rest of their account controls.
+    // Where it lives matters. It used to be a radio group inside the account dropdown, which
+    // could not explain itself and buried Sign out; it is now a panel of preview tiles on
+    // Settings, and what it does is unchanged.
     const { user } = renderComponent(
       <ThemeProvider>
-        <UserMenu />
+        <SettingsPage />
       </ThemeProvider>,
     )
 
-    await user.click(screen.getByRole('button', { name: /Ada Admin/ }))
     await user.click(screen.getByTestId('theme-dark'))
 
     expect(document.documentElement.classList.contains('dark')).toBe(true)
   })
 
-  it('offers all three choices and marks the current one', async () => {
-    const { user } = renderComponent(
+  it('offers all three choices and marks the current one', () => {
+    renderComponent(
       <ThemeProvider>
-        <UserMenu />
+        <SettingsPage />
       </ThemeProvider>,
     )
-    await user.click(screen.getByRole('button', { name: /Ada Admin/ }))
 
     for (const choice of ['light', 'dark', 'system']) {
       expect(screen.getByTestId(`theme-${choice}`)).not.toBeNull()
     }
     // Nothing chosen yet, so "System" is the one selected.
     expect(screen.getByTestId('theme-system').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('is no longer offered inside the account menu', async () => {
+    const { user } = renderComponent(
+      <MemoryRouter>
+        <ThemeProvider>
+          <UserMenu />
+        </ThemeProvider>
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: /Ada Admin/ }))
+
+    for (const choice of ['light', 'dark', 'system']) {
+      expect(screen.queryByTestId(`theme-${choice}`)).toBeNull()
+    }
+    // What it offers instead: a way to the page that now holds them.
+    expect(screen.getByTestId('menu-settings').getAttribute('href')).toBe('/settings')
   })
 })

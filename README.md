@@ -24,6 +24,8 @@ the real authorization boundary. No Cloud Functions — the free Spark plan is e
   revenue, outstanding money, cost, estimated profit and item performance, exportable as CSV.
 - **Roles** — staff get New Order, Orders and Queue; admins get Dashboard, Reports, Orders,
   Menu and Staff. Enforced by route guards and Firestore rules.
+- **Languages** — the interface speaks English, Bahasa Melayu or Chinese, chosen per device.
+  See below.
 
 ## Tech stack
 
@@ -85,6 +87,54 @@ The emulator-backed suites start their own emulators, so stop `npm run emulators
 running them.
 
 Also available: `npm run typecheck`, `npm run lint`, `npm run format`, `npm run build`.
+
+## Languages
+
+The interface is available in English (`en`), Bahasa Melayu (`ms`) and Simplified Chinese
+(`zh`). It is chosen from the account menu, stored per device in `localStorage`, and applied
+to `<html lang>` so assistive technology agrees with the screen. English is the default and
+the language every string is authored in, so an unrecognised or missing preference falls back
+to it rather than showing a gap.
+
+**Only predefined interface text is translated.** Everything a vendor typed — menu items,
+categories, modifier groups and options, staff names, table numbers, void reasons — is stored
+and shown exactly as entered, in every language. That is enforced by the types rather than by
+convention: `t` accepts a `TranslationKey` or a `Message`, never an arbitrary string, so
+`t(item.name)` does not compile. Where vendor text appears inside a sentence it is passed as a
+`{{param}}` and inserted verbatim.
+
+CSV exports keep stable English column headers on purpose, so a spreadsheet or a script
+reading them does not change shape when somebody switches the interface language.
+
+Everything lives in `src/features/i18n/`:
+
+| File                | What it holds                                                           |
+| ------------------- | ----------------------------------------------------------------------- |
+| `languages.ts`      | The list of languages, their endonyms, `<html lang>` tags and fallback. |
+| `translations/*.ts` | One dictionary per language. `en.ts` is the source of truth.            |
+| `messages.ts`       | `Message` and `MessageError`, how a pure module reports a problem.      |
+| `LanguageProvider`  | Holds the choice, persists it, and hands down `t`.                      |
+
+### Adding a language
+
+1. Add its code to `LANGUAGES` in `languages.ts`, then its endonym to `LANGUAGE_LABELS` (named
+   in itself — somebody looking for 中文 is not looking for "Chinese") and its BCP 47 tag to
+   `LANGUAGE_TAGS`.
+2. Copy `translations/en.ts` to `translations/<code>.ts`, type it as `Dictionary`, and
+   translate the values. Leave the keys and their order alone so the files read side by side.
+3. Register it in `DICTIONARIES` in `LanguageProvider.tsx`.
+
+The compiler does the rest of the checking: because every dictionary is typed as `Dictionary`,
+a key you missed and a key you invented are both build errors rather than a blank space on a
+till. `tests/unit/i18n.test.ts` additionally checks that no dictionary is simply a copy of the
+English one.
+
+### Adding a string
+
+Add it to the section of `en.ts` for the screen that shows it — keys are namespaced by where
+they are read, not by what they say — then to every other dictionary, which the compiler will
+insist on. Read it with `t('some.key')` in a component. A pure module that needs to report a
+problem returns `message('some.key')` instead, and the component that renders it calls `t`.
 
 ## Known limits
 

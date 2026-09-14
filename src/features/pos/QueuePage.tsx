@@ -1,3 +1,5 @@
+import { isMessageError, message, type Message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { AlertCircle, ChefHat } from 'lucide-react'
@@ -19,11 +21,11 @@ import { OrderElapsedTime } from '@/features/pos/OrderElapsedTime'
 import {
   groupQueue,
   itemCountOf,
-  QUEUE_COLUMN_LABELS,
+  QUEUE_COLUMN_LABEL_KEYS,
   queueActionFor,
   type QueueColumn,
 } from '@/features/pos/queue'
-import { fulfillmentOperatorNameOf, operatorNameOf, PAYMENT_LABELS } from '@/features/pos/types'
+import { fulfillmentOperatorNameOf, operatorNameOf, PAYMENT_LABEL_KEYS } from '@/features/pos/types'
 import { useShownBusinessDate } from '@/features/pos/useBusinessToday'
 import { useOrdersWorkspace } from '@/features/pos/useOrdersWorkspace'
 import { formatMoney } from '@/lib/money'
@@ -47,6 +49,7 @@ import { formatMoney } from '@/lib/money'
  * the counter's job on the receipt, not the kitchen's.
  */
 export function QueuePage() {
+  const { t } = useTranslation()
   // Follows today on its own, unless somebody has navigated to another day — see the hook.
   const { businessDate, showDate } = useShownBusinessDate()
   const { views, loading, error } = useOrdersWorkspace(businessDate)
@@ -67,7 +70,7 @@ export function QueuePage() {
    * It is still a guard: pressing the same button twice cannot send the same step twice.
    */
   const [inFlight, setInFlight] = useState<ReadonlyMap<string, FulfillmentStatus>>(() => new Map())
-  const [moveError, setMoveError] = useState<string | null>(null)
+  const [moveError, setMoveError] = useState<Message | null>(null)
 
   /**
    * The same map, kept in a ref because the guard has to be answered SYNCHRONOUSLY.
@@ -79,6 +82,7 @@ export function QueuePage() {
    */
   const inFlightRef = useRef<ReadonlyMap<string, FulfillmentStatus>>(inFlight)
 
+  const shownError = error ?? moveError
   const columns = useMemo(() => groupQueue(views), [views])
   const queued = columns.reduce((count, column) => count + column.views.length, 0)
 
@@ -143,10 +147,10 @@ export function QueuePage() {
       const denied = typeof caught === 'object' && caught !== null && 'code' in caught
       setMoveError(
         denied
-          ? 'That step could not be saved. Somebody may have already moved this order, or it has been voided.'
-          : caught instanceof Error && caught.message
-            ? caught.message
-            : 'That step could not be saved.',
+          ? message('queue.moveFailed')
+          : isMessageError(caught)
+            ? caught.detail
+            : message('queue.moveFailedGeneric'),
       )
     } finally {
       release(view.order.id, to)
@@ -156,20 +160,18 @@ export function QueuePage() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6">
       <div>
-        <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">Queue</h1>
-        <p className="text-muted-foreground">
-          Orders still to be made and handed over, oldest first. Each card moves one step: pending
-          to preparing, preparing to ready, ready to delivered. A delivered or voided order leaves
-          the board — it stays on the Orders page.
-        </p>
+        <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
+          {t('queue.title')}
+        </h1>
+        <p className="text-muted-foreground">{t('queue.blurb')}</p>
       </div>
 
       <BusinessDateBar businessDate={businessDate} onChange={showDate} />
 
-      {(error ?? moveError) && (
+      {shownError && (
         <Alert variant="destructive">
           <AlertCircle aria-hidden="true" />
-          <AlertDescription>{error ?? moveError}</AlertDescription>
+          <AlertDescription>{t(shownError)}</AlertDescription>
         </Alert>
       )}
 
@@ -178,8 +180,8 @@ export function QueuePage() {
       ) : queued === 0 ? (
         <div data-testid="queue-empty">
           <EmptyState
-            title="Nothing waiting on this date"
-            description="Every order has been delivered or voided. New orders appear here as they are rung up."
+            title={t('queue.empty')}
+            description={t('queue.emptyBlurb')}
             icon={<ChefHat className="size-6" aria-hidden="true" />}
           />
         </div>
@@ -211,15 +213,16 @@ function QueueColumnPanel({
   inFlight: ReadonlyMap<string, FulfillmentStatus>
   onAdvance: (view: OrderView, to: FulfillmentStatus) => Promise<void>
 }) {
+  const { t } = useTranslation()
   return (
     <section
       className="space-y-3 rounded-xl border bg-muted/40 p-3"
-      aria-label={QUEUE_COLUMN_LABELS[status]}
+      aria-label={t(QUEUE_COLUMN_LABEL_KEYS[status])}
       data-testid="queue-column"
       data-status={status}
     >
       <h2 className="flex items-baseline gap-2 text-sm font-semibold tracking-wide uppercase">
-        {QUEUE_COLUMN_LABELS[status]}
+        {t(QUEUE_COLUMN_LABEL_KEYS[status])}
         <span
           className="rounded-full bg-background px-2 py-0.5 text-xs tabular-nums text-muted-foreground"
           data-testid="queue-column-count"
@@ -230,7 +233,7 @@ function QueueColumnPanel({
 
       {views.length === 0 ? (
         <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-          Nothing here.
+          {t('queue.columnEmpty')}
         </p>
       ) : (
         <ul className="space-y-3">
@@ -259,6 +262,7 @@ function QueueCard({
   inFlightTo: FulfillmentStatus | null
   onAdvance: (view: OrderView, to: FulfillmentStatus) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const { order } = view
   const action = queueActionFor(view)
   // Busy only for the step actually in flight. Once the card has moved, the step it now
@@ -276,14 +280,14 @@ function QueueCard({
         <Link
           to={`/orders/${order.id}`}
           className="text-lg font-semibold tabular-nums hover:underline"
-          aria-label={`Receipt for order ${order.number}`}
+          aria-label={t('orders.receiptFor', { number: order.number })}
         >
           #{order.number}
         </Link>
         {/* "Dine-in · Table 5" or "Takeaway" — the table is the whole reason this is on the
             card, because it is how the food reaches the right person. */}
         <span className="text-sm font-medium" data-testid="queue-service">
-          {orderTypeSummaryOf(order)}
+          {t(orderTypeSummaryOf(order))}
         </span>
         <span className="ml-auto tabular-nums text-muted-foreground">
           {formatMoney(order.total)}
@@ -320,20 +324,22 @@ function QueueCard({
         <PaymentStatusBadge state={view.payment} />
         {view.payment.status === 'paid' && (
           <span className="text-xs text-muted-foreground">
-            {PAYMENT_LABELS[view.payment.method]}
+            {t(PAYMENT_LABEL_KEYS[view.payment.method])}
           </span>
         )}
         <span className="ml-auto tabular-nums text-muted-foreground">
-          {itemCountOf(view)} {itemCountOf(view) === 1 ? 'item' : 'items'}
+          {t(itemCountOf(view) === 1 ? 'queue.itemsOne' : 'queue.itemsOther', {
+            count: itemCountOf(view),
+          })}
         </span>
       </div>
 
       {/* Who rang it up, and — once somebody has touched it — who moved it last. The second
           line is why operator identities exist: a shared login cannot answer either. */}
       <p className="text-xs text-muted-foreground" data-testid="queue-operator">
-        Taken by {operatorNameOf(order)}
+        {t('queue.takenBy', { name: operatorNameOf(order) })}
         {view.fulfillmentRecord
-          ? ` · last moved by ${fulfillmentOperatorNameOf(view.fulfillmentRecord)}`
+          ? t('queue.lastMovedBy', { name: fulfillmentOperatorNameOf(view.fulfillmentRecord) })
           : ''}
       </p>
 
@@ -360,7 +366,7 @@ function QueueCard({
           onClick={() => void onAdvance(view, action.next)}
         >
           <ChefHat aria-hidden="true" />
-          {busy ? 'Saving…' : action.label}
+          {busy ? t('common.saving') : t(action.labelKey)}
         </Button>
       )}
     </article>

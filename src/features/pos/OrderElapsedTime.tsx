@@ -1,10 +1,11 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { Clock } from 'lucide-react'
 
 import {
   elapsedMsOf,
   elapsedWindowOf,
-  ELAPSED_FINAL_LABEL,
-  ELAPSED_LABEL,
+  ELAPSED_FINAL_LABEL_KEY,
+  ELAPSED_LABEL_KEY,
   formatDuration,
   isElapsedFinished,
   type DeliverableFulfillment,
@@ -103,11 +104,13 @@ function ElapsedReadout({
   size: 'compact' | 'prominent'
   className?: string
 }) {
+  const { t } = useTranslation()
+
   // Null only while a just-placed order's createdAt is an unresolved server timestamp in the
   // local cache. A frame or two later it fills in; a "0:00" in the meantime would be a claim.
   if (elapsed === null) return null
 
-  const label = running ? ELAPSED_LABEL : ELAPSED_FINAL_LABEL
+  const label = t(running ? ELAPSED_LABEL_KEY : ELAPSED_FINAL_LABEL_KEY)
 
   return (
     <span

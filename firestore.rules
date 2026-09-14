@@ -76,13 +76,41 @@ service cloud.firestore {
     // ---- users -------------------------------------------------------------
     // A staff member may read their own profile (the app subscribes to it live so a
     // role change or a deactivation takes effect without a re-login). Only an admin
-    // may read anyone else's, and only an admin may write at all — which is what stops
-    // a staff account from promoting itself to admin or reactivating itself.
+    // may read anyone else's.
+    //
+    // Writing is an admin's, with exactly one exception: anybody may change their own
+    // `displayName`, which is what the Settings page does. The exception is drawn as
+    // narrowly as it can be — `affectedKeys().hasOnly(['displayName'])` means a self-write
+    // that also touches `role`, `active`, `email`, `uid` or `createdAt` is refused
+    // outright, as is one that invents a field. So the two things these rules have always
+    // stopped a staff account from doing — promoting itself to admin, reactivating itself
+    // — are stopped by exactly the same clause as before.
+    //
+    // Note what this does NOT weaken. The name recorded against an order is the POS
+    // operator's, taken from `staffMembers`, which only an admin may write; the account
+    // name is the second half of the pair and is verified by accountNameMatches() against
+    // this document at the moment of the write. Renaming yourself therefore renames you on
+    // what you do NEXT, and cannot rewrite a single record already written — those hold
+    // their own snapshot and orders are immutable.
+
+    function validDisplayName(name) {
+      return name is string
+        && name.trim().size() > 0
+        && name.size() <= 60;
+    }
+
+    function renamesSelfOnly(uid) {
+      return isSelf(uid)
+        && isActive()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName'])
+        && validDisplayName(request.resource.data.displayName);
+    }
 
     match /users/{uid} {
       allow get: if isSelf(uid) || isAdmin();
       allow list: if isAdmin();
-      allow create, update, delete: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || renamesSelfOnly(uid);
     }
 
     // ---- Menu catalog ------------------------------------------------------

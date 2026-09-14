@@ -1,3 +1,4 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useMemo } from 'react'
 import { Link } from 'react-router'
 import {
@@ -17,13 +18,13 @@ import { EmptyState } from '@/components/data/EmptyState'
 import { MeterBar } from '@/components/data/MeterBar'
 import { Panel } from '@/components/data/Panel'
 import { StatCard } from '@/components/data/StatCard'
-import { ROLE_LABELS } from '@/features/auth/types'
+import { ROLE_LABEL_KEYS } from '@/features/auth/types'
 import { useAuth } from '@/features/auth/useAuth'
 import { buildDashboard } from '@/features/dashboard/summary'
-import { QUEUE_COLUMN_LABELS, QUEUE_COLUMNS } from '@/features/pos/queue'
+import { QUEUE_COLUMN_LABEL_KEYS, QUEUE_COLUMNS } from '@/features/pos/queue'
 import { useBusinessToday } from '@/features/pos/useBusinessToday'
 import { useOrdersWorkspace } from '@/features/pos/useOrdersWorkspace'
-import { PAYMENT_LABELS } from '@/features/pos/types'
+import { PAYMENT_LABEL_KEYS } from '@/features/pos/types'
 import type { Report } from '@/features/reports/aggregate'
 import type { DateRange } from '@/features/reports/ranges'
 import { useReport } from '@/features/reports/useReport'
@@ -47,6 +48,7 @@ const TOP_ITEM_COUNT = 5
  * permission error on the landing page.
  */
 export function DashboardPage() {
+  const { t } = useTranslation()
   const { profile } = useAuth()
   // Follows the clock rather than freezing at mount. This page has no date bar by design —
   // it answers for "today" and nothing else — so if today moved on without it, a till left
@@ -61,12 +63,16 @@ export function DashboardPage() {
     <div className="mx-auto w-full max-w-7xl space-y-6">
       <header className="space-y-1">
         <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
-          Welcome{profile ? `, ${profile.displayName}` : ''}
+          {/* The name is the vendor's own, spliced in rather than looked up. */}
+          {profile
+            ? t('dashboard.welcomeNamed', { name: profile.displayName })
+            : t('dashboard.welcome')}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {businessDate} · signed in as {profile ? ROLE_LABELS[profile.role] : 'a user'}. Everything
-          below is today only, and updates as orders are rung up and moved along. Voided sales are
-          excluded from every figure.
+          {t('dashboard.blurb', {
+            date: businessDate,
+            role: profile ? t(ROLE_LABEL_KEYS[profile.role]) : t('dashboard.aUser'),
+          })}
         </p>
       </header>
 
@@ -74,14 +80,14 @@ export function DashboardPage() {
           till nor the kitchen board — offering either would be a link to a 403. */}
       <div className="flex flex-wrap gap-2">
         <Button asChild size="lg" className="h-touch text-base">
-          <Link to="/orders">See all orders</Link>
+          <Link to="/orders">{t('dashboard.seeAllOrders')}</Link>
         </Button>
       </div>
 
       {error && (
         <Alert variant="destructive">
           <AlertCircle aria-hidden="true" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
@@ -90,34 +96,38 @@ export function DashboardPage() {
       ) : (
         <>
           {summary.finance && (
-            <Panel tone="accent" aria-label="Money taken today">
+            <Panel tone="accent" aria-label={t('dashboard.moneyTakenToday')}>
               {/* The hero and its two supporting figures share one surface, so they read as
                   one answer — what today is worth — rather than as three separate cards. */}
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
                 <StatCard
-                  label="Revenue today"
+                  label={t('dashboard.revenueToday')}
                   value={formatMoney(summary.finance.revenue)}
                   testId="tile-revenue"
                   tone="money"
                   variant="hero"
                   icon={<Coins className="size-3.5" aria-hidden="true" />}
-                  hint="Every order placed, paid or not"
+                  hint={t('dashboard.revenueTodayHint')}
                 />
                 <StatCard
-                  label="Collected"
+                  label={t('dashboard.collected')}
                   value={formatMoney(summary.finance.collected)}
                   testId="tile-collected"
                   tone="money"
                   icon={<Wallet className="size-3.5" aria-hidden="true" />}
-                  hint="Money in the drawer"
+                  hint={t('dashboard.collectedHint')}
                 />
                 <StatCard
-                  label="Outstanding"
+                  label={t('dashboard.outstanding')}
                   value={formatMoney(summary.finance.outstanding)}
                   testId="tile-outstanding"
                   tone={summary.finance.outstanding > 0 ? 'warning' : 'money'}
                   icon={<Receipt className="size-3.5" aria-hidden="true" />}
-                  hint={summary.finance.outstanding > 0 ? 'Still to collect' : 'Nothing owed'}
+                  hint={t(
+                    summary.finance.outstanding > 0
+                      ? 'dashboard.outstandingHintOwed'
+                      : 'dashboard.outstandingHintClear',
+                  )}
                   to="/orders"
                 />
               </div>
@@ -126,41 +136,41 @@ export function DashboardPage() {
 
           <Panel
             tone="plain"
-            title="Service"
-            description="How today is running. Delivered orders leave the board; they stay on the Orders page."
-            aria-label="Service"
+            title={t('dashboard.service')}
+            description={t('dashboard.serviceBlurb')}
+            aria-label={t('dashboard.service')}
           >
             {/* Quiet tiles sitting on the page itself: counts that give the money above its
                 context, not figures anybody opens a dashboard to read. */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
               <StatCard
-                label="Orders"
+                label={t('dashboard.orders')}
                 value={String(summary.orderCount)}
                 testId="tile-orders"
                 variant="quiet"
-                hint="Voided excluded"
+                hint={t('dashboard.ordersHint')}
                 to="/orders"
               />
               <StatCard
-                label="Unpaid"
+                label={t('dashboard.unpaid')}
                 value={String(summary.unpaidCount)}
                 testId="tile-unpaid"
                 variant="quiet"
                 tone={summary.unpaidCount > 0 ? 'warning' : 'count'}
-                hint="Awaiting payment"
+                hint={t('dashboard.unpaidHint')}
                 to="/orders"
               />
               <StatCard
-                label="Voided"
+                label={t('dashboard.voided')}
                 value={String(summary.voidedCount)}
                 testId="tile-voided"
                 variant="quiet"
-                hint="Not counted"
+                hint={t('dashboard.voidedHint')}
               />
               {QUEUE_COLUMNS.map((column) => (
                 <StatCard
                   key={column}
-                  label={QUEUE_COLUMN_LABELS[column]}
+                  label={t(QUEUE_COLUMN_LABEL_KEYS[column])}
                   value={String(summary.queue[column])}
                   testId="tile-queue"
                   dataStatus={column}
@@ -193,6 +203,7 @@ export function DashboardPage() {
  * into line, and the note says so rather than leaving it to be discovered.
  */
 function TodayBusinessBands({ businessDate }: { businessDate: string }) {
+  const { t } = useTranslation()
   // Built from the day the page is showing rather than from the clock, which is what makes
   // the snapshot follow a rollover: `rangeFor('today', …)` would answer for whenever it
   // happened to be called, and the card would keep reporting yesterday's profit under
@@ -216,19 +227,19 @@ function TodayBusinessBands({ businessDate }: { businessDate: string }) {
     <div className="space-y-6">
       <Panel
         tone="accent"
-        title="Cost and profit"
-        description="A snapshot taken when this page loaded, not a live figure. Cost comes from the cost recorded against each item at the time of the sale."
+        title={t('dashboard.costAndProfit')}
+        description={t('dashboard.costAndProfitBlurb')}
         action={
           <Button type="button" size="sm" variant="outline" onClick={refresh} disabled={loading}>
-            Refresh
+            {t('dashboard.refresh')}
           </Button>
         }
-        aria-label="Cost and profit"
+        aria-label={t('dashboard.costAndProfit')}
       >
         {error && (
           <Alert variant="destructive">
             <AlertCircle aria-hidden="true" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{t(error)}</AlertDescription>
           </Alert>
         )}
 
@@ -242,38 +253,42 @@ function TodayBusinessBands({ businessDate }: { businessDate: string }) {
               <Alert data-testid="missing-cost-warning">
                 <TriangleAlert aria-hidden="true" />
                 <AlertDescription>
-                  Some items sold today have no recorded cost, so profit is higher than the real
-                  figure. Record their cost on the <Link to="/menu">Menu</Link> page — every item is
-                  meant to have one.
+                  {/* Split around the link rather than spliced into one string: a sentence
+                      with markup in the middle of it cannot survive interpolation. */}
+                  {t('dashboard.missingCostBefore')} <Link to="/menu">{t('nav.menu')}</Link>{' '}
+                  {t('dashboard.missingCostAfter')}
                 </AlertDescription>
               </Alert>
             )}
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard
-                label="Profit"
+                label={t('dashboard.profit')}
                 value={formatMoney(report.estimatedProfit)}
                 testId="tile-estimated-profit"
                 tone="money"
                 variant="hero"
                 icon={<TrendingUp className="size-3.5" aria-hidden="true" />}
-                hint="Revenue less cost"
+                hint={t('dashboard.profitHint')}
                 className="sm:col-span-2"
               />
               <StatCard
-                label="Cost"
+                label={t('dashboard.cost')}
                 value={formatMoney(report.estimatedCost)}
                 testId="tile-estimated-cost"
                 tone="money"
                 variant="hero"
                 icon={<Coins className="size-3.5" aria-hidden="true" />}
-                hint="Recorded cost of what sold"
+                hint={t('dashboard.costHint')}
               />
               <StatCard
-                label="Margin"
+                label={t('dashboard.margin')}
                 value={report.marginPercent === null ? '—' : `${report.marginPercent.toFixed(1)}%`}
                 testId="tile-margin"
-                hint={`${report.voided.length} voided · ${formatMoney(report.voidedAmount)} reversed`}
+                hint={t('dashboard.voidedReversed', {
+                  count: report.voided.length,
+                  amount: formatMoney(report.voidedAmount),
+                })}
               />
             </div>
           </>
@@ -281,7 +296,11 @@ function TodayBusinessBands({ businessDate }: { businessDate: string }) {
       </Panel>
 
       {!loading && report && (
-        <Panel tone="plain" title="What today was made of" aria-label="What today was made of">
+        <Panel
+          tone="plain"
+          title={t('dashboard.whatTodayWasMadeOf')}
+          aria-label={t('dashboard.whatTodayWasMadeOf')}
+        >
           {/* Side by side once there is room; stacked before that, because two half-width
               bar lists on a phone would leave no room for the labels. */}
           <div className="grid gap-4 lg:grid-cols-2">
@@ -295,23 +314,24 @@ function TodayBusinessBands({ businessDate }: { businessDate: string }) {
 }
 
 function PaymentMixCard({ report }: { report: Report }) {
+  const { t } = useTranslation()
   // The denominator is the rows' own total, so the bars always sum to the whole they are
   // drawn from. A share for a bar's width — not a figure anybody reads as a result.
   const total = report.payments.reduce((sum, row) => sum + row.amount, 0)
 
   return (
-    <Panel tone="raised" as="h3" title="How today was paid">
+    <Panel tone="raised" as="h3" title={t('dashboard.howTodayWasPaid')}>
       {report.payments.length === 0 ? (
         <EmptyState
-          title="No payments recorded yet"
-          description="Payments appear here as orders are settled."
+          title={t('dashboard.noPaymentsYet')}
+          description={t('dashboard.noPaymentsBlurb')}
         />
       ) : (
         <div className="space-y-3">
           {report.payments.map((row, index) => (
             <MeterBar
               key={row.method}
-              label={`${PAYMENT_LABELS[row.method]} · ${row.count} ${row.count === 1 ? 'order' : 'orders'}`}
+              label={`${t(PAYMENT_LABEL_KEYS[row.method])} · ${t(row.count === 1 ? 'common.ordersOne' : 'common.ordersOther', { count: row.count })}`}
               value={formatMoney(row.amount)}
               percent={total === 0 ? null : (row.amount / total) * 100}
               tone={index === 0 ? 'primary' : 'secondary'}
@@ -324,17 +344,18 @@ function PaymentMixCard({ report }: { report: Report }) {
 }
 
 function TopItemsCard({ report }: { report: Report }) {
+  const { t } = useTranslation()
   // `report.items` arrives sorted by revenue, so this is a slice rather than a sort — the
   // ordering is the report's, not this component's.
   const top = report.items.slice(0, TOP_ITEM_COUNT)
   const leader = top[0]?.revenue ?? 0
 
   return (
-    <Panel tone="raised" as="h3" title="Revenue-leading items">
+    <Panel tone="raised" as="h3" title={t('dashboard.revenueLeadingItems')}>
       {top.length === 0 ? (
         <EmptyState
-          title="Nothing sold yet today"
-          description="Items appear here once the first order is rung up."
+          title={t('dashboard.nothingSoldYet')}
+          description={t('dashboard.nothingSoldBlurb')}
         />
       ) : (
         <div className="space-y-3">
@@ -343,7 +364,8 @@ function TopItemsCard({ report }: { report: Report }) {
               key={row.menuItemId}
               rank={index + 1}
               leading={index === 0}
-              label={`${row.name} · ${row.quantity} sold`}
+              // The item name is the vendor's own word; only the count phrase is translated.
+              label={`${row.name} · ${t('dashboard.soldCount', { count: row.quantity })}`}
               value={formatMoney(row.revenue)}
               // Relative to the leader rather than to total revenue: this band answers
               // "what is selling", and a bar against the day's whole total would be a

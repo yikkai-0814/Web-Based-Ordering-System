@@ -1,3 +1,5 @@
+import { message, type Message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState, type FormEvent } from 'react'
 import { AlertCircle, Check, Plus, UserRound, X } from 'lucide-react'
 
@@ -26,15 +28,16 @@ import { useStaffMembers } from '@/features/staff/useStaffMembers'
  * is deactivation, which hides them from the till and leaves their sales intact.
  */
 export function StaffListPage() {
+  const { t } = useTranslation()
   const { staff, loading, error: loadError } = useStaffMembers()
 
   const [newName, setNewName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
   const [pending, setPending] = useState(false)
 
-  const message = loadError ?? error
+  const banner = loadError ?? error
 
   async function run(action: () => Promise<void>) {
     setError(null)
@@ -42,7 +45,7 @@ export function StaffListPage() {
     try {
       await action()
     } catch {
-      setError('That change was refused. Only administrators can manage staff.')
+      setError(message('staff.writeRefusedAdmin'))
     } finally {
       setPending(false)
     }
@@ -84,17 +87,14 @@ export function StaffListPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Staff</h1>
-        <p className="text-muted-foreground">
-          People who operate the till. These are not login accounts — they identify who took an
-          order. Deactivate to retire someone; their past orders keep their name.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t('nav.staff')}</h1>
+        <p className="text-muted-foreground">{t('staff.blurb')}</p>
       </div>
 
-      {message && (
+      {banner && (
         <Alert variant="destructive">
           <AlertCircle aria-hidden="true" />
-          <AlertDescription>{message}</AlertDescription>
+          <AlertDescription>{t(banner)}</AlertDescription>
         </Alert>
       )}
 
@@ -104,11 +104,11 @@ export function StaffListPage() {
         className="flex flex-wrap items-end gap-3 rounded-lg border p-4"
       >
         <div className="grid min-w-48 flex-1 gap-2">
-          <Label htmlFor="new-staff-name">Add staff member</Label>
+          <Label htmlFor="new-staff-name">{t('staff.addMember')}</Label>
           <Input
             id="new-staff-name"
             className="h-touch text-base"
-            placeholder="Alice"
+            placeholder={t('staff.namePlaceholder')}
             maxLength={STAFF_NAME_MAX}
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
@@ -117,20 +117,20 @@ export function StaffListPage() {
         </div>
         <Button type="submit" size="lg" className="h-touch text-base" disabled={pending}>
           <Plus aria-hidden="true" />
-          Add
+          {t('common.add')}
         </Button>
       </form>
 
       {staff.length === 0 ? (
-        <p className="text-muted-foreground">No staff members yet. Add the first one above.</p>
+        <p className="text-muted-foreground">{t('staff.empty')}</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead className="w-28">Status</TableHead>
-                <TableHead className="w-64 text-right">Actions</TableHead>
+                <TableHead>{t('common.name')}</TableHead>
+                <TableHead className="w-28">{t('staff.columnStatus')}</TableHead>
+                <TableHead className="w-64 text-right">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -146,7 +146,7 @@ export function StaffListPage() {
                     <TableCell>
                       {editing ? (
                         <Input
-                          aria-label="Staff name"
+                          aria-label={t('staff.name')}
                           className="h-touch text-base"
                           maxLength={STAFF_NAME_MAX}
                           value={editName}
@@ -163,7 +163,7 @@ export function StaffListPage() {
                       className={member.active ? 'text-sm' : 'text-sm text-muted-foreground'}
                       data-testid="staff-status"
                     >
-                      {member.active ? 'Active' : 'Inactive'}
+                      {t(member.active ? 'common.active' : 'common.inactive')}
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       {editing ? (
@@ -175,7 +175,7 @@ export function StaffListPage() {
                             onClick={() => void saveEdit(member)}
                           >
                             <Check aria-hidden="true" />
-                            Save
+                            {t('common.save')}
                           </Button>
                           <Button
                             variant="ghost"
@@ -184,7 +184,7 @@ export function StaffListPage() {
                             onClick={() => setEditingId(null)}
                           >
                             <X aria-hidden="true" />
-                            Cancel
+                            {t('common.cancel')}
                           </Button>
                         </>
                       ) : (
@@ -192,10 +192,10 @@ export function StaffListPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            aria-label={`Rename ${member.name}`}
+                            aria-label={t('common.renameNamed', { name: member.name })}
                             onClick={() => startEditing(member)}
                           >
-                            Rename
+                            {t('common.rename')}
                           </Button>
                           <Button
                             variant="ghost"
@@ -206,7 +206,7 @@ export function StaffListPage() {
                               void run(() => setStaffActive(member.id, !member.active))
                             }
                           >
-                            {member.active ? 'Deactivate' : 'Reactivate'}
+                            {t(member.active ? 'common.deactivate' : 'staff.reactivate')}
                           </Button>
                         </>
                       )}

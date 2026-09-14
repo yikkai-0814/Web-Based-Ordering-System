@@ -1,3 +1,4 @@
+import type { Message } from '@/features/i18n/messages'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   onAuthStateChanged,
@@ -22,15 +23,15 @@ const INITIAL: AuthState = { status: 'loading', user: null, profile: null }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(INITIAL)
-  const [rejectionMessage, setRejectionMessage] = useState<string | null>(null)
+  const [rejectionMessage, setRejectionMessage] = useState<Message | null>(null)
 
   // Holds the unsubscribe for the users/{uid} snapshot listener, which is torn down and
   // recreated every time the signed-in user changes.
   const unsubscribeProfile = useRef<(() => void) | null>(null)
 
   /** Ends a session the app will not accept, and records why for the login screen. */
-  const rejectSession = useCallback(async (message: string) => {
-    setRejectionMessage(message)
+  const rejectSession = useCallback(async (reason: Message) => {
+    setRejectionMessage(reason)
     unsubscribeProfile.current?.()
     unsubscribeProfile.current = null
     await firebaseSignOut(auth)

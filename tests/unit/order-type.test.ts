@@ -1,8 +1,9 @@
+import { say } from '../say'
 import { describe, expect, it } from 'vitest'
 
 import {
   isOrderType,
-  ORDER_TYPE_LABELS,
+  ORDER_TYPE_LABEL_KEYS,
   ORDER_TYPES,
   orderTypeSummaryOf,
   TABLE_NUMBER_MAX,
@@ -14,8 +15,8 @@ import { parseOrder } from '@/features/pos/types'
 describe('order types', () => {
   it('offers exactly two, dine-in and takeaway', () => {
     expect(ORDER_TYPES).toEqual(['dine_in', 'takeaway'])
-    expect(ORDER_TYPE_LABELS.dine_in).toBe('Dine-in')
-    expect(ORDER_TYPE_LABELS.takeaway).toBe('Takeaway')
+    expect(say(ORDER_TYPE_LABEL_KEYS.dine_in)).toBe('Dine-in')
+    expect(say(ORDER_TYPE_LABEL_KEYS.takeaway)).toBe('Takeaway')
   })
 
   it('recognises only those two values', () => {
@@ -50,7 +51,7 @@ describe('validateTableNumber', () => {
     for (const value of ['', '   ', '\t', '\n']) {
       const result = validateTableNumber(value)
       expect(result.ok).toBe(false)
-      if (!result.ok) expect(result.error).toMatch(/enter a table number/i)
+      if (!result.ok) expect(result.error.key).toBe('validation.tableRequired')
     }
   })
 
@@ -63,7 +64,7 @@ describe('validateTableNumber', () => {
     const tooLong = 'A'.repeat(TABLE_NUMBER_MAX + 1)
     const result = validateTableNumber(tooLong)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/at most 8 characters/i)
+    if (!result.ok) expect(say(result.error)).toMatch(/at most 8 characters/i)
   })
 
   it('rejects anything that is not a letter or a digit', () => {
@@ -72,7 +73,7 @@ describe('validateTableNumber', () => {
     for (const value of ['A-3', 'T 12', '5!', 'a b', '#4', '5.0', 'té']) {
       const result = validateTableNumber(value)
       expect(result.ok).toBe(false)
-      if (!result.ok) expect(result.error).toMatch(/letters and numbers only/i)
+      if (!result.ok) expect(result.error.key).toBe('validation.tableCharacters')
     }
   })
 })
@@ -89,7 +90,7 @@ describe('validatePlacement', () => {
   it('refuses a dine-in order with no table number', () => {
     const result = validatePlacement('dine_in', '')
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/enter a table number/i)
+    if (!result.ok) expect(result.error.key).toBe('validation.tableRequired')
   })
 
   it('refuses a dine-in order whose table number is invalid', () => {
@@ -121,32 +122,34 @@ describe('validatePlacement', () => {
 
 describe('orderTypeSummaryOf', () => {
   it('names the table for a dine-in order', () => {
-    expect(orderTypeSummaryOf({ orderType: 'dine_in', tableNumber: '5' })).toBe('Dine-in · Table 5')
-    expect(orderTypeSummaryOf({ orderType: 'dine_in', tableNumber: 'A3' })).toBe(
+    expect(say(orderTypeSummaryOf({ orderType: 'dine_in', tableNumber: '5' }))).toBe(
+      'Dine-in · Table 5',
+    )
+    expect(say(orderTypeSummaryOf({ orderType: 'dine_in', tableNumber: 'A3' }))).toBe(
       'Dine-in · Table A3',
     )
   })
 
   it('never shows a table for a takeaway, even if one somehow reached the document', () => {
-    expect(orderTypeSummaryOf({ orderType: 'takeaway', tableNumber: null })).toBe('Takeaway')
-    expect(orderTypeSummaryOf({ orderType: 'takeaway', tableNumber: '5' })).toBe('Takeaway')
+    expect(say(orderTypeSummaryOf({ orderType: 'takeaway', tableNumber: null }))).toBe('Takeaway')
+    expect(say(orderTypeSummaryOf({ orderType: 'takeaway', tableNumber: '5' }))).toBe('Takeaway')
   })
 
   it('says "Not recorded" for an order placed before order types existed', () => {
     // The honest answer. Guessing a type would invent history that never happened.
-    expect(orderTypeSummaryOf({ orderType: null, tableNumber: null })).toBe('Not recorded')
+    expect(say(orderTypeSummaryOf({ orderType: null, tableNumber: null }))).toBe('Not recorded')
   })
 
   it('degrades to plain Dine-in rather than "Table null"', () => {
     // Structurally impossible for a new order — the rules refuse it — but reachable for a
     // hand-written document, and a receipt must never render the word "null".
-    expect(orderTypeSummaryOf({ orderType: 'dine_in', tableNumber: null })).toBe('Dine-in')
+    expect(say(orderTypeSummaryOf({ orderType: 'dine_in', tableNumber: null }))).toBe('Dine-in')
   })
 
   it('never returns an empty string', () => {
     for (const orderType of [...ORDER_TYPES, null]) {
       for (const tableNumber of ['5', null]) {
-        expect(orderTypeSummaryOf({ orderType, tableNumber })).not.toBe('')
+        expect(say(orderTypeSummaryOf({ orderType, tableNumber }))).not.toBe('')
       }
     }
   })
@@ -184,7 +187,7 @@ describe('parseOrder and the new fields', () => {
     expect(parsed?.orderType).toBeNull()
     expect(parsed?.tableNumber).toBeNull()
     // And it renders honestly rather than being hidden from the list.
-    expect(orderTypeSummaryOf(parsed!)).toBe('Not recorded')
+    expect(say(orderTypeSummaryOf(parsed!))).toBe('Not recorded')
   })
 
   it('treats an unrecognised order type as absent rather than discarding the sale', () => {

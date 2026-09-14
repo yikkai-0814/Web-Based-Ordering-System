@@ -182,9 +182,15 @@ describe('groupQueue', () => {
 
 describe('queueActionFor', () => {
   it('offers exactly one step forward from each column', () => {
-    expect(queueActionFor(at('pending'))).toEqual({ next: 'preparing', label: 'Start preparing' })
-    expect(queueActionFor(at('preparing'))).toEqual({ next: 'ready', label: 'Mark ready' })
-    expect(queueActionFor(at('ready'))).toEqual({ next: 'delivered', label: 'Mark delivered' })
+    expect(queueActionFor(at('pending'))).toEqual({
+      next: 'preparing',
+      labelKey: 'queue.startPreparing',
+    })
+    expect(queueActionFor(at('preparing'))).toEqual({ next: 'ready', labelKey: 'queue.markReady' })
+    expect(queueActionFor(at('ready'))).toEqual({
+      next: 'delivered',
+      labelKey: 'queue.markDelivered',
+    })
   })
 
   it('never offers a step that skips one', () => {
@@ -223,7 +229,7 @@ describe('queueActionFor', () => {
       built,
       sidecars({ payments: new Map([[built.id, payment(built.id)]]) }),
     )
-    expect(queueActionFor(paid)).toEqual({ next: 'preparing', label: 'Start preparing' })
+    expect(queueActionFor(paid)).toEqual({ next: 'preparing', labelKey: 'queue.startPreparing' })
   })
 })
 

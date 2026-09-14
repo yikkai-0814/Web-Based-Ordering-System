@@ -1,3 +1,6 @@
+import { isMessageError, message, MessageError } from '@/features/i18n/messages'
+import type { Message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { AlertCircle, Ban, ChefHat } from 'lucide-react'
@@ -11,12 +14,12 @@ import { useStaffSession } from '@/features/staff/useStaffSession'
 import { lineTotal } from '@/features/pos/cart'
 import {
   canAdvanceFulfillment,
-  FULFILLMENT_ACTIONS,
+  FULFILLMENT_ACTION_KEYS,
   type FulfillmentStatus,
 } from '@/features/pos/fulfillment'
 import { setFulfillment } from '@/features/pos/fulfillment-api'
 import { OrderElapsedTime } from '@/features/pos/OrderElapsedTime'
-import { ORDER_TYPE_LABELS } from '@/features/pos/order-type'
+import { ORDER_TYPE_LABEL_KEYS } from '@/features/pos/order-type'
 import { withManagerAuthorization } from '@/features/pos/manager-authorization'
 import { recordPayment } from '@/features/pos/payment-api'
 import { canRecordPayment } from '@/features/pos/payments'
@@ -31,7 +34,7 @@ import {
   operatorNameOf,
   paymentOperatorNameOf,
   voidInitiatorNameOf,
-  PAYMENT_LABELS,
+  PAYMENT_LABEL_KEYS,
   type PaymentMethod,
 } from '@/features/pos/types'
 import { useOrderDetail } from '@/features/pos/useOrderDetail'
@@ -48,6 +51,7 @@ import { formatMoney } from '@/lib/money'
  * afterwards leaves this receipt exactly as it was at the time of sale.
  */
 export function OrderDetailPage() {
+  const { t } = useTranslation()
   const { orderId } = useParams<{ orderId: string }>()
   const { profile, role } = useAuth()
   const { operator } = useStaffSession()
@@ -55,7 +59,7 @@ export function OrderDetailPage() {
   // about exactly one sale, and this page used to load every order ever written to find it.
   const { view, loading } = useOrderDetail(orderId)
   const [advancing, setAdvancing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
 
   if (loading) {
     return <Skeleton className="h-96 w-full max-w-lg" />
@@ -64,10 +68,10 @@ export function OrderDetailPage() {
   if (!view) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Order not found</h1>
-        <p className="text-muted-foreground">No sale matches that address.</p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t('order.notFound')}</h1>
+        <p className="text-muted-foreground">{t('order.notFoundBlurb')}</p>
         <Button asChild size="lg" className="h-touch text-base">
-          <Link to="/orders">Back to orders</Link>
+          <Link to="/orders">{t('order.backToOrders')}</Link>
         </Button>
       </div>
     )
@@ -136,10 +140,10 @@ export function OrderDetailPage() {
       const denied = typeof caught === 'object' && caught !== null && 'code' in caught
       setError(
         denied
-          ? 'That step could not be saved. Somebody may have already moved this order, or it has been voided.'
-          : caught instanceof Error && caught.message
-            ? caught.message
-            : 'That step could not be saved.',
+          ? message('queue.moveFailed')
+          : isMessageError(caught)
+            ? caught.detail
+            : message('order.advanceFailed'),
       )
     } finally {
       setAdvancing(false)
@@ -162,11 +166,7 @@ export function OrderDetailPage() {
       // would tell the counter nothing. Translate it into the two things it can actually
       // mean, and let recordPayment's own validation messages through untouched.
       const denied = typeof caught === 'object' && caught !== null && 'code' in caught
-      throw denied
-        ? new Error(
-            'That payment could not be recorded. The order may already be paid, or it may have been voided.',
-          )
-        : caught
+      throw denied ? new MessageError(message('payment.recordFailed')) : caught
     }
   }
 
@@ -213,12 +213,9 @@ export function OrderDetailPage() {
       // withManagerAuthorization already produces a sentence worth reading — a wrong
       // password, a throttled account, credentials that are not a manager's. Anything else
       // is a rules refusal, which needs one written here.
-      const message =
-        caught instanceof Error && caught.message
-          ? caught.message
-          : 'That sale could not be voided.'
-      setError(message)
-      throw new Error(message)
+      const failure = isMessageError(caught) ? caught.detail : message('order.voidFailed')
+      setError(failure)
+      throw new MessageError(failure)
     }
   }
 
@@ -229,12 +226,21 @@ export function OrderDetailPage() {
           <Ban aria-hidden="true" />
           <AlertDescription>
             <span className="block font-medium">
-              This sale was voided — {formatMoney(voided.amount)} reversed.
+              {t('void.bannerHeadline', { amount: formatMoney(voided.amount) })}
             </span>
-            <span className="block">Reason: {voided.reason}</span>
+            {/* The reason is the vendor's own sentence, spliced in exactly as typed. */}
+            <span className="block">{t('void.bannerReason', { reason: voided.reason })}</span>
             <span className="block text-xs">
-              Requested by {voidInitiatorNameOf(voided)}, authorised by {voided.voidedByName}
-              {voided.voidedAt ? ` on ${voided.voidedAt.toDate().toLocaleString()}` : ''}
+              {voided.voidedAt
+                ? t('void.bannerByOn', {
+                    requester: voidInitiatorNameOf(voided),
+                    authoriser: voided.voidedByName,
+                    when: voided.voidedAt.toDate().toLocaleString(),
+                  })
+                : t('void.bannerBy', {
+                    requester: voidInitiatorNameOf(voided),
+                    authoriser: voided.voidedByName,
+                  })}
             </span>
           </AlertDescription>
         </Alert>
@@ -243,18 +249,20 @@ export function OrderDetailPage() {
       {error && (
         <Alert variant="destructive" className="w-full max-w-lg">
           <AlertCircle aria-hidden="true" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
       <Card className="w-full max-w-lg">
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-2 text-xl">
-            <span data-testid="receipt-number">Order #{order.number}</span>
+            <span data-testid="receipt-number">{t('order.title', { number: order.number })}</span>
             <OverallStatusBadge status={overall} />
           </CardTitle>
           <CardDescription>
-            {order.businessDate} · served by{' '}
+            {/* The operator is kept in its own element for the test id, so the sentence
+                stops just before the name rather than splicing it in. */}
+            {t('order.receiptSubtitle', { date: order.businessDate })}{' '}
             <span data-testid="receipt-operator">{operatorNameOf(order)}</span>
           </CardDescription>
         </CardHeader>
@@ -263,14 +271,16 @@ export function OrderDetailPage() {
               showing "Table —" would imply a table that was never involved. */}
           <dl className="grid gap-1 text-sm" data-testid="service-summary">
             <div className="flex gap-3">
-              <dt className="text-muted-foreground">Order type</dt>
+              <dt className="text-muted-foreground">{t('orderType.label')}</dt>
               <dd className="ml-auto" data-testid="receipt-order-type">
-                {order.orderType === null ? 'Not recorded' : ORDER_TYPE_LABELS[order.orderType]}
+                {order.orderType === null
+                  ? t('common.notRecorded')
+                  : t(ORDER_TYPE_LABEL_KEYS[order.orderType])}
               </dd>
             </div>
             {order.orderType === 'dine_in' && order.tableNumber !== null && (
               <div className="flex gap-3">
-                <dt className="text-muted-foreground">Table</dt>
+                <dt className="text-muted-foreground">{t('order.table')}</dt>
                 <dd className="ml-auto" data-testid="receipt-table">
                   {order.tableNumber}
                 </dd>
@@ -282,7 +292,7 @@ export function OrderDetailPage() {
               The overall line is derived from the two above it, never stored. */}
           <dl className="grid gap-1 rounded-lg border p-3 text-sm" data-testid="status-summary">
             <div className="flex items-center gap-3">
-              <dt className="text-muted-foreground">Fulfilment</dt>
+              <dt className="text-muted-foreground">{t('orders.column.fulfilment')}</dt>
               <dd className="ml-auto">
                 <FulfillmentStatusBadge status={fulfillment} />
               </dd>
@@ -291,7 +301,7 @@ export function OrderDetailPage() {
                 kept in the transitions journal beneath this order's fulfilment record. */}
             {fulfillmentRecord && (
               <div className="flex items-center gap-3">
-                <dt className="text-muted-foreground">Last moved by</dt>
+                <dt className="text-muted-foreground">{t('order.lastMovedBy')}</dt>
                 <dd className="ml-auto" data-testid="fulfillment-operator">
                   {fulfillmentOperatorNameOf(fulfillmentRecord)}
                 </dd>
@@ -300,7 +310,7 @@ export function OrderDetailPage() {
             {/* Creation to delivery: live while the customer is still waiting, then fixed
                 and kept for the rest of the order's life. Payment has no bearing on it. */}
             <div className="flex items-center gap-3">
-              <dt className="text-muted-foreground">Time taken</dt>
+              <dt className="text-muted-foreground">{t('order.timeTaken')}</dt>
               <dd className="ml-auto">
                 <OrderElapsedTime
                   order={order}
@@ -310,13 +320,13 @@ export function OrderDetailPage() {
               </dd>
             </div>
             <div className="flex items-center gap-3">
-              <dt className="text-muted-foreground">Payment</dt>
+              <dt className="text-muted-foreground">{t('orders.column.payment')}</dt>
               <dd className="ml-auto">
                 <PaymentStatusBadge state={paymentState} />
               </dd>
             </div>
             <div className="flex items-center gap-3 border-t pt-1">
-              <dt className="font-medium">Overall</dt>
+              <dt className="font-medium">{t('orders.column.overall')}</dt>
               <dd className="ml-auto">
                 <OverallStatusBadge status={overall} />
               </dd>
@@ -369,7 +379,7 @@ export function OrderDetailPage() {
           </ul>
 
           <div className="flex items-baseline gap-3 border-t pt-3">
-            <span className="text-base font-medium">Total</span>
+            <span className="text-base font-medium">{t('common.total')}</span>
             <span
               className="ml-auto text-2xl font-semibold tabular-nums"
               data-testid="receipt-total"
@@ -381,23 +391,23 @@ export function OrderDetailPage() {
           {paymentState.status === 'paid' ? (
             <dl className="grid gap-1 text-sm">
               <div className="flex gap-3">
-                <dt className="text-muted-foreground">Status</dt>
-                <dd className="ml-auto font-medium">Paid</dd>
+                <dt className="text-muted-foreground">{t('order.status')}</dt>
+                <dd className="ml-auto font-medium">{t('status.paid')}</dd>
               </div>
               <div className="flex gap-3">
-                <dt className="text-muted-foreground">Payment method</dt>
+                <dt className="text-muted-foreground">{t('payment.method')}</dt>
                 <dd className="ml-auto" data-testid="receipt-method">
-                  {PAYMENT_LABELS[paymentState.method]}
+                  {t(PAYMENT_LABEL_KEYS[paymentState.method])}
                 </dd>
               </div>
               <div className="flex gap-3">
-                <dt className="text-muted-foreground">Paid at</dt>
+                <dt className="text-muted-foreground">{t('payment.paidAt')}</dt>
                 <dd className="ml-auto" data-testid="receipt-paid-at">
                   {paidAt ? paidAt.toDate().toLocaleString() : '—'}
                 </dd>
               </div>
               <div className="flex gap-3">
-                <dt className="text-muted-foreground">Payment taken by</dt>
+                <dt className="text-muted-foreground">{t('payment.takenBy')}</dt>
                 {/* A legacy order was paid as it was rung up, so its own operator is who
                     took the money — there is no separate payment record to name. */}
                 <dd className="ml-auto" data-testid="receipt-paid-by">
@@ -409,13 +419,13 @@ export function OrderDetailPage() {
               {paymentState.method === 'cash' && paymentState.cashTendered !== null && (
                 <>
                   <div className="flex gap-3">
-                    <dt className="text-muted-foreground">Cash received</dt>
+                    <dt className="text-muted-foreground">{t('payment.cashReceived')}</dt>
                     <dd className="ml-auto tabular-nums" data-testid="receipt-tendered">
                       {formatMoney(paymentState.cashTendered)}
                     </dd>
                   </div>
                   <div className="flex gap-3">
-                    <dt className="text-muted-foreground">Change</dt>
+                    <dt className="text-muted-foreground">{t('payment.change')}</dt>
                     <dd className="ml-auto tabular-nums" data-testid="receipt-change">
                       {formatMoney(paymentState.changeGiven ?? 0)}
                     </dd>
@@ -425,9 +435,7 @@ export function OrderDetailPage() {
             </dl>
           ) : (
             <p className="text-sm text-muted-foreground" data-testid="receipt-unpaid">
-              {voided
-                ? 'This sale was voided before it was paid.'
-                : 'This order has not been paid yet.'}
+              {t(voided ? 'order.voidedBeforePaid' : 'order.notPaidYet')}
             </p>
           )}
         </CardContent>
@@ -435,13 +443,13 @@ export function OrderDetailPage() {
 
       <div className="flex flex-wrap gap-3">
         <Button asChild variant="outline" size="lg" className="h-touch text-base">
-          <Link to="/orders">Back to orders</Link>
+          <Link to="/orders">{t('order.backToOrders')}</Link>
         </Button>
 
         {/* Moving the order along the kitchen workflow. Both roles, one step at a time, and
             only when the rules would accept it — a delivered or voided order gets no button.
             The label says what is about to happen, not the state being left. */}
-        {advance.ok && FULFILLMENT_ACTIONS[fulfillment] && (
+        {advance.ok && FULFILLMENT_ACTION_KEYS[fulfillment] !== null && (
           <Button
             variant="outline"
             size="lg"
@@ -452,7 +460,7 @@ export function OrderDetailPage() {
             onClick={() => void handleAdvance(fulfillment, advance.next)}
           >
             <ChefHat aria-hidden="true" />
-            {advancing ? 'Saving…' : FULFILLMENT_ACTIONS[fulfillment]}
+            {advancing ? t('common.saving') : t(FULFILLMENT_ACTION_KEYS[fulfillment]!)}
           </Button>
         )}
 

@@ -7,7 +7,7 @@ import {
   isOrderFilter,
   matchesFilter,
   matchesSearch,
-  ORDER_FILTER_LABELS,
+  ORDER_FILTER_LABEL_KEYS,
   ORDER_FILTERS,
   type OrderSidecars,
 } from '@/features/pos/orders-view'
@@ -178,7 +178,7 @@ describe('order filters', () => {
       'takeaway',
     ])
     for (const filter of ORDER_FILTERS) {
-      expect(ORDER_FILTER_LABELS[filter]).toBeTruthy()
+      expect(ORDER_FILTER_LABEL_KEYS[filter]).toBeTruthy()
     }
   })
 

@@ -1,3 +1,4 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation } from 'react-router'
 import { AlertCircle } from 'lucide-react'
@@ -9,13 +10,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { landingPathFor } from '@/components/layout/nav-items'
 import { useAuth } from '@/features/auth/useAuth'
+import { message, type Message } from '@/features/i18n/messages'
 import { authErrorMessage } from '@/lib/auth-errors'
 
 /** Deliberately minimal — one form does not justify a form library. */
-function validate(email: string, password: string): string | null {
-  if (!email.trim()) return 'Please enter your email address.'
-  if (!email.includes('@')) return 'That does not look like an email address.'
-  if (!password) return 'Please enter your password.'
+function validate(email: string, password: string): Message | null {
+  if (!email.trim()) return message('validation.loginRequired')
+  if (!email.includes('@')) return message('validation.emailFormat')
+  if (!password) return message('auth.error.missingPassword')
   return null
 }
 
@@ -24,12 +26,13 @@ interface LocationState {
 }
 
 export function LoginPage() {
+  const { t } = useTranslation()
   const { status, role, signIn, rejectionMessage } = useAuth()
   const location = useLocation()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
   const [pending, setPending] = useState(false)
 
   // Where RequireAuth wanted to go before it detoured through here. Falling back to the
@@ -69,22 +72,20 @@ export function LoginPage() {
     <div className="flex min-h-svh items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-xl">Sign in</CardTitle>
-          <CardDescription>
-            Accounts are created by an administrator. There is no self-service sign-up.
-          </CardDescription>
+          <CardTitle className="text-xl">{t('login.title')}</CardTitle>
+          <CardDescription>{t('login.blurb')}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={(event) => void handleSubmit(event)} noValidate className="grid gap-4">
             {message && (
               <Alert variant="destructive">
                 <AlertCircle aria-hidden="true" />
-                <AlertDescription>{message}</AlertDescription>
+                <AlertDescription>{t(message)}</AlertDescription>
               </Alert>
             )}
 
             <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t('login.email')}</Label>
               <Input
                 id="email"
                 name="email"
@@ -100,7 +101,7 @@ export function LoginPage() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t('login.password')}</Label>
               <Input
                 id="password"
                 name="password"
@@ -115,7 +116,7 @@ export function LoginPage() {
             </div>
 
             <Button type="submit" size="lg" className="h-touch w-full text-base" disabled={pending}>
-              {pending ? 'Signing in…' : 'Sign in'}
+              {pending ? t('login.submitting') : t('login.submit')}
             </Button>
           </form>
         </CardContent>

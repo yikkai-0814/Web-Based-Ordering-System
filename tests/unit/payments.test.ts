@@ -1,3 +1,4 @@
+import { say } from '../say'
 import { describe, expect, it } from 'vitest'
 
 import { changeDue } from '@/features/pos/cart'
@@ -5,7 +6,7 @@ import {
   canRecordPayment,
   indexPaymentsByOrderId,
   isPaid,
-  PAYMENT_STATUS_LABELS,
+  PAYMENT_STATUS_LABEL_KEYS,
   resolvePaymentState,
   type PayableOrder,
   type RecordedPayment,
@@ -107,7 +108,7 @@ describe('canRecordPayment', () => {
     const result = canRecordPayment({ state, voided: false })
 
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toMatch(/already been paid/i)
+    if (!result.ok) expect(say(result.reason)).toMatch(/already been paid/i)
   })
 
   it('refuses payment on a legacy order, which is already paid', () => {
@@ -120,7 +121,7 @@ describe('canRecordPayment', () => {
     const result = canRecordPayment({ state, voided: true })
 
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toMatch(/voided/i)
+    if (!result.ok) expect(say(result.reason)).toMatch(/voided/i)
   })
 
   // Voiding an unpaid order is the ordinary case, but a paid one can be voided too and the
@@ -144,7 +145,7 @@ describe('cash arithmetic for a recorded payment', () => {
   it('rejects insufficient cash rather than returning negative change', () => {
     const result = changeDue(1550, 1500)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/less than the total/i)
+    if (!result.ok) expect(result.error.key).toBe('validation.tenderedTooLittle')
   })
 
   it('rejects a fractional sen amount', () => {
@@ -154,8 +155,8 @@ describe('cash arithmetic for a recorded payment', () => {
 
 describe('PAYMENT_STATUS_LABELS', () => {
   it('says PAID and UNPAID, in the words the counter has to read at a glance', () => {
-    expect(PAYMENT_STATUS_LABELS.paid).toBe('PAID')
-    expect(PAYMENT_STATUS_LABELS.unpaid).toBe('UNPAID')
+    expect(say(PAYMENT_STATUS_LABEL_KEYS.paid)).toBe('PAID')
+    expect(say(PAYMENT_STATUS_LABEL_KEYS.unpaid)).toBe('UNPAID')
   })
 })
 

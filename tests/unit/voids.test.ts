@@ -1,3 +1,4 @@
+import { say } from '../say'
 import { describe, expect, it } from 'vitest'
 
 import { voidInitiatorNameOf } from '@/features/pos/types'
@@ -20,7 +21,7 @@ describe('validateVoidReason', () => {
     for (const input of ['', '   ', '\t\n ']) {
       const result = validateVoidReason(input)
       expect(result.ok).toBe(false)
-      if (!result.ok) expect(result.error).toMatch(/enter a reason/i)
+      if (!result.ok) expect(result.error.key).toBe('validation.voidReasonRequired')
     }
   })
 
@@ -32,7 +33,7 @@ describe('validateVoidReason', () => {
   it('rejects a reason one character over the maximum', () => {
     const result = validateVoidReason('x'.repeat(VOID_REASON_MAX + 1))
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/at most 200 characters/i)
+    if (!result.ok) expect(say(result.error)).toMatch(/at most 200 characters/i)
   })
 
   it('measures length after trimming, not before', () => {
@@ -88,7 +89,7 @@ describe('validateManagerCredentials', () => {
   it('rejects a missing password', () => {
     const result = validateManagerCredentials('ada@example.com', '')
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/password/i)
+    if (!result.ok) expect(say(result.error)).toMatch(/password/i)
   })
 
   it('does not trim the password — leading and trailing spaces are part of it', () => {

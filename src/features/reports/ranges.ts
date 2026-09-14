@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/features/i18n/translations/en'
+import { message, type Message } from '@/features/i18n/messages'
 import { businessDateOf } from '@/features/pos/types'
 
 /**
@@ -15,12 +17,12 @@ export const RANGE_PRESETS = ['today', 'yesterday', 'thisWeek', 'thisMonth', 'cu
 
 export type RangePreset = (typeof RANGE_PRESETS)[number]
 
-export const RANGE_LABELS: Record<RangePreset, string> = {
-  today: 'Today',
-  yesterday: 'Yesterday',
-  thisWeek: 'This Week',
-  thisMonth: 'This Month',
-  custom: 'Custom Range',
+export const RANGE_LABEL_KEYS: Record<RangePreset, TranslationKey> = {
+  today: 'reports.range.today',
+  yesterday: 'reports.range.yesterday',
+  thisWeek: 'reports.range.thisWeek',
+  thisMonth: 'reports.range.thisMonth',
+  custom: 'reports.range.custom',
 }
 
 export interface DateRange {
@@ -80,7 +82,7 @@ export function rangeFor(preset: Exclude<RangePreset, 'custom'>, today: Date): D
   }
 }
 
-export type RangeValidation = { ok: true; range: DateRange } | { ok: false; error: string }
+export type RangeValidation = { ok: true; range: DateRange } | { ok: false; error: Message }
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
@@ -99,15 +101,15 @@ export function validateCustomRange(from: string, to: string): RangeValidation {
   const start = parseBusinessDate(from)
   const end = parseBusinessDate(to)
 
-  if (!start) return { ok: false, error: 'Enter a valid start date.' }
-  if (!end) return { ok: false, error: 'Enter a valid end date.' }
+  if (!start) return { ok: false, error: message('validation.startDate') }
+  if (!end) return { ok: false, error: message('validation.endDate') }
   if (start.getTime() > end.getTime()) {
-    return { ok: false, error: 'The start date must not be after the end date.' }
+    return { ok: false, error: message('validation.startAfterEnd') }
   }
 
   const spanDays = Math.round((end.getTime() - start.getTime()) / DAY_MS) + 1
   if (spanDays > MAX_RANGE_DAYS) {
-    return { ok: false, error: `Choose a range of at most ${MAX_RANGE_DAYS} days.` }
+    return { ok: false, error: message('validation.rangeTooLong', { max: MAX_RANGE_DAYS }) }
   }
 
   return { ok: true, range: { from, to } }

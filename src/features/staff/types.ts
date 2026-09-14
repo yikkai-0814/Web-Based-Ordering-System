@@ -1,3 +1,4 @@
+import { message, type Message } from '@/features/i18n/messages'
 import type { Timestamp } from 'firebase/firestore'
 
 /** Mirrored in firestore.rules; keep the two in step. */
@@ -44,13 +45,13 @@ export function byName(a: StaffMember, b: StaffMember): number {
   return a.name.localeCompare(b.name)
 }
 
-export type StaffNameResult = { ok: true; name: string } | { ok: false; error: string }
+export type StaffNameResult = { ok: true; name: string } | { ok: false; error: Message }
 
 export function validateStaffName(input: string): StaffNameResult {
   const trimmed = input.trim()
-  if (trimmed === '') return { ok: false, error: 'Enter a name for this staff member.' }
+  if (trimmed === '') return { ok: false, error: message('validation.staffNameRequired') }
   if (trimmed.length > STAFF_NAME_MAX) {
-    return { ok: false, error: `Names can be at most ${STAFF_NAME_MAX} characters.` }
+    return { ok: false, error: message('validation.staffNameTooLong', { max: STAFF_NAME_MAX }) }
   }
   return { ok: true, name: trimmed }
 }

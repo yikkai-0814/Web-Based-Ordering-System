@@ -1,3 +1,4 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { cn } from '@/lib/utils'
 
 /**
@@ -35,6 +36,7 @@ export function MeterBar({
   leading?: boolean
   className?: string
 }) {
+  const { t } = useTranslation()
   const width = percent === null ? 0 : Math.min(100, Math.max(0, percent))
 
   return (
@@ -71,7 +73,7 @@ export function MeterBar({
         aria-valuenow={percent === null ? undefined : Math.round(width)}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuetext={percent === null ? 'Not available' : `${Math.round(width)}%`}
+        aria-valuetext={percent === null ? t('common.notAvailable') : `${Math.round(width)}%`}
       >
         <div
           className={cn(

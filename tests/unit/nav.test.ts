@@ -1,10 +1,11 @@
+import { say } from '../say'
 import { describe, expect, it } from 'vitest'
 
 import { landingPathFor, navItemsForRole, NAV_ITEMS } from '@/components/layout/nav-items'
 import { ROLES } from '@/features/auth/types'
 
 const labelsFor = (role: Parameters<typeof navItemsForRole>[0]) =>
-  navItemsForRole(role).map((item) => item.label)
+  navItemsForRole(role).map((item) => say(item.labelKey))
 
 const pathsFor = (role: Parameters<typeof navItemsForRole>[0]) =>
   navItemsForRole(role).map((item) => item.to)
@@ -19,14 +20,36 @@ const pathsFor = (role: Parameters<typeof navItemsForRole>[0]) =>
  * catching and "contains" would not notice it.
  */
 describe('navItemsForRole', () => {
-  it('gives staff exactly the three things the counter does, in order', () => {
-    expect(labelsFor('staff')).toEqual(['New Order', 'Orders', 'Queue'])
-    expect(pathsFor('staff')).toEqual(['/pos', '/orders', '/queue'])
+  it('gives staff the three things the counter does, then Settings, in order', () => {
+    expect(labelsFor('staff')).toEqual(['New Order', 'Orders', 'Queue', 'Settings'])
+    expect(pathsFor('staff')).toEqual(['/pos', '/orders', '/queue', '/settings'])
   })
 
-  it('gives an admin exactly the five things the office does, in order', () => {
-    expect(labelsFor('admin')).toEqual(['Dashboard', 'Reports', 'Orders', 'Menu', 'Staff'])
-    expect(pathsFor('admin')).toEqual(['/dashboard', '/reports', '/orders', '/menu', '/staff'])
+  it('gives an admin the five things the office does, then Settings, in order', () => {
+    expect(labelsFor('admin')).toEqual([
+      'Dashboard',
+      'Reports',
+      'Orders',
+      'Menu',
+      'Staff',
+      'Settings',
+    ])
+    expect(pathsFor('admin')).toEqual([
+      '/dashboard',
+      '/reports',
+      '/orders',
+      '/menu',
+      '/staff',
+      '/settings',
+    ])
+  })
+
+  it('ends both roles on Settings', () => {
+    // It is about the person and the device rather than the work, so it sits below
+    // everything either role came here to do.
+    for (const role of ROLES) {
+      expect(pathsFor(role).at(-1)).toBe('/settings')
+    }
   })
 
   it('keeps the counter out of the admin nav', () => {
@@ -48,12 +71,13 @@ describe('navItemsForRole', () => {
     // Menu, Staff and Reports are each a link of their own; nothing is a page whose only
     // purpose is to list other pages.
     expect(NAV_ITEMS.map((item) => item.to)).not.toContain('/admin')
-    expect(NAV_ITEMS.map((item) => item.label)).not.toContain('Admin')
+    expect(NAV_ITEMS.map((item) => say(item.labelKey))).not.toContain('Admin')
   })
 
-  it('shares exactly one destination between the two roles', () => {
+  it('shares exactly two destinations between the two roles', () => {
+    // The sales record, which both roles read, and Settings, which belongs to neither job.
     const shared = pathsFor('admin').filter((path) => pathsFor('staff').includes(path))
-    expect(shared).toEqual(['/orders'])
+    expect(shared).toEqual(['/orders', '/settings'])
   })
 
   it('shows nobody anything when there is no role', () => {
@@ -62,7 +86,7 @@ describe('navItemsForRole', () => {
 
   it('calls the order-taking page New Order, not Till', () => {
     const newOrder = NAV_ITEMS.find((item) => item.to === '/pos')
-    expect(newOrder?.label).toBe('New Order')
+    expect(newOrder && say(newOrder.labelKey)).toBe('New Order')
     // The route is deliberately unchanged, so existing links and bookmarks still work.
     expect(NAV_ITEMS.map((item) => item.to)).toContain('/pos')
   })

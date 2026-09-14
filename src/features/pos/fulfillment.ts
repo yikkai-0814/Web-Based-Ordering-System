@@ -17,6 +17,8 @@
  * firestore.rules.
  */
 
+import type { TranslationKey } from '@/features/i18n/translations/en'
+import { message, type Message } from '@/features/i18n/messages'
 import type { PaymentState } from '@/features/pos/payments'
 import type { PaymentMethod } from '@/features/pos/types'
 
@@ -25,21 +27,21 @@ export const FULFILLMENT_STATUSES = ['pending', 'preparing', 'ready', 'delivered
 
 export type FulfillmentStatus = (typeof FULFILLMENT_STATUSES)[number]
 
-export const FULFILLMENT_LABELS: Record<FulfillmentStatus, string> = {
-  pending: 'Pending',
-  preparing: 'Preparing',
-  ready: 'Ready',
-  delivered: 'Delivered',
+export const FULFILLMENT_LABEL_KEYS: Record<FulfillmentStatus, TranslationKey> = {
+  pending: 'status.pending',
+  preparing: 'status.preparing',
+  ready: 'status.ready',
+  delivered: 'status.delivered',
 }
 
 /**
  * The wording on the button that advances each step — what the person is about to do, not
  * the state they are leaving.
  */
-export const FULFILLMENT_ACTIONS: Record<FulfillmentStatus, string | null> = {
-  pending: 'Start preparing',
-  preparing: 'Mark ready',
-  ready: 'Mark delivered',
+export const FULFILLMENT_ACTION_KEYS: Record<FulfillmentStatus, TranslationKey | null> = {
+  pending: 'queue.startPreparing',
+  preparing: 'queue.markReady',
+  ready: 'queue.markDelivered',
   delivered: null,
 }
 
@@ -138,13 +140,13 @@ export function resolveFulfillmentState(
 export type OverallStatus =
   'voided' | 'completed' | 'payment-outstanding' | 'pending' | 'preparing' | 'ready'
 
-export const OVERALL_LABELS: Record<OverallStatus, string> = {
-  voided: 'Voided',
-  completed: 'Completed',
-  'payment-outstanding': 'Payment outstanding',
-  pending: 'Pending',
-  preparing: 'Preparing',
-  ready: 'Ready',
+export const OVERALL_LABEL_KEYS: Record<OverallStatus, TranslationKey> = {
+  voided: 'status.voided',
+  completed: 'status.completed',
+  'payment-outstanding': 'status.paymentOutstanding',
+  pending: 'status.pending',
+  preparing: 'status.preparing',
+  ready: 'status.ready',
 }
 
 /**
@@ -175,7 +177,7 @@ export function isCompleted(overall: OverallStatus): boolean {
 }
 
 export type FulfillmentEligibility =
-  { ok: true; next: FulfillmentStatus } | { ok: false; reason: string }
+  { ok: true; next: FulfillmentStatus } | { ok: false; reason: Message }
 
 /**
  * Whether fulfilment may be advanced, and to what.
@@ -193,10 +195,10 @@ export function canAdvanceFulfillment({
   voided: boolean
 }): FulfillmentEligibility {
   if (voided) {
-    return { ok: false, reason: 'This sale was voided, so it cannot be worked on further.' }
+    return { ok: false, reason: message('validation.voidedNoWork') }
   }
   const next = nextFulfillment(current)
-  if (!next) return { ok: false, reason: 'This order has already been delivered.' }
+  if (!next) return { ok: false, reason: message('validation.alreadyDelivered') }
   return { ok: true, next }
 }
 
@@ -377,7 +379,7 @@ export function formatDuration(ms: number): string {
  * A duration on an order card is ambiguous on its own — it could as easily be a countdown or
  * a preparation time — so this is the readout's accessible name rather than a decoration.
  */
-export const ELAPSED_LABEL = 'Time since ordered'
+export const ELAPSED_LABEL_KEY: TranslationKey = 'queue.elapsedRunning'
 
 /** The same, once it has stopped. */
-export const ELAPSED_FINAL_LABEL = 'Total time to delivery'
+export const ELAPSED_FINAL_LABEL_KEY: TranslationKey = 'queue.elapsedFinal'

@@ -1,10 +1,11 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import {
-  FULFILLMENT_LABELS,
-  OVERALL_LABELS,
+  FULFILLMENT_LABEL_KEYS,
+  OVERALL_LABEL_KEYS,
   type FulfillmentStatus,
   type OverallStatus,
 } from '@/features/pos/fulfillment'
-import { PAYMENT_STATUS_LABELS, type PaymentState } from '@/features/pos/payments'
+import { PAYMENT_STATUS_LABEL_KEYS, type PaymentState } from '@/features/pos/payments'
 import { StatusBadge, type StatusTone } from '@/features/pos/StatusBadge'
 
 /**
@@ -20,9 +21,10 @@ export function PaymentStatusBadge({
   state: PaymentState
   className?: string
 }) {
+  const { t } = useTranslation()
   return (
     <StatusBadge
-      label={PAYMENT_STATUS_LABELS[state.status]}
+      label={t(PAYMENT_STATUS_LABEL_KEYS[state.status])}
       tone={state.status === 'paid' ? 'good' : 'warn'}
       testId="payment-status"
       value={state.status}
@@ -47,9 +49,10 @@ export function FulfillmentStatusBadge({
   status: FulfillmentStatus
   className?: string
 }) {
+  const { t } = useTranslation()
   return (
     <StatusBadge
-      label={FULFILLMENT_LABELS[status]}
+      label={t(FULFILLMENT_LABEL_KEYS[status])}
       tone={FULFILLMENT_TONES[status]}
       testId="fulfillment-status"
       value={status}
@@ -77,9 +80,10 @@ export function OverallStatusBadge({
   status: OverallStatus
   className?: string
 }) {
+  const { t } = useTranslation()
   return (
     <StatusBadge
-      label={OVERALL_LABELS[status]}
+      label={t(OVERALL_LABEL_KEYS[status])}
       tone={OVERALL_TONES[status]}
       testId="overall-status"
       value={status}

@@ -12,6 +12,8 @@
  * write is an update, and updates are denied. See firestore.rules.
  */
 
+import type { TranslationKey } from '@/features/i18n/translations/en'
+import { message, type Message } from '@/features/i18n/messages'
 import type { PaymentMethod } from '@/features/pos/types'
 
 /**
@@ -104,7 +106,7 @@ export function isPaid(state: PaymentState): boolean {
   return state.status === 'paid'
 }
 
-export type PaymentEligibility = { ok: true } | { ok: false; reason: string }
+export type PaymentEligibility = { ok: true } | { ok: false; reason: Message }
 
 /**
  * Whether payment may be recorded against this order.
@@ -122,10 +124,10 @@ export function canRecordPayment({
   voided: boolean
 }): PaymentEligibility {
   if (voided) {
-    return { ok: false, reason: 'This sale was voided, so payment cannot be recorded against it.' }
+    return { ok: false, reason: message('validation.voidedNoPayment') }
   }
   if (state.status === 'paid') {
-    return { ok: false, reason: 'This order has already been paid.' }
+    return { ok: false, reason: message('validation.alreadyPaid') }
   }
   return { ok: true }
 }
@@ -134,9 +136,9 @@ export function canRecordPayment({
  * Deliberately shouty, and deliberately not sentence case: an unpaid order is money not yet
  * in the drawer, and the person at the counter has to see it at a glance across a busy till.
  */
-export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
-  paid: 'PAID',
-  unpaid: 'UNPAID',
+export const PAYMENT_STATUS_LABEL_KEYS: Record<PaymentStatus, TranslationKey> = {
+  paid: 'status.paidUpper',
+  unpaid: 'status.unpaidUpper',
 }
 
 /**

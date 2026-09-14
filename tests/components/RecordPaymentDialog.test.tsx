@@ -7,6 +7,7 @@
  * arithmetic returned, that an under-payment is stopped at the till rather than at the
  * server, and that e-wallet sends no cash figure at all — the shape the rules insist on.
  */
+import { message, MessageError } from '@/features/i18n/messages'
 import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -108,14 +109,14 @@ describe('RecordPaymentDialog: e-wallet', () => {
 describe('RecordPaymentDialog: when the write fails', () => {
   it('stays open and shows why, rather than looking as though it worked', async () => {
     const onConfirm = vi.fn<(method: string, cash: number | null) => Promise<void>>(async () => {
-      throw new Error('That sale has already been paid.')
+      throw new MessageError(message('validation.alreadyPaid'))
     })
     const { user } = setup(onConfirm)
     await open(user)
     await user.click(screen.getByTestId('payment-ewallet'))
     await user.click(screen.getByTestId('confirm-payment'))
 
-    expect(await screen.findByText('That sale has already been paid.')).not.toBeNull()
+    expect(await screen.findByText('This order has already been paid.')).not.toBeNull()
     expect(screen.getByTestId('confirm-payment')).not.toBeNull()
   })
 

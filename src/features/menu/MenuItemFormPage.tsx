@@ -1,3 +1,5 @@
+import { message, type Message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { AlertCircle } from 'lucide-react'
@@ -34,6 +36,7 @@ const SELECT_CLASS =
  * makes that impossible by construction rather than by a guard that can be got wrong.
  */
 export function MenuItemFormPage() {
+  const { t } = useTranslation()
   const { itemId } = useParams<{ itemId: string }>()
   const isEditing = Boolean(itemId)
 
@@ -51,10 +54,10 @@ export function MenuItemFormPage() {
   if (isEditing && !existing) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Item not found</h1>
-        <p className="text-muted-foreground">It may have been deleted by someone else.</p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t('menu.itemNotFound')}</h1>
+        <p className="text-muted-foreground">{t('menu.itemNotFoundBlurb')}</p>
         <Button asChild size="lg" className="h-touch text-base">
-          <Link to="/menu">Back to the menu</Link>
+          <Link to="/menu">{t('menu.backToMenu')}</Link>
         </Button>
       </div>
     )
@@ -63,13 +66,10 @@ export function MenuItemFormPage() {
   if (categories.length === 0) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Create a category first</h1>
-        <p className="text-muted-foreground">
-          Every item belongs to a category, so there needs to be at least one before you can add
-          items.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t('menu.createCategoryFirst')}</h1>
+        <p className="text-muted-foreground">{t('menu.createCategoryFirstBlurb')}</p>
         <Button asChild size="lg" className="h-touch text-base">
-          <Link to="/menu/categories">Go to categories</Link>
+          <Link to="/menu/categories">{t('menu.goToCategories')}</Link>
         </Button>
       </div>
     )
@@ -97,6 +97,7 @@ function MenuItemForm({
   categories: Category[]
   itemId: string | undefined
 }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const isEditing = Boolean(itemId)
 
@@ -112,26 +113,26 @@ function MenuItemForm({
   const [sortOrder, setSortOrder] = useState(String(existing?.sortOrder ?? 0))
   const [active, setActive] = useState(existing?.active ?? true)
 
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
   const [pending, setPending] = useState(false)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
     if (name.trim() === '') {
-      setError('Enter a name for this item.')
+      setError(message('validation.itemNameRequired'))
       return
     }
     if (name.trim().length > ITEM_NAME_MAX) {
-      setError(`Names can be at most ${ITEM_NAME_MAX} characters.`)
+      setError(message('validation.itemNameTooLong', { max: ITEM_NAME_MAX }))
       return
     }
     if (description.length > ITEM_DESCRIPTION_MAX) {
-      setError(`Descriptions can be at most ${ITEM_DESCRIPTION_MAX} characters.`)
+      setError(message('validation.descriptionTooLong', { max: ITEM_DESCRIPTION_MAX }))
       return
     }
     if (categoryId === '') {
-      setError('Choose a category.')
+      setError(message('validation.categoryRequired'))
       return
     }
 
@@ -148,7 +149,7 @@ function MenuItemForm({
     if (costText.trim() !== '') {
       const result = parsePriceInput(costText)
       if (!result.ok) {
-        setError(`Cost: ${result.error}`)
+        setError(message('validation.costPrefix', { reason: t(result.error) }))
         return
       }
       parsedCost = result.sen
@@ -156,7 +157,7 @@ function MenuItemForm({
 
     const parsedSort = Number(sortOrder)
     if (!Number.isInteger(parsedSort)) {
-      setError('Sort order must be a whole number.')
+      setError(message('modifierAdmin.badSortOrder'))
       return
     }
 
@@ -178,7 +179,7 @@ function MenuItemForm({
       }
       void navigate('/menu')
     } catch {
-      setError('That change was refused. Your account may not have permission to edit the menu.')
+      setError(message('menu.writeRefused'))
       setPending(false)
     }
   }
@@ -187,22 +188,22 @@ function MenuItemForm({
     <div className="space-y-6">
       <Card className="w-full max-w-xl">
         <CardHeader>
-          <CardTitle className="text-xl">{isEditing ? 'Edit item' : 'New item'}</CardTitle>
-          <CardDescription>
-            Prices are entered in {CURRENCY_PREFIX} and stored to the sen.
-          </CardDescription>
+          <CardTitle className="text-xl">
+            {t(isEditing ? 'menu.editItem' : 'menu.newItem')}
+          </CardTitle>
+          <CardDescription>{t('menu.priceHint', { currency: CURRENCY_PREFIX })}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={(event) => void handleSubmit(event)} noValidate className="grid gap-4">
             {error && (
               <Alert variant="destructive">
                 <AlertCircle aria-hidden="true" />
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription>{t(error)}</AlertDescription>
               </Alert>
             )}
 
             <div className="grid gap-2">
-              <Label htmlFor="name">Name</Label>
+              <Label htmlFor="name">{t('common.name')}</Label>
               <Input
                 id="name"
                 className="h-touch text-base"
@@ -215,7 +216,7 @@ function MenuItemForm({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="description">Description (optional)</Label>
+              <Label htmlFor="description">{t('menu.descriptionOptional')}</Label>
               <Input
                 id="description"
                 className="h-touch text-base"
@@ -227,7 +228,7 @@ function MenuItemForm({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="categoryId">Category</Label>
+              <Label htmlFor="categoryId">{t('menu.category')}</Label>
               {/* A native select: on a touch screen the OS picker beats a custom listbox. */}
               <select
                 id="categoryId"
@@ -239,18 +240,20 @@ function MenuItemForm({
                 {categories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
-                    {category.active ? '' : ' (hidden)'}
+                    {category.active ? '' : t('menu.hiddenSuffix')}
                   </option>
                 ))}
               </select>
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="price">Price ({CURRENCY_PREFIX})</Label>
+              <Label htmlFor="price">
+                {t('menu.priceCurrency', { currency: CURRENCY_PREFIX })}
+              </Label>
               <Input
                 id="price"
                 inputMode="decimal"
-                placeholder="12.50"
+                placeholder={t('menu.pricePlaceholder')}
                 className="h-touch text-base"
                 value={priceText}
                 onChange={(event) => setPriceText(event.target.value)}
@@ -259,25 +262,21 @@ function MenuItemForm({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="cost">Cost ({CURRENCY_PREFIX})</Label>
+              <Label htmlFor="cost">{t('menu.costCurrency', { currency: CURRENCY_PREFIX })}</Label>
               <Input
                 id="cost"
                 inputMode="decimal"
-                placeholder="Leave blank if not recorded"
+                placeholder={t('menu.costPlaceholder')}
                 className="h-touch text-base"
                 value={costText}
                 onChange={(event) => setCostText(event.target.value)}
                 disabled={pending}
               />
-              <p className="text-xs text-muted-foreground">
-                What the café pays for this item. Visible to administrators only — staff accounts
-                cannot read it. Leave blank if you have not recorded it; that is not the same as
-                zero.
-              </p>
+              <p className="text-xs text-muted-foreground">{t('menu.costBlurb')}</p>
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="sortOrder">Sort order</Label>
+              <Label htmlFor="sortOrder">{t('common.sortOrder')}</Label>
               <Input
                 id="sortOrder"
                 inputMode="numeric"
@@ -286,9 +285,7 @@ function MenuItemForm({
                 onChange={(event) => setSortOrder(event.target.value)}
                 disabled={pending}
               />
-              <p className="text-xs text-muted-foreground">
-                Lower numbers appear first. Items with the same number are sorted by name.
-              </p>
+              <p className="text-xs text-muted-foreground">{t('menu.sortOrderHint')}</p>
             </div>
 
             <label className="flex items-center gap-3 text-sm">
@@ -300,12 +297,14 @@ function MenuItemForm({
                 onChange={(event) => setActive(event.target.checked)}
                 disabled={pending}
               />
-              Available for sale
+              {t('menu.availableForSale')}
             </label>
 
             <div className="flex gap-3">
               <Button type="submit" size="lg" className="h-touch text-base" disabled={pending}>
-                {pending ? 'Saving…' : isEditing ? 'Save changes' : 'Create item'}
+                {pending
+                  ? t('common.saving')
+                  : t(isEditing ? 'menu.saveChanges' : 'menu.createItem')}
               </Button>
               <Button
                 asChild
@@ -314,7 +313,7 @@ function MenuItemForm({
                 size="lg"
                 className="h-touch text-base"
               >
-                <Link to="/menu">Cancel</Link>
+                <Link to="/menu">{t('common.cancel')}</Link>
               </Button>
             </div>
           </form>
@@ -328,9 +327,7 @@ function MenuItemForm({
       {isEditing && itemId ? (
         <ModifierGroupsEditor itemId={itemId} />
       ) : (
-        <p className="max-w-xl text-sm text-muted-foreground">
-          Save the item first to add customisation options to it.
-        </p>
+        <p className="max-w-xl text-sm text-muted-foreground">{t('modifierAdmin.saveItemFirst')}</p>
       )}
     </div>
   )

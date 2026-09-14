@@ -12,6 +12,8 @@
  * should divide or multiply a price by 100.
  */
 
+import { message, type Message } from '@/features/i18n/messages'
+
 /** Change these two lines to move the system to another currency. */
 export const CURRENCY_CODE = 'MYR'
 export const CURRENCY_PREFIX = 'RM'
@@ -19,7 +21,7 @@ export const CURRENCY_PREFIX = 'RM'
 /** Minor units per major unit — 100 sen to the ringgit. */
 const MINOR_UNITS = 100
 
-export type ParsedPrice = { ok: true; sen: number } | { ok: false; error: string }
+export type ParsedPrice = { ok: true; sen: number } | { ok: false; error: Message }
 
 /**
  * Formats an integer sen amount for display, e.g. `1250` -> `"RM 12.50"`.
@@ -58,11 +60,11 @@ export function parsePriceInput(input: string): ParsedPrice {
   const trimmed = input.trim()
 
   if (trimmed === '') {
-    return { ok: false, error: 'Enter a price.' }
+    return { ok: false, error: message('validation.priceRequired') }
   }
 
   if (trimmed.includes('-')) {
-    return { ok: false, error: 'A price cannot be negative.' }
+    return { ok: false, error: message('validation.priceNegative') }
   }
 
   // Strip the currency prefix, grouping commas and any whitespace (including the
@@ -70,24 +72,24 @@ export function parsePriceInput(input: string): ParsedPrice {
   const cleaned = trimmed.replace(/[\s ,]/g, '').replace(new RegExp(`^${CURRENCY_PREFIX}`, 'i'), '')
 
   if (cleaned === '') {
-    return { ok: false, error: 'Enter a price.' }
+    return { ok: false, error: message('validation.priceRequired') }
   }
 
   if (!/^\d+(\.\d+)?$/.test(cleaned)) {
-    return { ok: false, error: 'Enter a number, for example 12.50.' }
+    return { ok: false, error: message('validation.priceNotANumber') }
   }
 
   const [major = '', minor = ''] = cleaned.split('.')
 
   if (minor.length > 2) {
-    return { ok: false, error: 'Use at most 2 decimal places.' }
+    return { ok: false, error: message('validation.priceDecimals') }
   }
 
   // String maths, not `parseFloat(x) * 100` — the multiply is exactly what loses cents.
   const sen = Number(major) * MINOR_UNITS + Number(minor.padEnd(2, '0') || '0')
 
   if (!Number.isSafeInteger(sen)) {
-    return { ok: false, error: 'That price is too large.' }
+    return { ok: false, error: message('validation.priceTooLarge') }
   }
 
   return { ok: true, sen }

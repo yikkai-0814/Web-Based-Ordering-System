@@ -1,3 +1,4 @@
+import type { Message } from '@/features/i18n/messages'
 import { useEffect, useState } from 'react'
 import { onSnapshot, type DocumentReference, type Query } from 'firebase/firestore'
 
@@ -24,7 +25,7 @@ import { onSnapshot, type DocumentReference, type Query } from 'firebase/firesto
 export interface LiveQueryState<T> {
   data: T[]
   loading: boolean
-  error: string | null
+  error: Message | null
 }
 
 export type ParseDoc<T> = (id: string, data: Record<string, unknown>) => T | null
@@ -52,7 +53,7 @@ const IDLE: LiveQueryState<never> = Object.freeze({
 export function useQueryDocs<T>(
   liveQuery: Query | null,
   parse: ParseDoc<T>,
-  errorMessage: string,
+  errorMessage: Message,
 ): LiveQueryState<T> {
   const [received, setReceived] = useState<{
     source: Query
@@ -88,7 +89,7 @@ export function useQueryDocs<T>(
 export interface LiveDocState<T> {
   data: T | null
   loading: boolean
-  error: string | null
+  error: Message | null
 }
 
 const DOC_LOADING: LiveDocState<never> = Object.freeze({
@@ -114,7 +115,7 @@ const DOC_IDLE: LiveDocState<never> = Object.freeze({
 export function useLiveDoc<T>(
   reference: DocumentReference | null,
   parse: ParseDoc<T>,
-  errorMessage: string,
+  errorMessage: Message,
 ): LiveDocState<T> {
   const [received, setReceived] = useState<{
     source: DocumentReference

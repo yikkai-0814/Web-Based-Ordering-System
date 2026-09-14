@@ -1,3 +1,4 @@
+import { say } from '../say'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -5,14 +6,14 @@ import {
   FINAL_FULFILLMENT,
   elapsedMsOf,
   elapsedWindowOf,
-  ELAPSED_FINAL_LABEL,
-  ELAPSED_LABEL,
+  ELAPSED_FINAL_LABEL_KEY,
+  ELAPSED_LABEL_KEY,
   formatDuration,
   isElapsedFinished,
   nextDeliveredAt,
   nextReadyAt,
-  FULFILLMENT_ACTIONS,
-  FULFILLMENT_LABELS,
+  FULFILLMENT_ACTION_KEYS,
+  FULFILLMENT_LABEL_KEYS,
   FULFILLMENT_STATUSES,
   indexFulfillmentsByOrderId,
   INITIAL_FULFILLMENT,
@@ -96,12 +97,12 @@ describe('the fulfilment progression', () => {
 
   it('labels every status and offers an action for all but the last', () => {
     for (const status of FULFILLMENT_STATUSES) {
-      expect(FULFILLMENT_LABELS[status]).toBeTruthy()
+      expect(say(FULFILLMENT_LABEL_KEYS[status])).toBeTruthy()
     }
-    expect(FULFILLMENT_ACTIONS.pending).toBe('Start preparing')
-    expect(FULFILLMENT_ACTIONS.ready).toBe('Mark delivered')
+    expect(say(FULFILLMENT_ACTION_KEYS.pending!)).toBe('Start preparing')
+    expect(say(FULFILLMENT_ACTION_KEYS.ready!)).toBe('Mark delivered')
     // Nothing follows delivered, so there is no button to offer.
-    expect(FULFILLMENT_ACTIONS.delivered).toBeNull()
+    expect(FULFILLMENT_ACTION_KEYS.delivered).toBeNull()
   })
 
   it('recognises only the four real statuses', () => {
@@ -227,7 +228,7 @@ describe('canAdvanceFulfillment', () => {
   it('offers nothing once delivered', () => {
     const result = canAdvanceFulfillment({ current: 'delivered', voided: false })
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toMatch(/already been delivered/i)
+    if (!result.ok) expect(say(result.reason)).toMatch(/already been delivered/i)
   })
 
   // Test 9, at the UI layer. The rules enforce it independently.
@@ -235,7 +236,7 @@ describe('canAdvanceFulfillment', () => {
     for (const current of FULFILLMENT_STATUSES) {
       const result = canAdvanceFulfillment({ current, voided: true })
       expect(result.ok).toBe(false)
-      if (!result.ok) expect(result.reason).toMatch(/voided/i)
+      if (!result.ok) expect(say(result.reason)).toMatch(/voided/i)
     }
   })
 })
@@ -591,7 +592,7 @@ describe('formatDuration reads like a counter', () => {
   })
 
   it('says what the number is, running and stopped', () => {
-    expect(ELAPSED_LABEL).toBe('Time since ordered')
-    expect(ELAPSED_FINAL_LABEL).toBe('Total time to delivery')
+    expect(say(ELAPSED_LABEL_KEY)).toBe('Time since ordered')
+    expect(say(ELAPSED_FINAL_LABEL_KEY)).toBe('Total time to delivery')
   })
 })

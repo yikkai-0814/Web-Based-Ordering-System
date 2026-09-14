@@ -16,6 +16,7 @@
  * new one, and that distinction can never be collapsed.
  */
 
+import { message, type Message } from '@/features/i18n/messages'
 import {
   lineKeyOf,
   modifiersTotal,
@@ -148,7 +149,7 @@ export function cartItemCount(cart: Cart): number {
   return cart.reduce((count, line) => count + line.quantity, 0)
 }
 
-export type ChangeResult = { ok: true; change: number } | { ok: false; error: string }
+export type ChangeResult = { ok: true; change: number } | { ok: false; error: Message }
 
 /**
  * Change owed for a cash sale.
@@ -159,38 +160,38 @@ export type ChangeResult = { ok: true; change: number } | { ok: false; error: st
  */
 export function changeDue(total: number, tendered: number): ChangeResult {
   if (!Number.isInteger(total) || !Number.isInteger(tendered)) {
-    return { ok: false, error: 'Amounts must be whole sen.' }
+    return { ok: false, error: message('validation.wholeSen') }
   }
   if (tendered < total) {
-    return { ok: false, error: 'The amount tendered is less than the total.' }
+    return { ok: false, error: message('validation.tenderedTooLittle') }
   }
   return { ok: true, change: tendered - total }
 }
 
-export type CartValidation = { ok: true } | { ok: false; error: string }
+export type CartValidation = { ok: true } | { ok: false; error: Message }
 
 /** Guards the submit button: an empty or malformed cart must never reach Firestore. */
 export function validateCart(cart: Cart): CartValidation {
   if (cart.length === 0) {
-    return { ok: false, error: 'Add at least one item before taking payment.' }
+    return { ok: false, error: message('validation.cartEmpty') }
   }
   if (cart.length > MAX_CART_LINES) {
-    return { ok: false, error: `An order cannot have more than ${MAX_CART_LINES} lines.` }
+    return { ok: false, error: message('validation.cartTooManyLines', { max: MAX_CART_LINES }) }
   }
   for (const line of cart) {
     if (!Number.isInteger(line.unitPrice) || line.unitPrice < 0) {
-      return { ok: false, error: `"${line.name}" has an invalid price.` }
+      return { ok: false, error: message('validation.linePrice', { name: line.name }) }
     }
     if (!Number.isInteger(line.basePrice) || line.basePrice < 0) {
-      return { ok: false, error: `"${line.name}" has an invalid price.` }
+      return { ok: false, error: message('validation.linePrice', { name: line.name }) }
     }
     if (!Number.isInteger(line.quantity) || line.quantity < 1) {
-      return { ok: false, error: `"${line.name}" has an invalid quantity.` }
+      return { ok: false, error: message('validation.lineQuantity', { name: line.name }) }
     }
     // The charged price must be exactly what the recorded options add up to. A line that
     // disagreed with its own snapshot would produce a receipt the customer could not check.
     if (line.unitPrice !== Math.max(0, line.basePrice + modifiersTotal(line.modifiers))) {
-      return { ok: false, error: `"${line.name}" has an inconsistent price.` }
+      return { ok: false, error: message('validation.linePriceInconsistent', { name: line.name }) }
     }
   }
   return { ok: true }

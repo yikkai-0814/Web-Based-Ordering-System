@@ -1,3 +1,5 @@
+import { message } from '@/features/i18n/messages'
+import type { Message } from '@/features/i18n/messages'
 import { useMemo } from 'react'
 import { doc } from 'firebase/firestore'
 
@@ -26,10 +28,10 @@ export interface OrderDetail {
   /** Null when no order has that id, which the page renders as "not found". */
   view: OrderView | null
   loading: boolean
-  error: string | null
+  error: Message | null
 }
 
-const ORDER_ERROR = 'Could not load this order. You may not have permission, or you are offline.'
+const ORDER_ERROR = message('load.order')
 
 export function useOrderDetail(orderId: string | undefined): OrderDetail {
   const orderRef = useMemo(() => (orderId ? doc(db, 'orders', orderId) : null), [orderId])
@@ -41,13 +43,9 @@ export function useOrderDetail(orderId: string | undefined): OrderDetail {
   )
 
   const order = useLiveDoc(orderRef, parseOrder, ORDER_ERROR)
-  const payment = useLiveDoc(paymentRef, parseOrderPayment, 'Could not load the payment.')
-  const voided = useLiveDoc(voidRef, parseOrderVoid, 'Could not load the void record.')
-  const fulfillment = useLiveDoc(
-    fulfillmentRef,
-    parseOrderFulfillment,
-    'Could not load fulfilment.',
-  )
+  const payment = useLiveDoc(paymentRef, parseOrderPayment, message('load.payment'))
+  const voided = useLiveDoc(voidRef, parseOrderVoid, message('load.void'))
+  const fulfillment = useLiveDoc(fulfillmentRef, parseOrderFulfillment, message('load.fulfilment'))
 
   const loading = order.loading || payment.loading || voided.loading || fulfillment.loading
 

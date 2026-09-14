@@ -12,10 +12,11 @@
  * exist, not a workflow of its own.
  */
 
+import type { TranslationKey } from '@/features/i18n/translations/en'
 import {
   canAdvanceFulfillment,
-  FULFILLMENT_ACTIONS,
-  FULFILLMENT_LABELS,
+  FULFILLMENT_ACTION_KEYS,
+  FULFILLMENT_LABEL_KEYS,
   type FulfillmentStatus,
 } from '@/features/pos/fulfillment'
 import type { OrderView } from '@/features/pos/orders-view'
@@ -35,10 +36,10 @@ export const QUEUE_COLUMNS = [
 
 export type QueueColumn = (typeof QUEUE_COLUMNS)[number]
 
-export const QUEUE_COLUMN_LABELS: Record<QueueColumn, string> = {
-  pending: FULFILLMENT_LABELS.pending,
-  preparing: FULFILLMENT_LABELS.preparing,
-  ready: FULFILLMENT_LABELS.ready,
+export const QUEUE_COLUMN_LABEL_KEYS: Record<QueueColumn, TranslationKey> = {
+  pending: FULFILLMENT_LABEL_KEYS.pending,
+  preparing: FULFILLMENT_LABEL_KEYS.preparing,
+  ready: FULFILLMENT_LABEL_KEYS.ready,
 }
 
 export function isQueueColumn(value: unknown): value is QueueColumn {
@@ -84,8 +85,8 @@ export function groupQueue(views: readonly OrderView[]): QueueGroup[] {
 export interface QueueAction {
   /** Where the card moves to. Always exactly one step forward. */
   next: FulfillmentStatus
-  /** What the person is about to do — the wording on the button. */
-  label: string
+  /** What the person is about to do. A key, so the button follows the chosen language. */
+  labelKey: TranslationKey
 }
 
 /**
@@ -103,8 +104,8 @@ export function queueActionFor(view: OrderView): QueueAction | null {
   })
   if (!advance.ok) return null
 
-  const label = FULFILLMENT_ACTIONS[view.fulfillment]
-  return label === null ? null : { next: advance.next, label }
+  const labelKey = FULFILLMENT_ACTION_KEYS[view.fulfillment]
+  return labelKey === null ? null : { next: advance.next, labelKey }
 }
 
 /** Total items on a card — what the kitchen counts, not what the till charged. */

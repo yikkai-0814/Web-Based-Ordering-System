@@ -1,3 +1,4 @@
+import type { Message } from '@/features/i18n/messages'
 import { useMemo } from 'react'
 
 import { chunkOrderIds } from '@/features/pos/order-sidecars'
@@ -22,7 +23,7 @@ export interface OrdersWorkspace {
   /** Newest first, every order of the selected date, with both axes resolved. */
   views: OrderView[]
   loading: boolean
-  error: string | null
+  error: Message | null
 }
 
 export function useOrdersWorkspace(businessDate: string): OrdersWorkspace {

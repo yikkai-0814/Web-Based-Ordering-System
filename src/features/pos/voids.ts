@@ -3,13 +3,15 @@
  * the rules a void must satisfy can be tested exhaustively without an emulator.
  */
 
+import { message, type Message } from '@/features/i18n/messages'
+
 /** Mirrored in firestore.rules; keep the two in step. */
 export const VOID_REASON_MAX = 200
 
-export type VoidReasonResult = { ok: true; reason: string } | { ok: false; error: string }
+export type VoidReasonResult = { ok: true; reason: string } | { ok: false; error: Message }
 
 export type ManagerCredentialsResult =
-  { ok: true; email: string; password: string } | { ok: false; error: string }
+  { ok: true; email: string; password: string } | { ok: false; error: Message }
 
 /**
  * Checks that a manager actually filled the authorisation form in.
@@ -27,10 +29,10 @@ export function validateManagerCredentials(
   const trimmed = email.trim()
 
   if (trimmed === '') {
-    return { ok: false, error: "Enter the manager's email address." }
+    return { ok: false, error: message('validation.managerEmailRequired') }
   }
   if (password === '') {
-    return { ok: false, error: "Enter the manager's password." }
+    return { ok: false, error: message('validation.managerPasswordRequired') }
   }
 
   return { ok: true, email: trimmed, password }
@@ -48,10 +50,10 @@ export function validateVoidReason(input: string): VoidReasonResult {
   const trimmed = input.trim()
 
   if (trimmed === '') {
-    return { ok: false, error: 'Enter a reason for voiding this sale.' }
+    return { ok: false, error: message('validation.voidReasonRequired') }
   }
   if (trimmed.length > VOID_REASON_MAX) {
-    return { ok: false, error: `Reasons can be at most ${VOID_REASON_MAX} characters.` }
+    return { ok: false, error: message('validation.voidReasonTooLong', { max: VOID_REASON_MAX }) }
   }
 
   return { ok: true, reason: trimmed }

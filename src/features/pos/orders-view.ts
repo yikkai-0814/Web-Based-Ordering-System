@@ -13,6 +13,7 @@
  * contradict the two it is derived from.
  */
 
+import type { TranslationKey } from '@/features/i18n/translations/en'
 import {
   isCompleted,
   overallStatusOf,
@@ -88,17 +89,17 @@ export const ORDER_FILTERS = [
 
 export type OrderFilter = (typeof ORDER_FILTERS)[number]
 
-export const ORDER_FILTER_LABELS: Record<OrderFilter, string> = {
-  all: 'All',
-  unpaid: 'Unpaid',
-  paid: 'Paid',
-  pending: 'Pending',
-  preparing: 'Preparing',
-  ready: 'Ready',
-  delivered: 'Delivered',
-  completed: 'Completed',
-  dine_in: 'Dine-in',
-  takeaway: 'Takeaway',
+export const ORDER_FILTER_LABEL_KEYS: Record<OrderFilter, TranslationKey> = {
+  all: 'orders.filter.all',
+  unpaid: 'orders.filter.unpaid',
+  paid: 'orders.filter.paid',
+  pending: 'orders.filter.pending',
+  preparing: 'orders.filter.preparing',
+  ready: 'orders.filter.ready',
+  delivered: 'orders.filter.delivered',
+  completed: 'orders.filter.completed',
+  dine_in: 'orders.filter.dineIn',
+  takeaway: 'orders.filter.takeaway',
 }
 
 export function isOrderFilter(value: unknown): value is OrderFilter {

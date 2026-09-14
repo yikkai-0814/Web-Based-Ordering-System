@@ -1,3 +1,5 @@
+import type { Message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useMemo, useState } from 'react'
 import { AlertCircle, Download, TriangleAlert } from 'lucide-react'
 
@@ -19,13 +21,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { PAYMENT_LABELS } from '@/features/pos/types'
+import { PAYMENT_LABEL_KEYS } from '@/features/pos/types'
 import type { Report } from '@/features/reports/aggregate'
 import { toCsv } from '@/features/reports/csv'
 import { downloadCsv } from '@/features/reports/download'
 import {
   MAX_RANGE_DAYS,
-  RANGE_LABELS,
+  RANGE_LABEL_KEYS,
   RANGE_PRESETS,
   rangeFor,
   validateCustomRange,
@@ -38,10 +40,11 @@ import { formatMoney } from '@/lib/money'
 const formatPercent = (value: number | null) => (value === null ? '—' : `${value.toFixed(1)}%`)
 
 export function ReportsPage() {
+  const { t } = useTranslation()
   const [preset, setPreset] = useState<RangePreset>('today')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
-  const [customError, setCustomError] = useState<string | null>(null)
+  const [customError, setCustomError] = useState<Message | null>(null)
   const [appliedRange, setAppliedRange] = useState<DateRange>(() => rangeFor('today', new Date()))
 
   const { report, loading, error } = useReport(appliedRange)
@@ -65,12 +68,13 @@ export function ReportsPage() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6">
       <header className="space-y-1">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">Reports</h1>
+        <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
+          {t('nav.reports')}
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Sales for {appliedRange.from}
-          {appliedRange.to !== appliedRange.from ? ` to ${appliedRange.to}` : ''}. Voided sales are
-          excluded from every figure below. Revenue counts every order placed, paid or not; what has
-          actually been received is shown as Collected.
+          {appliedRange.to === appliedRange.from
+            ? t('reports.blurbDay', { from: appliedRange.from })
+            : t('reports.blurbRange', { from: appliedRange.from, to: appliedRange.to })}
         </p>
       </header>
 
@@ -87,7 +91,7 @@ export function ReportsPage() {
               data-testid={`range-${candidate}`}
               onClick={() => choosePreset(candidate)}
             >
-              {RANGE_LABELS[candidate]}
+              {t(RANGE_LABEL_KEYS[candidate])}
             </Button>
           ))}
         </div>
@@ -95,7 +99,7 @@ export function ReportsPage() {
         {preset === 'custom' && (
           <div className="flex flex-wrap items-end gap-3">
             <div className="grid min-w-36 flex-1 gap-2 sm:flex-none">
-              <Label htmlFor="from">From</Label>
+              <Label htmlFor="from">{t('reports.from')}</Label>
               <Input
                 id="from"
                 type="date"
@@ -105,7 +109,7 @@ export function ReportsPage() {
               />
             </div>
             <div className="grid min-w-36 flex-1 gap-2 sm:flex-none">
-              <Label htmlFor="to">To</Label>
+              <Label htmlFor="to">{t('reports.to')}</Label>
               <Input
                 id="to"
                 type="date"
@@ -121,16 +125,18 @@ export function ReportsPage() {
               data-testid="apply-range"
               onClick={applyCustom}
             >
-              Apply
+              {t('reports.apply')}
             </Button>
-            <p className="text-xs text-muted-foreground">At most {MAX_RANGE_DAYS} days.</p>
+            <p className="text-xs text-muted-foreground">
+              {t('reports.maxDays', { max: MAX_RANGE_DAYS })}
+            </p>
           </div>
         )}
 
         {customError && (
           <Alert variant="destructive">
             <AlertCircle aria-hidden="true" />
-            <AlertDescription>{customError}</AlertDescription>
+            <AlertDescription>{t(customError)}</AlertDescription>
           </Alert>
         )}
       </div>
@@ -138,7 +144,7 @@ export function ReportsPage() {
       {error && (
         <Alert variant="destructive">
           <AlertCircle aria-hidden="true" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{t(error)}</AlertDescription>
         </Alert>
       )}
 
@@ -150,6 +156,7 @@ export function ReportsPage() {
 }
 
 function ReportBody({ report, range }: { report: Report; range: DateRange }) {
+  const { t } = useTranslation()
   /**
    * An item was sold with no recorded cost.
    *
@@ -217,13 +224,13 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
     <div className="space-y-6">
       <Panel
         tone="plain"
-        title="Trading"
-        description="Revenue counts every order placed; Collected is what has actually been received."
-        aria-label="Trading"
+        title={t('reports.trading')}
+        description={t('reports.tradingBlurb')}
+        aria-label={t('reports.trading')}
       >
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
           <StatCard
-            label="Revenue"
+            label={t('reports.revenue')}
             value={formatMoney(report.revenue)}
             testId="tile-revenue"
             tone="money"
@@ -231,36 +238,44 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
             className="col-span-2 lg:col-span-1"
           />
           <StatCard
-            label="Orders"
+            label={t('reports.orders')}
             value={String(report.orderCount)}
             testId="tile-orders"
             variant="quiet"
           />
           <StatCard
-            label="Average order"
+            label={t('reports.averageOrder')}
             value={formatMoney(report.averageOrderValue)}
             testId="tile-average"
             variant="quiet"
             tone="money"
           />
           <StatCard
-            label="Collected"
+            label={t('reports.collected')}
             value={formatMoney(report.collectedRevenue)}
             testId="tile-collected"
             variant="quiet"
             tone="money"
-            hint={`${report.paidOrderCount} of ${report.orderCount} orders paid`}
+            hint={t('reports.collectedHint', {
+              paid: report.paidOrderCount,
+              total: report.orderCount,
+            })}
           />
           <StatCard
-            label="Outstanding"
+            label={t('reports.outstanding')}
             value={formatMoney(report.outstandingRevenue)}
             testId="tile-outstanding"
             variant="quiet"
             tone={report.outstandingRevenue > 0 ? 'warning' : 'money'}
             hint={
               report.unpaidOrderCount === 0
-                ? 'Everything has been paid'
-                : `${report.unpaidOrderCount} order${report.unpaidOrderCount === 1 ? '' : 's'} not yet paid`
+                ? t('reports.outstandingHintClear')
+                : t(
+                    report.unpaidOrderCount === 1
+                      ? 'reports.outstandingHintOne'
+                      : 'reports.outstandingHintOther',
+                    { count: report.unpaidOrderCount },
+                  )
             }
           />
         </div>
@@ -270,46 +285,42 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
           opens Reports rather than the Orders list. */}
       <Panel
         tone="accent"
-        title="Cost and profitability"
-        description="Cost comes from the cost recorded against each item at the time of each sale, so a price change today does not rewrite what an older order cost."
-        aria-label="Cost and profitability"
+        title={t('reports.costAndProfitability')}
+        description={t('reports.costBlurb')}
+        aria-label={t('reports.costAndProfitability')}
       >
         {/* An exception, not a metric: shown only when an item was sold with no recorded
             cost, and phrased as something to go and fix. */}
         {missingCost && (
           <Alert data-testid="missing-cost-warning">
             <TriangleAlert aria-hidden="true" />
-            <AlertDescription>
-              Some items sold in this range have no recorded cost, so the cost below is lower — and
-              the profit higher — than the real figures. The item table marks which ones; record
-              their cost on the Menu page.
-            </AlertDescription>
+            <AlertDescription>{t('reports.missingCostRange')}</AlertDescription>
           </Alert>
         )}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="Profit"
+            label={t('reports.profit')}
             value={formatMoney(report.estimatedProfit)}
             testId="tile-profit"
             tone="money"
             variant="hero"
             className="sm:col-span-2"
-            hint="Revenue less recorded cost"
+            hint={t('reports.profitHint')}
           />
           <StatCard
-            label="Recorded cost"
+            label={t('reports.recordedCost')}
             value={formatMoney(report.estimatedCost)}
             testId="tile-cost"
             tone="money"
             variant="hero"
-            hint="What the items sold cost to make"
+            hint={t('reports.recordedCostHint')}
           />
           <StatCard
-            label="Margin"
+            label={t('reports.margin')}
             value={formatPercent(report.marginPercent)}
             testId="tile-margin"
-            hint="Profit as a share of revenue"
+            hint={t('reports.marginHint')}
           />
         </div>
       </Panel>
@@ -323,7 +334,7 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
           onClick={() => downloadCsv(`summary-${range.from}-to-${range.to}.csv`, summaryCsv)}
         >
           <Download aria-hidden="true" />
-          Export summary (CSV)
+          {t('reports.exportSummary')}
         </Button>
         <Button
           variant="outline"
@@ -333,30 +344,28 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
           onClick={() => downloadCsv(`items-${range.from}-to-${range.to}.csv`, itemsCsv)}
         >
           <Download aria-hidden="true" />
-          Export items (CSV)
+          {t('reports.exportItems')}
         </Button>
       </div>
 
-      <section className="space-y-3" aria-label="Payment methods">
+      <section className="space-y-3" aria-label={t('reports.paymentMethods')}>
         <SectionHeader
-          title="Payment methods"
-          description="Paid orders only — an unpaid order has no method to attribute."
+          title={t('reports.paymentMethods')}
+          description={t('reports.paymentMethodsBlurb')}
         />
         {report.payments.length === 0 ? (
           <EmptyState
-            title={
-              report.orderCount === 0
-                ? 'No sales in this range'
-                : 'No payments recorded in this range'
-            }
-            description="Methods appear here as orders are settled."
+            title={t(
+              report.orderCount === 0 ? 'reports.noSalesInRange' : 'reports.noPaymentsInRange',
+            )}
+            description={t('reports.methodsBlurb')}
           />
         ) : (
           <div className="space-y-4 rounded-xl border bg-card p-4 shadow-xs">
             {report.payments.map((row, index) => (
               <div key={row.method} data-testid="payment-row" data-method={row.method}>
                 <MeterBar
-                  label={`${PAYMENT_LABELS[row.method]} · ${row.count} ${row.count === 1 ? 'order' : 'orders'}`}
+                  label={`${t(PAYMENT_LABEL_KEYS[row.method])} · ${t(row.count === 1 ? 'common.ordersOne' : 'common.ordersOther', { count: row.count })}`}
                   value={formatMoney(row.amount)}
                   // Share of what was collected, which is exactly what these rows sum to.
                   percent={
@@ -372,27 +381,27 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
         )}
       </section>
 
-      <section className="space-y-3" aria-label="Item performance">
+      <section className="space-y-3" aria-label={t('reports.itemPerformance')}>
         <SectionHeader
-          title="Item performance"
-          description="Every item sold in this period with its quantity sold, ordered by revenue. Scrolls sideways on a narrow screen rather than shrinking the figures."
+          title={t('reports.itemPerformance')}
+          description={t('reports.itemPerformanceBlurb')}
         />
         {report.items.length === 0 ? (
           <EmptyState
-            title="No items sold in this range"
-            description="Try a wider date range, or check that sales were rung up on these days."
+            title={t('reports.noItemsSold')}
+            description={t('reports.noItemsSoldBlurb')}
           />
         ) : (
           <div className="rounded-xl border bg-card shadow-xs">
             <Table className="min-w-2xl">
               <TableHeader className="bg-muted/50">
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>Item</TableHead>
-                  <TableHead className="w-24 text-right">Qty sold</TableHead>
-                  <TableHead className="w-32 text-right">Revenue</TableHead>
-                  <TableHead className="w-32 text-right">Est. cost</TableHead>
-                  <TableHead className="w-32 text-right">Est. profit</TableHead>
-                  <TableHead className="w-24 text-right">Margin</TableHead>
+                  <TableHead>{t('reports.columnItem')}</TableHead>
+                  <TableHead className="w-24 text-right">{t('reports.qtySold')}</TableHead>
+                  <TableHead className="w-32 text-right">{t('reports.revenue')}</TableHead>
+                  <TableHead className="w-32 text-right">{t('reports.estCost')}</TableHead>
+                  <TableHead className="w-32 text-right">{t('reports.estProfit')}</TableHead>
+                  <TableHead className="w-24 text-right">{t('reports.margin')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -413,7 +422,7 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
                             className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
                             data-testid="item-missing-cost"
                           >
-                            No cost recorded
+                            {t('reports.noCostRecorded')}
                           </span>
                         )}
                       </span>
@@ -444,23 +453,26 @@ function ReportBody({ report, range }: { report: Report; range: DateRange }) {
         )}
       </section>
 
-      <section className="space-y-3" aria-label="Voided sales">
+      <section className="space-y-3" aria-label={t('reports.voidedSales')}>
         <SectionHeader
-          title="Voided sales"
-          description={`${report.voided.length} ${report.voided.length === 1 ? 'sale' : 'sales'} worth ${formatMoney(report.voidedAmount)}, excluded from every figure above. A void is a counter-entry, never an edit.`}
+          title={t('reports.voidedSales')}
+          description={t(
+            report.voided.length === 1 ? 'reports.voidedSummaryOne' : 'reports.voidedSummaryOther',
+            { count: report.voided.length, amount: formatMoney(report.voidedAmount) },
+          )}
         />
         {report.voided.length === 0 ? (
-          <EmptyState title="No sales were voided in this range" />
+          <EmptyState title={t('reports.noVoids')} />
         ) : (
           <div className="rounded-xl border bg-card shadow-xs">
             <Table className="min-w-2xl">
               <TableHeader className="bg-muted/50">
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-24">Order</TableHead>
-                  <TableHead className="w-32">Date</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead>Voided by</TableHead>
-                  <TableHead className="w-32 text-right">Value</TableHead>
+                  <TableHead className="w-24">{t('reports.columnOrder')}</TableHead>
+                  <TableHead className="w-32">{t('reports.columnDate')}</TableHead>
+                  <TableHead>{t('void.reason')}</TableHead>
+                  <TableHead>{t('void.by')}</TableHead>
+                  <TableHead className="w-32 text-right">{t('reports.columnValue')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

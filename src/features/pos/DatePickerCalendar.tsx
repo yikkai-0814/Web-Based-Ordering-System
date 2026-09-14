@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/features/i18n/translations/en'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
@@ -23,22 +25,36 @@ import { cn } from '@/lib/utils'
  * the same day the rest of the system would file an order under.
  */
 
-const WEEKDAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'] as const
+/**
+ * Monday-first, matching the grid below. Keys rather than words: the column headings are
+ * predefined interface text like everything else, and a Malay or Chinese till should not
+ * have seven English abbreviations across the top of its calendar.
+ */
+const WEEKDAY_KEYS = [
+  'date.monday',
+  'date.tuesday',
+  'date.wednesday',
+  'date.thursday',
+  'date.friday',
+  'date.saturday',
+  'date.sunday',
+] as const satisfies readonly TranslationKey[]
 
-const MONTHS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-] as const
+/** `getMonth()` counts from 0; these keys count from 1, the way a person names a month. */
+const MONTH_KEYS = [
+  'date.month.1',
+  'date.month.2',
+  'date.month.3',
+  'date.month.4',
+  'date.month.5',
+  'date.month.6',
+  'date.month.7',
+  'date.month.8',
+  'date.month.9',
+  'date.month.10',
+  'date.month.11',
+  'date.month.12',
+] as const satisfies readonly TranslationKey[]
 
 /** `YYYY-MM-DD` to a local Date at midnight. The inverse of `businessDateOf`. */
 function dateOf(businessDate: string): Date {
@@ -78,6 +94,7 @@ export function DatePickerCalendar({
   max: string
   onSelect: (next: string) => void
 }) {
+  const { t } = useTranslation()
   const selected = useMemo(() => dateOf(value), [value])
   const [month, setMonth] = useState(() => new Date(selected.getFullYear(), selected.getMonth(), 1))
 
@@ -100,7 +117,7 @@ export function DatePickerCalendar({
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Previous month"
+          aria-label={t('date.previousMonth')}
           data-testid="calendar-previous-month"
           onClick={() => step(-1)}
         >
@@ -112,12 +129,12 @@ export function DatePickerCalendar({
           aria-live="polite"
           data-testid="calendar-month"
         >
-          {MONTHS[month.getMonth()]} {month.getFullYear()}
+          {t(MONTH_KEYS[month.getMonth()] ?? 'date.month.1')} {month.getFullYear()}
         </span>
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Next month"
+          aria-label={t('date.nextMonth')}
           data-testid="calendar-next-month"
           disabled={atLastMonth}
           onClick={() => step(1)}
@@ -126,15 +143,19 @@ export function DatePickerCalendar({
         </Button>
       </div>
 
-      <div className="grid grid-cols-7 gap-0.5" role="grid" aria-label="Choose a business date">
-        {WEEKDAYS.map((weekday) => (
+      <div
+        className="grid grid-cols-7 gap-0.5"
+        role="grid"
+        aria-label={t('date.chooseBusinessDate')}
+      >
+        {WEEKDAY_KEYS.map((weekdayKey) => (
           <span
-            key={weekday}
+            key={weekdayKey}
             role="columnheader"
-            aria-label={weekday}
+            aria-label={t(weekdayKey)}
             className="pb-1 text-center text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase"
           >
-            {weekday}
+            {t(weekdayKey)}
           </span>
         ))}
 

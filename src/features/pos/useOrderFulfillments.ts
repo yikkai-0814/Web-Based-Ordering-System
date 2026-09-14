@@ -1,3 +1,5 @@
+import { message } from '@/features/i18n/messages'
+import type { Message } from '@/features/i18n/messages'
 import { useSidecarDocs } from '@/features/pos/useOrderSidecars'
 import { parseOrderFulfillment, type OrderFulfillment } from '@/features/pos/types'
 
@@ -17,13 +19,13 @@ import { parseOrderFulfillment, type OrderFulfillment } from '@/features/pos/typ
 export function useOrderFulfillments(chunks: readonly (readonly string[])[]): {
   fulfillments: Map<string, OrderFulfillment>
   loading: boolean
-  error: string | null
+  error: Message | null
 } {
   const state = useSidecarDocs<OrderFulfillment>(
     'orderFulfillment',
     parseOrderFulfillment,
     chunks,
-    'Could not load fulfilment for this date.',
+    message('load.fulfilmentDate'),
   )
 
   return { fulfillments: state.records, loading: state.loading, error: state.error }

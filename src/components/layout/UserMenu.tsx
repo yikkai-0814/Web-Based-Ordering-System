@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { LogOut, MonitorCog, Moon, Sun } from 'lucide-react'
+import { Link } from 'react-router'
+import { LogOut, Settings } from 'lucide-react'
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -8,15 +9,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ROLE_LABELS } from '@/features/auth/types'
+import { ROLE_LABEL_KEYS } from '@/features/auth/types'
 import { useAuth } from '@/features/auth/useAuth'
-import { THEME_LABELS, THEMES, type ThemePreference } from '@/features/theme/theme'
-import { useTheme } from '@/features/theme/useTheme'
+import { useTranslation } from '@/features/i18n/useTranslation'
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean).slice(0, 2)
@@ -24,16 +22,18 @@ function initials(name: string): string {
   return parts.map((part) => part.charAt(0).toUpperCase()).join('')
 }
 
-/** One icon per choice, so the menu is scannable without reading every row. */
-const THEME_ICONS: Record<ThemePreference, typeof Sun> = {
-  light: Sun,
-  dark: Moon,
-  system: MonitorCog,
-}
-
+/**
+ * Who is signed in, and the two things they can do about it.
+ *
+ * Deliberately short. This menu used to carry the theme and the language as radio groups,
+ * which pushed Sign out — the one thing anybody opens an account menu to find — to the
+ * bottom of a list of eight, and left no room for the display name to be editable at all.
+ * Both now live on the Settings page, which this links to; the menu is back to identity,
+ * a way in, and a way out.
+ */
 export function UserMenu() {
   const { profile, signOut } = useAuth()
-  const { preference, resolved, setPreference } = useTheme()
+  const { t } = useTranslation()
   const [signingOut, setSigningOut] = useState(false)
 
   if (!profile) return null
@@ -55,51 +55,34 @@ export function UserMenu() {
             <AvatarFallback>{initials(profile.displayName)}</AvatarFallback>
           </Avatar>
           <span className="hidden text-left sm:block">
+            {/* The display name is the person's own, shown exactly as they set it. */}
             <span className="block text-sm font-medium">{profile.displayName}</span>
-            <span className="block text-xs text-muted-foreground">{ROLE_LABELS[profile.role]}</span>
+            <span className="block text-xs text-muted-foreground">
+              {t(ROLE_LABEL_KEYS[profile.role])}
+            </span>
           </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
-          <span className="block font-medium">{profile.displayName}</span>
+          <span className="block font-medium" data-testid="menu-display-name">
+            {profile.displayName}
+          </span>
           <span className="block text-xs font-normal text-muted-foreground">{profile.email}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 
-        {/* The theme belongs to the person using this screen, so it lives with the rest of
-            their session controls rather than in the navigation. */}
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-          Appearance
-        </DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={preference}
-          onValueChange={(next) => setPreference(next as ThemePreference)}
-        >
-          {THEMES.map((candidate) => {
-            const Icon = THEME_ICONS[candidate]
-            return (
-              <DropdownMenuRadioItem
-                key={candidate}
-                value={candidate}
-                data-testid={`theme-${candidate}`}
-              >
-                <Icon aria-hidden="true" />
-                {THEME_LABELS[candidate]}
-                {candidate === 'system' && (
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {resolved === 'dark' ? 'Dark' : 'Light'}
-                  </span>
-                )}
-              </DropdownMenuRadioItem>
-            )
-          })}
-        </DropdownMenuRadioGroup>
+        <DropdownMenuItem asChild>
+          <Link to="/settings" data-testid="menu-settings">
+            <Settings aria-hidden="true" />
+            {t('nav.settings')}
+          </Link>
+        </DropdownMenuItem>
 
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={signingOut} onSelect={() => void handleSignOut()}>
           <LogOut aria-hidden="true" />
-          {signingOut ? 'Signing out…' : 'Sign out'}
+          {signingOut ? t('common.saving') : t('account.signOut')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -1,3 +1,4 @@
+import { message, MessageError, type Message } from '@/features/i18n/messages'
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { doc, getDoc, type Firestore } from 'firebase/firestore'
 
@@ -18,8 +19,7 @@ export interface ManagerIdentity {
  * member holding a colleague's password should not learn from this screen whether that
  * colleague is an administrator.
  */
-export const NOT_A_MANAGER_MESSAGE =
-  'Those credentials are not allowed to authorise this. Ask an administrator.'
+export const NOT_A_MANAGER_MESSAGE: Message = message('void.notAManager')
 
 /**
  * Runs `action` with a manager's authority, then gives it straight back.
@@ -56,15 +56,15 @@ export async function withManagerAuthorization<T>(
     } catch (caught) {
       // Firebase's own codes, mapped to language a cashier can read — including
       // auth/too-many-requests, which is Firebase throttling guesses for us.
-      throw new Error(authErrorMessage(caught))
+      throw new MessageError(authErrorMessage(caught))
     }
 
     const snapshot = await getDoc(doc(firestore, 'users', uid))
-    if (!snapshot.exists()) throw new Error(NOT_A_MANAGER_MESSAGE)
+    if (!snapshot.exists()) throw new MessageError(NOT_A_MANAGER_MESSAGE)
 
     const profile = parseUserProfile(uid, snapshot.data())
     if (!profile || !profile.active || profile.role !== 'admin') {
-      throw new Error(NOT_A_MANAGER_MESSAGE)
+      throw new MessageError(NOT_A_MANAGER_MESSAGE)
     }
 
     // The name comes from the PROFILE, not from the Auth record: firestore.rules compares

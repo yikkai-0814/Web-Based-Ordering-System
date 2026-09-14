@@ -1,3 +1,4 @@
+import { message, MessageError } from '@/features/i18n/messages'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
 
 import { changeDue } from '@/features/pos/cart'
@@ -47,12 +48,12 @@ export async function recordPayment(
   let change: number | null = null
 
   if (method === 'cash') {
-    if (cashTendered === null) throw new Error('Enter the amount received.')
+    if (cashTendered === null) throw new MessageError(message('validation.amountRequired'))
     const result = changeDue(amount, cashTendered)
-    if (!result.ok) throw new Error(result.error)
+    if (!result.ok) throw new MessageError(result.error)
     change = result.change
   } else if (cashTendered !== null) {
-    throw new Error('Only cash payments record an amount received.')
+    throw new MessageError(message('validation.cashOnlyTendered'))
   }
 
   await setDoc(doc(db, 'orderPayments', orderId), {

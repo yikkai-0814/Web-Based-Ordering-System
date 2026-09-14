@@ -1,3 +1,5 @@
+import { isMessageError, message, type Message } from '@/features/i18n/messages'
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { useMemo, useState } from 'react'
 import { AlertCircle, CheckCircle2, CupSoda } from 'lucide-react'
 
@@ -34,7 +36,7 @@ import { formatMoney } from '@/lib/money'
 interface PlacedOrder {
   number: number
   total: number
-  service: string
+  service: Message
 }
 
 /**
@@ -44,22 +46,25 @@ interface PlacedOrder {
  * the next one — which is where the person standing there is actually looking.
  */
 function OrderPlacedAlert({ order }: { order: PlacedOrder }) {
+  const { t } = useTranslation()
   return (
     <Alert className="mx-auto max-w-2xl" data-testid="order-confirmation">
       <CheckCircle2 aria-hidden="true" />
-      <AlertDescription>
-        Order #{order.number} placed · {formatMoney(order.total)} ·{' '}
-        {/* Echoes what was actually written, so the operator confirms the service details
-            rather than assuming them. */}
-        <span data-testid="confirmation-service">{order.service}</span> ·{' '}
-        <span className="font-semibold">unpaid</span>. Record payment from the Orders page once the
-        customer has paid.
+      {/* Echoes what was actually written, so the operator confirms the service details
+          rather than assuming them. */}
+      <AlertDescription data-testid="confirmation-service">
+        {t('terminal.placedBanner', {
+          number: order.number,
+          total: formatMoney(order.total),
+          service: t(order.service),
+        })}
       </AlertDescription>
     </Alert>
   )
 }
 
 export function TerminalPage() {
+  const { t } = useTranslation()
   const { profile } = useAuth()
   const { operator, loading: staffLoading } = useStaffSession()
   const { categories, loading: categoriesLoading } = useCategories()
@@ -93,7 +98,7 @@ export function TerminalPage() {
    */
   const [operatorChosen, setOperatorChosen] = useState(false)
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Message | null>(null)
   const [lastOrder, setLastOrder] = useState<PlacedOrder | null>(null)
 
   // Only what is actually for sale: archived items and hidden categories never reach the
@@ -178,11 +183,7 @@ export function TerminalPage() {
       setOperatorChosen(false)
       setLastOrder({ number: created.number, total, service })
     } catch (caught) {
-      setError(
-        caught instanceof Error && caught.message
-          ? caught.message
-          : 'That order could not be saved. Please try again.',
-      )
+      setError(isMessageError(caught) ? caught.detail : message('terminal.placeFailed'))
     } finally {
       setPending(false)
     }
@@ -200,8 +201,8 @@ export function TerminalPage() {
       <div className="space-y-4">
         {lastOrder && <OrderPlacedAlert order={lastOrder} />}
         <StaffPicker
-          heading="Who is making this order?"
-          blurb="Their name is recorded on this order. Tap a name to start it."
+          heading="terminal.whoIsMaking"
+          blurb="terminal.whoIsMakingBlurb"
           onSelected={() => {
             setOperatorChosen(true)
             // The previous order's confirmation belongs to the previous order.
@@ -229,22 +230,22 @@ export function TerminalPage() {
       <section className="min-w-0 space-y-5">
         <div className="space-y-1">
           <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
-            New Order
+            {t('nav.newOrder')}
           </h1>
-          <p className="text-sm text-muted-foreground">Tap an item to add it to the order.</p>
+          <p className="text-sm text-muted-foreground">{t('terminal.blurb')}</p>
         </div>
 
         {itemsError && (
           <Alert variant="destructive">
             <AlertCircle aria-hidden="true" />
-            <AlertDescription>{itemsError}</AlertDescription>
+            <AlertDescription>{t(itemsError)}</AlertDescription>
           </Alert>
         )}
 
         {groups.length === 0 && (
           <EmptyState
-            title="Nothing is available for sale"
-            description="An administrator needs to add menu items, or make existing ones available."
+            title={t('terminal.noItems')}
+            description={t('terminal.noItemsBlurb')}
             icon={<CupSoda className="size-6" aria-hidden="true" />}
           />
         )}
@@ -291,7 +292,7 @@ export function TerminalPage() {
         {error && (
           <Alert variant="destructive" className="mx-4">
             <AlertCircle aria-hidden="true" />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{t(error)}</AlertDescription>
           </Alert>
         )}
 
@@ -327,7 +328,7 @@ export function TerminalPage() {
          */}
         <div className="sticky bottom-mobile-nav z-20 space-y-2 border-t bg-card p-4 lg:static">
           <div className="flex items-baseline justify-between gap-3 lg:hidden">
-            <span className="text-sm text-muted-foreground">Total</span>
+            <span className="text-sm text-muted-foreground">{t('common.total')}</span>
             <span className="text-xl font-semibold tabular-nums">{formatMoney(total)}</span>
           </div>
           <Button
@@ -338,14 +339,14 @@ export function TerminalPage() {
             disabled={!canPlace || pending}
             onClick={() => void placeOrder()}
           >
-            {pending ? 'Saving…' : `Place order · ${formatMoney(total)}`}
+            {pending
+              ? t('common.saving')
+              : t('terminal.placeOrderWithTotal', { total: formatMoney(total) })}
           </Button>
           {/* Never leave a dead button unexplained: when the gate is service rather than the
               cart, say which. */}
           <p className="text-center text-xs text-muted-foreground">
-            {!placement.ok && cart.length > 0
-              ? placement.error
-              : 'The order is created unpaid. Payment is recorded separately.'}
+            {!placement.ok && cart.length > 0 ? t(placement.error) : t('terminal.unpaidNote')}
           </p>
         </div>
       </aside>

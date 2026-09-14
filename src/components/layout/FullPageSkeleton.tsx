@@ -1,3 +1,4 @@
+import { useTranslation } from '@/features/i18n/useTranslation'
 import { Skeleton } from '@/components/ui/skeleton'
 
 /**
@@ -8,8 +9,9 @@ import { Skeleton } from '@/components/ui/skeleton'
  * placeholder until the status is known avoids that.
  */
 export function FullPageSkeleton() {
+  const { t } = useTranslation()
   return (
-    <div className="flex min-h-svh flex-col" aria-busy="true" aria-label="Loading">
+    <div className="flex min-h-svh flex-col" aria-busy="true" aria-label={t('common.loading')}>
       <div className="flex h-16 items-center gap-4 border-b px-6">
         <Skeleton className="h-8 w-40" />
         <div className="ml-auto flex items-center gap-3">
