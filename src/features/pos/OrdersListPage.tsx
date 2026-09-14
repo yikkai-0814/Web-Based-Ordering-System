@@ -181,18 +181,15 @@ export function OrdersListPage() {
         </Alert>
       )}
 
-      {/* Says which day is being fetched, so the rows below — which are still the previous
-          day's — cannot be mistaken for it. This replaces the count line while it shows. */}
-      {refreshing && (
-        <p className="text-sm text-muted-foreground" data-testid="orders-refreshing">
-          {t('orders.loadingDate', { date: businessDate })}
-        </p>
-      )}
+      {/* Deliberately NOTHING visible marks a date change in flight. The rows already on
+          screen stay exactly as they are and are quietly replaced when the new day answers —
+          which, for a day that has been viewed before, is 27-48 ms later. A message or a
+          dimmed list at that duration reads as a flicker, not as information.
 
-      <div
-        aria-busy={refreshing}
-        className={cn('space-y-6 transition-opacity', refreshing && 'opacity-60')}
-      >
+          `aria-busy` still says so for assistive technology, and the count line below is
+          still withheld, because that line names the selected date and the rows above are not
+          yet that date's. Withholding a claim is silent; announcing the load is not. */}
+      <div aria-busy={refreshing} className="space-y-6">
         {firstLoad ? (
           <Skeleton className="h-96 w-full max-w-4xl" />
         ) : rows.length === 0 ? (

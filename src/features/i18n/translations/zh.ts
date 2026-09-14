@@ -190,7 +190,6 @@ export const zh: Dictionary = {
   'orders.emptyDateBlurb': '订单在下单后会显示在这里。使用日期栏查看其他日子。',
   'orders.emptyFilter': '没有符合该筛选或搜索的订单',
   'orders.emptyFilterBlurb': '请清除搜索，或选择其他筛选。',
-  'orders.loadingDate': '正在加载 {{date}}…',
   'orders.countOne': '在 {{date}} 显示 {{total}} 张订单中的 {{shown}} 张。',
   'orders.countOther': '在 {{date}} 显示 {{total}} 张订单中的 {{shown}} 张。',
   'orders.servedByLine': '{{count}} 件 · 经手人 {{name}}',

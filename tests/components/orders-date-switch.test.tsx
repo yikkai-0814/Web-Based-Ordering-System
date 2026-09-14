@@ -11,6 +11,11 @@
  * Keeping the previous rows up is only acceptable if the page stops asserting anything about
  * the selected date while they are there, and if the switch always completes. Both halves are
  * pinned below, along with the states that must still show a skeleton or an empty state.
+ *
+ * The switch is also **silent**: no message, no dimming, nothing that reads as a reload. For a
+ * day that has been viewed before Firestore answers in 27-48 ms, so anything announcing that
+ * would be a flicker rather than information. `aria-busy` carries it for assistive technology
+ * instead, and the assertions below insist on both halves — busy set, nothing visible.
  */
 import { useSyncExternalStore } from 'react'
 
@@ -128,6 +133,18 @@ function skeleton(container: HTMLElement): Element | null {
   return container.querySelector('[data-slot="skeleton"]')
 }
 
+function busy(container: HTMLElement): boolean {
+  return container.querySelector('[aria-busy="true"]') !== null
+}
+
+/**
+ * Nothing on screen may announce the load. Asserted by text rather than by test id so that
+ * reintroducing a message under any name fails this.
+ */
+function announcesLoading(): boolean {
+  return /loading|memuatkan|加载/i.test(document.body.textContent ?? '')
+}
+
 async function stepBack(user: ReturnType<typeof renderOrders>['user']) {
   await user.click(screen.getByTestId('previous-day'))
 }
@@ -160,21 +177,23 @@ describe('Orders list during a business-date change', () => {
     // The whole point: no grey surface, and the rows stay on screen.
     expect(skeleton(container)).toBeNull()
     expect(shownOrderNumbers()).toEqual(['3', '2', '1'])
-    // But the page says what it is doing, and withholds every claim about the new date.
-    expect(screen.getByTestId('orders-refreshing')).toBeTruthy()
+    // The load is carried by aria-busy alone — nothing visible announces it.
+    expect(busy(container)).toBe(true)
+    expect(announcesLoading()).toBe(false)
+    // And every claim about the new date is withheld until its rows are actually here.
     expect(screen.queryByTestId('orders-count')).toBeNull()
-    expect(container.querySelector('[aria-busy="true"]')).not.toBeNull()
   })
 
   it('replaces the old rows completely once the new date arrives', async () => {
-    const { user } = renderOrders()
+    const { container, user } = renderOrders()
     act(() => arrive(DAY_0, [3, 2, 1]))
     await stepBack(user)
     act(() => arrive(DAY_1, [9]))
 
     // Replaced, not merged: the previous day's single order and nothing of today's.
     expect(shownOrderNumbers()).toEqual(['9'])
-    expect(screen.queryByTestId('orders-refreshing')).toBeNull()
+    expect(busy(container)).toBe(false)
+    expect(announcesLoading()).toBe(false)
     const count = screen.getByTestId('orders-count')
     expect(within(count).getByText(new RegExp(DAY_1))).toBeTruthy()
   })
@@ -188,29 +207,30 @@ describe('Orders list during a business-date change', () => {
     expect(screen.getByTestId('orders-empty')).toBeTruthy()
     expect(shownOrderNumbers()).toEqual([])
     expect(skeleton(container)).toBeNull()
-    expect(screen.queryByTestId('orders-refreshing')).toBeNull()
+    expect(busy(container)).toBe(false)
   })
 
   it('never leaves the wrong date on screen when dates are changed quickly', async () => {
-    const { user } = renderOrders()
+    const { container, user } = renderOrders()
     act(() => arrive(DAY_0, [3, 2, 1]))
 
     // Two steps back in quick succession, neither settled yet.
     await stepBack(user)
     await stepBack(user)
-    expect(screen.getByTestId('orders-refreshing')).toBeTruthy()
+    expect(busy(container)).toBe(true)
 
     // The skipped-over day answers late — it must not be painted, because it is not the
     // date that is selected.
     act(() => arrive(DAY_1, [77]))
     expect(shownOrderNumbers()).toEqual(['3', '2', '1'])
-    expect(screen.getByTestId('orders-refreshing')).toBeTruthy()
+    expect(busy(container)).toBe(true)
     expect(screen.queryByTestId('orders-count')).toBeNull()
 
     // The selected day answers, and only now does the list change.
     act(() => arrive(DAY_2, [55]))
     expect(shownOrderNumbers()).toEqual(['55'])
-    expect(screen.queryByTestId('orders-refreshing')).toBeNull()
+    expect(busy(container)).toBe(false)
+    expect(announcesLoading()).toBe(false)
     const count = screen.getByTestId('orders-count')
     expect(within(count).getByText(new RegExp(DAY_2))).toBeTruthy()
   })

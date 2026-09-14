@@ -198,7 +198,6 @@ export const ms: Dictionary = {
     'Pesanan muncul di sini apabila ia dibuat. Gunakan bar tarikh untuk melihat hari lain.',
   'orders.emptyFilter': 'Tiada yang sepadan dengan tapisan atau carian itu',
   'orders.emptyFilterBlurb': 'Cuba kosongkan carian, atau pilih tapisan lain.',
-  'orders.loadingDate': 'Memuatkan {{date}}…',
   'orders.countOne': 'Memaparkan {{shown}} daripada {{total}} pesanan pada {{date}}.',
   'orders.countOther': 'Memaparkan {{shown}} daripada {{total}} pesanan pada {{date}}.',
   'orders.servedByLine': '{{count}} item · dilayan oleh {{name}}',

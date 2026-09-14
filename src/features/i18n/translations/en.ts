@@ -202,7 +202,6 @@ export const en = {
     'Orders appear here as they are rung up. Use the date bar to look at another day.',
   'orders.emptyFilter': 'Nothing matches that filter or search',
   'orders.emptyFilterBlurb': 'Try clearing the search, or choosing a different filter.',
-  'orders.loadingDate': 'Loading {{date}}…',
   'orders.countOne': 'Showing {{shown}} of {{total}} order on {{date}}.',
   'orders.countOther': 'Showing {{shown}} of {{total}} orders on {{date}}.',
   'orders.servedByLine': '{{count}} items · served by {{name}}',
