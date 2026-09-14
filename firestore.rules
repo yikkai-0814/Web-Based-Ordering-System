@@ -716,6 +716,27 @@ service cloud.firestore {
         - fulfillmentIndex(resource.data.status);
     }
 
+    // The two backward steps the counter owns, mirroring isStaffReversibleStep in
+    // src/features/pos/fulfillment.ts.
+    //
+    // Staff work the queue during service, so recovering from a mis-tap made moments earlier
+    // must not require finding an admin mid-rush. Both steps are named explicitly rather than
+    // derived from the index, because "one step back" is NOT the rule: `delivered → ready`
+    // is also one step back and is deliberately not here. Handing the order over is the step
+    // that stops the customer's clock and makes the sale final during service, so undoing it
+    // is a correction to the record rather than a step in the workflow, and stays with an
+    // admin.
+    //
+    // Timestamps are not relaxed by any of this. validPreparationUpdate() still pins readyAt
+    // to null on both of these steps and validDeliveredAt() still pins deliveredAt, so a
+    // staff account gains exactly two transitions and no ability to write a time of its own.
+    function staffReversibleStep() {
+      let from = resource.data.status;
+      let to = request.resource.data.status;
+      return (from == 'preparing' && to == 'pending')
+        || (from == 'ready' && to == 'preparing');
+    }
+
     match /orderFulfillment/{orderId} {
       allow read: if isActive();
       allow create: if isActive()
@@ -726,7 +747,11 @@ service cloud.firestore {
         && validFulfillmentFields(orderId)
         && validPreparationUpdate()
         && validDeliveredAt()
-        && (fulfillmentStepChange() == 1 || (isAdmin() && fulfillmentStepChange() == -1));
+        && (fulfillmentStepChange() == 1
+            // An admin may correct any single step, `delivered → ready` included.
+            || (isAdmin() && fulfillmentStepChange() == -1)
+            // Staff may take only the two the kitchen owns.
+            || staffReversibleStep());
       // A record of how an order progressed is not something to erase.
       allow delete: if false;
 

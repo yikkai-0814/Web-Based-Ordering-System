@@ -371,23 +371,155 @@ describe('setFulfillment moves an order and journals every step', () => {
     expect(journal.size).toBe(2)
   })
 
-  it('refuses a staff account stepping an order backwards', async () => {
+  it('steps ready back to preparing, clearing readyAt and leaving the clock alone', async () => {
     const orderId = await placeOrder()
-    await setFulfillment(orderId, {
-      from: FULFILLMENT_ORIGIN,
+    for (const [from, to] of [
+      [FULFILLMENT_ORIGIN, 'preparing'],
+      ['preparing', 'ready'],
+    ] as const) {
+      await setFulfillment(orderId, { from, to, user: asUser(staff), staff: asOperator(staff) })
+    }
+    const ready = await getDoc(doc(db, 'orderFulfillment', orderId))
+    expect(ready.get('status')).toBe('ready')
+    expect(ready.get('readyAt')).not.toBeNull()
+
+    await signInAs(admin)
+    await correctFulfillment(orderId, {
+      from: 'ready',
+      to: 'preparing',
+      user: asUser(admin),
+      staff: asOperator(admin),
+    })
+
+    const back = await getDoc(doc(db, 'orderFulfillment', orderId))
+    expect(back.get('status')).toBe('preparing')
+    // It is being worked on again, so it no longer claims a finish time...
+    expect(back.get('readyAt')).toBeNull()
+    // ...and it was never delivered, so the customer's clock has not been stopped at any
+    // point. The timer is createdAt -> deliveredAt and neither end moved.
+    expect(back.get('deliveredAt')).toBeNull()
+  })
+
+  it('steps delivered back to ready, resuming the clock but keeping readyAt', async () => {
+    const orderId = await placeOrder()
+    for (const [from, to] of [
+      [FULFILLMENT_ORIGIN, 'preparing'],
+      ['preparing', 'ready'],
+      ['ready', 'delivered'],
+    ] as const) {
+      await setFulfillment(orderId, { from, to, user: asUser(staff), staff: asOperator(staff) })
+    }
+    const delivered = await getDoc(doc(db, 'orderFulfillment', orderId))
+    expect(delivered.get('deliveredAt')).not.toBeNull()
+    const finishedAt = delivered.get('readyAt')
+
+    await signInAs(admin)
+    await correctFulfillment(orderId, {
+      from: 'delivered',
+      to: 'ready',
+      user: asUser(admin),
+      staff: asOperator(admin),
+    })
+
+    const back = await getDoc(doc(db, 'orderFulfillment', orderId))
+    expect(back.get('status')).toBe('ready')
+    // Not handed over after all: the clock resumes.
+    expect(back.get('deliveredAt')).toBeNull()
+    // But the food was still finished when it was finished.
+    expect(back.get('readyAt')).toEqual(finishedAt)
+  })
+
+  it('leaves payment untouched when fulfilment is reversed', async () => {
+    const orderId = await placeOrder()
+    for (const [from, to] of [
+      [FULFILLMENT_ORIGIN, 'preparing'],
+      ['preparing', 'ready'],
+    ] as const) {
+      await setFulfillment(orderId, { from, to, user: asUser(staff), staff: asOperator(staff) })
+    }
+    await recordPayment(orderId, {
+      method: 'cash',
+      // The rules check the amount against the order, so it has to be the cart's real total.
+      amount: CART_TOTAL,
+      cashTendered: CART_TOTAL,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+    const before = await getDoc(doc(db, 'orderPayments', orderId))
+
+    await signInAs(admin)
+    await correctFulfillment(orderId, {
+      from: 'ready',
+      to: 'preparing',
+      user: asUser(admin),
+      staff: asOperator(admin),
+    })
+
+    // Two independent axes: moving one never writes the other's document.
+    const after = await getDoc(doc(db, 'orderPayments', orderId))
+    expect(after.data()).toEqual(before.data())
+  })
+
+  /**
+   * The role split changed deliberately: the counter works the queue during service, so
+   * recovering from a mis-tap made moments earlier is theirs. What stays with an admin is
+   * reopening a DELIVERED order — handing over stops the customer's clock and makes the sale
+   * final during service, so undoing it is a correction to the record, not a kitchen step.
+   */
+  it('lets a staff account take the two backward steps the kitchen owns', async () => {
+    const orderId = await placeOrder()
+    for (const [from, to] of [
+      [FULFILLMENT_ORIGIN, 'preparing'],
+      ['preparing', 'ready'],
+    ] as const) {
+      await setFulfillment(orderId, { from, to, user: asUser(staff), staff: asOperator(staff) })
+    }
+
+    await correctFulfillment(orderId, {
+      from: 'ready',
       to: 'preparing',
       user: asUser(staff),
       staff: asOperator(staff),
     })
+    let record = await getDoc(doc(db, 'orderFulfillment', orderId))
+    expect(record.get('status')).toBe('preparing')
+    // Being worked on again, so it no longer claims a finish time.
+    expect(record.get('readyAt')).toBeNull()
+
+    await correctFulfillment(orderId, {
+      from: 'preparing',
+      to: FULFILLMENT_ORIGIN,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+    record = await getDoc(doc(db, 'orderFulfillment', orderId))
+    expect(record.get('status')).toBe('pending')
+    expect(record.get('readyAt')).toBeNull()
+    expect(record.get('deliveredAt')).toBeNull()
+  })
+
+  it('refuses a staff account reopening a delivered order', async () => {
+    const orderId = await placeOrder()
+    for (const [from, to] of [
+      [FULFILLMENT_ORIGIN, 'preparing'],
+      ['preparing', 'ready'],
+      ['ready', 'delivered'],
+    ] as const) {
+      await setFulfillment(orderId, { from, to, user: asUser(staff), staff: asOperator(staff) })
+    }
 
     await expect(
       correctFulfillment(orderId, {
-        from: 'preparing',
-        to: FULFILLMENT_ORIGIN,
+        from: 'delivered',
+        to: 'ready',
         user: asUser(staff),
         staff: asOperator(staff),
       }),
     ).rejects.toThrow()
+
+    // And it really is still delivered — the refusal changed nothing.
+    const record = await getDoc(doc(db, 'orderFulfillment', orderId))
+    expect(record.get('status')).toBe('delivered')
   })
 
   // ---- Order timing ---------------------------------------------------------

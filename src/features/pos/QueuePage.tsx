@@ -2,7 +2,7 @@ import { isMessageError, message, type Message } from '@/features/i18n/messages'
 import { useTranslation } from '@/features/i18n/useTranslation'
 import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { AlertCircle, ChefHat } from 'lucide-react'
+import { AlertCircle, ChefHat, Undo2 } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import { useAuth } from '@/features/auth/useAuth'
 import { useStaffSession } from '@/features/staff/useStaffSession'
 import { BusinessDateBar } from '@/features/pos/BusinessDateBar'
 import type { FulfillmentStatus } from '@/features/pos/fulfillment'
-import { setFulfillment } from '@/features/pos/fulfillment-api'
+import { correctFulfillment, setFulfillment } from '@/features/pos/fulfillment-api'
 import { describeModifiers, lineKeyOf } from '@/features/menu/modifiers'
 import { orderTypeSummaryOf } from '@/features/pos/order-type'
 import type { OrderView } from '@/features/pos/orders-view'
@@ -23,6 +23,7 @@ import {
   itemCountOf,
   QUEUE_COLUMN_LABEL_KEYS,
   queueActionFor,
+  queueReverseFor,
   type QueueColumn,
 } from '@/features/pos/queue'
 import { fulfillmentOperatorNameOf, operatorNameOf, PAYMENT_LABEL_KEYS } from '@/features/pos/types'
@@ -157,6 +158,41 @@ export function QueuePage() {
     }
   }
 
+  /**
+   * Stepping a card BACK, for a mis-tap made moments ago.
+   *
+   * The same shape as `handleAdvance` and sharing its in-flight map, so a card cannot be sent
+   * two ways at once — `claim` is keyed by order and target, so the two buttons on one card
+   * lock each other out. It writes through `correctFulfillment`, which the rules judge by a
+   * different clause: a staff account may take only the two steps the kitchen owns, and
+   * `queueReverseFor` offers no button for the rest.
+   */
+  async function handleReverse(view: OrderView, to: FulfillmentStatus) {
+    if (!profile || !mover) return
+    if (!claim(view.order.id, to)) return
+
+    setMoveError(null)
+    try {
+      await correctFulfillment(view.order.id, {
+        from: view.fulfillment,
+        to,
+        user: { uid: profile.uid, displayName: profile.displayName },
+        staff: { id: mover.id, name: mover.name },
+      })
+    } catch (caught) {
+      const denied = typeof caught === 'object' && caught !== null && 'code' in caught
+      setMoveError(
+        denied
+          ? message('queue.moveFailed')
+          : isMessageError(caught)
+            ? caught.detail
+            : message('queue.moveFailedGeneric'),
+      )
+    } finally {
+      release(view.order.id, to)
+    }
+  }
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6">
       <div>
@@ -194,6 +230,7 @@ export function QueuePage() {
               views={column.views}
               inFlight={inFlight}
               onAdvance={handleAdvance}
+              onReverse={handleReverse}
             />
           ))}
         </div>
@@ -207,11 +244,13 @@ function QueueColumnPanel({
   views,
   inFlight,
   onAdvance,
+  onReverse,
 }: {
   status: QueueColumn
   views: OrderView[]
   inFlight: ReadonlyMap<string, FulfillmentStatus>
   onAdvance: (view: OrderView, to: FulfillmentStatus) => Promise<void>
+  onReverse: (view: OrderView, to: FulfillmentStatus) => Promise<void>
 }) {
   const { t } = useTranslation()
   return (
@@ -243,6 +282,7 @@ function QueueColumnPanel({
                 view={view}
                 inFlightTo={inFlight.get(view.order.id) ?? null}
                 onAdvance={onAdvance}
+                onReverse={onReverse}
               />
             </li>
           ))}
@@ -256,11 +296,13 @@ function QueueCard({
   view,
   inFlightTo,
   onAdvance,
+  onReverse,
 }: {
   view: OrderView
   /** The step this card has in flight, if any - see `inFlight` on the page. */
   inFlightTo: FulfillmentStatus | null
   onAdvance: (view: OrderView, to: FulfillmentStatus) => Promise<void>
+  onReverse: (view: OrderView, to: FulfillmentStatus) => Promise<void>
 }) {
   const { t } = useTranslation()
   const { order } = view
@@ -268,6 +310,8 @@ function QueueCard({
   // Busy only for the step actually in flight. Once the card has moved, the step it now
   // offers is a different one and is pressable immediately.
   const busy = action !== null && inFlightTo === action.next
+  const reversal = queueReverseFor(view)
+  const reversing = reversal !== null && inFlightTo === reversal.previous
 
   return (
     <article
@@ -356,19 +400,42 @@ function QueueCard({
         />
       </div>
 
-      {action && (
-        <Button
-          className="h-touch w-full text-base"
-          size="lg"
-          disabled={busy}
-          data-testid="queue-advance"
-          data-next={action.next}
-          onClick={() => void onAdvance(view, action.next)}
-        >
-          <ChefHat aria-hidden="true" />
-          {busy ? t('common.saving') : t(action.labelKey)}
-        </Button>
-      )}
+      {/* Back on the left and secondary, forward on the right and primary: the normal move
+          is the one the kitchen makes every time, and the correction is the one it makes by
+          mistake. `outline` against the default fill is the same pairing the rest of the app
+          uses for a secondary action beside a primary one.
+
+          Offered only where the counter owns the step — never at `pending`, which has nothing
+          behind it, and never at `delivered`, which is an admin's correction. */}
+      <div className="flex gap-2">
+        {reversal && (
+          <Button
+            variant="outline"
+            className="h-touch flex-1 text-base"
+            size="lg"
+            disabled={reversing}
+            data-testid="queue-reverse"
+            data-previous={reversal.previous}
+            onClick={() => void onReverse(view, reversal.previous)}
+          >
+            <Undo2 aria-hidden="true" />
+            {reversing ? t('common.saving') : t(reversal.labelKey)}
+          </Button>
+        )}
+        {action && (
+          <Button
+            className="h-touch flex-1 text-base"
+            size="lg"
+            disabled={busy}
+            data-testid="queue-advance"
+            data-next={action.next}
+            onClick={() => void onAdvance(view, action.next)}
+          >
+            <ChefHat aria-hidden="true" />
+            {busy ? t('common.saving') : t(action.labelKey)}
+          </Button>
+        )}
+      </div>
     </article>
   )
 }

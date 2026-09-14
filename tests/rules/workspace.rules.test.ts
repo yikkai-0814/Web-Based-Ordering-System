@@ -346,9 +346,44 @@ describe('fulfilment moved from the queue', () => {
     await assertFails(move(staffDb(), { from: 'pending', to: 'delivered', orderId: 'today-2' }))
   })
 
-  it('refuses staff stepping an order backwards', async () => {
+  /**
+   * The role split changed deliberately.
+   *
+   * Staff work the queue during service, so recovering from a mis-tap made moments earlier is
+   * theirs — waiting for an admin mid-rush is not a workflow. What is NOT theirs is reopening
+   * a delivered order: handing over stops the customer's clock and makes the sale final
+   * during service, so undoing it is a correction to the record rather than a step in the
+   * kitchen's workflow. `staffReversibleStep()` names the two, and nothing else.
+   */
+  it('lets staff take the two backward steps the kitchen owns', async () => {
     await seed()
-    await assertFails(move(staffDb(), { from: 'preparing', to: 'pending', orderId: 'today-1' }))
+    await assertSucceeds(move(staffDb(), { from: 'preparing', to: 'pending', orderId: 'today-1' }))
+  })
+
+  it('refuses staff reopening a delivered order', async () => {
+    await seed()
+    // Walked forward first, because `move` reads the stored status to decide the step: the
+    // order has to actually BE delivered for this to be the transition under test.
+    await assertSucceeds(move(staffDb(), { from: 'preparing', to: 'ready', orderId: 'today-1' }))
+    await assertSucceeds(move(staffDb(), { from: 'ready', to: 'delivered', orderId: 'today-1' }))
+
+    await assertFails(move(staffDb(), { from: 'delivered', to: 'ready', orderId: 'today-1' }))
+  })
+
+  it('still refuses staff skipping backwards more than one step', async () => {
+    await seed()
+    await assertSucceeds(move(staffDb(), { from: 'preparing', to: 'ready', orderId: 'today-1' }))
+
+    // Two places back. `staffReversibleStep` names transitions, not distances, so this is
+    // refused even though each half of it would be allowed on its own.
+    await assertFails(move(staffDb(), { from: 'ready', to: 'pending', orderId: 'today-1' }))
+  })
+
+  it('lets staff take ready back to preparing', async () => {
+    await seed()
+    await assertSucceeds(move(staffDb(), { from: 'preparing', to: 'ready', orderId: 'today-1' }))
+
+    await assertSucceeds(move(staffDb(), { from: 'ready', to: 'preparing', orderId: 'today-1' }))
   })
 
   it('lets an admin correct a mis-tap by exactly one step back', async () => {

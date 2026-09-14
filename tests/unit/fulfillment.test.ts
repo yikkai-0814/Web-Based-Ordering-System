@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   canAdvanceFulfillment,
+  canReverseFulfillment,
+  isStaffReversibleStep,
+  FULFILLMENT_BACK_ACTION_KEYS,
   FINAL_FULFILLMENT,
   elapsedMsOf,
   elapsedWindowOf,
@@ -111,6 +114,104 @@ describe('the fulfilment progression', () => {
     expect(isFulfillmentStatus('cancelled')).toBe(false)
     expect(isFulfillmentStatus(undefined)).toBe(false)
     expect(isFulfillmentStatus(3)).toBe(false)
+  })
+})
+
+describe('canReverseFulfillment — undoing a step', () => {
+  const asStaff = (current: FulfillmentStatus, voided = false) =>
+    canReverseFulfillment({ current, voided, isAdmin: false })
+  const asAdmin = (current: FulfillmentStatus, voided = false) =>
+    canReverseFulfillment({ current, voided, isAdmin: true })
+
+  it('offers nothing to undo at the first step, to either role', () => {
+    expect(asStaff('pending').ok).toBe(false)
+    expect(asAdmin('pending').ok).toBe(false)
+  })
+
+  it('lets STAFF take the two steps the kitchen owns', () => {
+    expect(asStaff('preparing')).toEqual({ ok: true, previous: 'pending' })
+    expect(asStaff('ready')).toEqual({ ok: true, previous: 'preparing' })
+  })
+
+  it('does NOT let staff reopen a delivered order', () => {
+    // Handing over stops the customer's clock and makes the sale final during service.
+    expect(asStaff('delivered').ok).toBe(false)
+  })
+
+  it('lets an ADMIN reopen a delivered order', () => {
+    expect(asAdmin('delivered')).toEqual({ ok: true, previous: 'ready' })
+  })
+
+  it('names exactly the two staff-reversible steps, and no others', () => {
+    expect(isStaffReversibleStep('preparing', 'pending')).toBe(true)
+    expect(isStaffReversibleStep('ready', 'preparing')).toBe(true)
+    // One step back, but not the counter's to take.
+    expect(isStaffReversibleStep('delivered', 'ready')).toBe(false)
+    // Forward steps are not reversals, however they are asked.
+    expect(isStaffReversibleStep('pending', 'preparing')).toBe(false)
+    // Nor is a skip.
+    expect(isStaffReversibleStep('ready', 'pending')).toBe(false)
+  })
+
+  it('refuses to move a voided order either way, for either role', () => {
+    expect(asStaff('ready', true).ok).toBe(false)
+    expect(asAdmin('ready', true).ok).toBe(false)
+    expect(canAdvanceFulfillment({ current: 'ready', voided: true }).ok).toBe(false)
+  })
+
+  it('names a button for every state that has one, and none for the first', () => {
+    expect(FULFILLMENT_BACK_ACTION_KEYS.pending).toBeNull()
+    expect(FULFILLMENT_BACK_ACTION_KEYS.preparing).toBe('queue.backToPending')
+    expect(FULFILLMENT_BACK_ACTION_KEYS.ready).toBe('queue.backToPreparing')
+    expect(FULFILLMENT_BACK_ACTION_KEYS.delivered).toBe('queue.backToReady')
+  })
+})
+
+describe('reversing a step keeps the timestamps honest', () => {
+  it('clears readyAt on ready -> preparing, because it is being worked on again', () => {
+    expect(nextReadyAt('ready', 'preparing')).toBeNull()
+    // And it never claims a delivery.
+    expect(nextDeliveredAt('ready', 'preparing')).toBeNull()
+  })
+
+  it('does NOT touch the customer clock when ready -> preparing', () => {
+    // The clock is createdAt -> deliveredAt. Neither end moves, so the running duration is
+    // unchanged by the reversal — no restart, no pause.
+    const started = new Date('2026-09-15T02:00:00.000Z')
+    const order = { createdAt: { toDate: () => started } }
+    const before = elapsedWindowOf(order, { deliveredAt: null })
+    const after = elapsedWindowOf(order, { deliveredAt: null })
+
+    expect(after).toEqual(before)
+    expect(elapsedMsOf(after, started.getTime() + 90_000)).toBe(90_000)
+    expect(isElapsedFinished(after)).toBe(false)
+  })
+
+  it('resumes the clock on delivered -> ready, and keeps when it was finished', () => {
+    // deliveredAt cleared: the order is not handed over, so the wait is running again.
+    expect(nextDeliveredAt('delivered', 'ready')).toBeNull()
+    // readyAt kept: undoing a mis-tapped handover does not un-cook the food.
+    expect(nextReadyAt('delivered', 'ready')).toBe('keep')
+
+    const started = new Date('2026-09-15T02:00:00.000Z')
+    const order = { createdAt: { toDate: () => started } }
+    const delivered = elapsedWindowOf(order, {
+      deliveredAt: { toDate: () => new Date(started.getTime() + 60_000) },
+    })
+    expect(isElapsedFinished(delivered)).toBe(true)
+    expect(elapsedMsOf(delivered, started.getTime() + 600_000)).toBe(60_000)
+
+    // After the reversal the sidecar carries no deliveredAt, so it ticks again.
+    const reversed = elapsedWindowOf(order, { deliveredAt: null })
+    expect(isElapsedFinished(reversed)).toBe(false)
+    expect(elapsedMsOf(reversed, started.getTime() + 600_000)).toBe(600_000)
+  })
+
+  it('still stamps the forward steps exactly as before', () => {
+    expect(nextReadyAt('preparing', 'ready')).toBe('now')
+    expect(nextReadyAt('ready', 'delivered')).toBe('keep')
+    expect(nextDeliveredAt('ready', 'delivered')).toBe('now')
+    expect(nextReadyAt('pending', 'preparing')).toBeNull()
   })
 })
 

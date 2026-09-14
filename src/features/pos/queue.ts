@@ -15,7 +15,9 @@
 import type { TranslationKey } from '@/features/i18n/translations/en'
 import {
   canAdvanceFulfillment,
+  canReverseFulfillment,
   FULFILLMENT_ACTION_KEYS,
+  FULFILLMENT_BACK_ACTION_KEYS,
   FULFILLMENT_LABEL_KEYS,
   type FulfillmentStatus,
 } from '@/features/pos/fulfillment'
@@ -97,6 +99,32 @@ export interface QueueAction {
  * security rules decide it again independently at write time. This is what the button says,
  * not what is permitted.
  */
+/** The step back a card offers, when the counter owns one. */
+export interface QueueReversal {
+  /** Where the card moves back to. Always exactly one step. */
+  previous: FulfillmentStatus
+  labelKey: TranslationKey
+}
+
+/**
+ * The backward action on a card, or null when there is none for staff to take.
+ *
+ * Null at `pending`, which has nothing behind it, and null at `delivered`, which is an
+ * admin's correction rather than a step in the kitchen's workflow — see
+ * `isStaffReversibleStep`. The board is staff-only, so this asks as a staff account.
+ */
+export function queueReverseFor(view: OrderView): QueueReversal | null {
+  const reverse = canReverseFulfillment({
+    current: view.fulfillment,
+    voided: view.voided !== null,
+    isAdmin: false,
+  })
+  if (!reverse.ok) return null
+
+  const labelKey = FULFILLMENT_BACK_ACTION_KEYS[view.fulfillment]
+  return labelKey === null ? null : { previous: reverse.previous, labelKey }
+}
+
 export function queueActionFor(view: OrderView): QueueAction | null {
   const advance = canAdvanceFulfillment({
     current: view.fulfillment,

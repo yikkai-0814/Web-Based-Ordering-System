@@ -3,7 +3,7 @@ import type { Message } from '@/features/i18n/messages'
 import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { AlertCircle, Ban, ChefHat } from 'lucide-react'
+import { AlertCircle, Ban, ChefHat, Undo2 } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -14,10 +14,12 @@ import { useStaffSession } from '@/features/staff/useStaffSession'
 import { lineTotal } from '@/features/pos/cart'
 import {
   canAdvanceFulfillment,
+  canReverseFulfillment,
+  FULFILLMENT_BACK_ACTION_KEYS,
   FULFILLMENT_ACTION_KEYS,
   type FulfillmentStatus,
 } from '@/features/pos/fulfillment'
-import { setFulfillment } from '@/features/pos/fulfillment-api'
+import { correctFulfillment, setFulfillment } from '@/features/pos/fulfillment-api'
 import { OrderElapsedTime } from '@/features/pos/OrderElapsedTime'
 import { ORDER_TYPE_LABEL_KEYS } from '@/features/pos/order-type'
 import { withManagerAuthorization } from '@/features/pos/manager-authorization'
@@ -93,6 +95,18 @@ export function OrderDetailPage() {
   const isAdmin = role === 'admin'
   const eligibility = canRecordPayment({ state: paymentState, voided: voided !== null })
   const advance = canAdvanceFulfillment({ current: fulfillment, voided: voided !== null })
+  /**
+   * Stepping back is an ADMIN correction, and that is not a decision made here: firestore.rules
+   * accepts a backward step only from an admin, so offering the button to anyone else would
+   * be offering a refusal. The check mirrors the rule rather than replacing it.
+   */
+  // Asked as the signed-in role: staff own the two steps the kitchen takes back, and an
+  // admin may also reopen a delivered order. The rules judge the write by the same split.
+  const reverse = canReverseFulfillment({
+    current: fulfillment,
+    voided: voided !== null,
+    isAdmin,
+  })
 
   /**
    * When the money actually changed hands. A payment recorded after the fact carries its
@@ -137,6 +151,37 @@ export function OrderDetailPage() {
     } catch (caught) {
       // A rules refusal says only 'permission-denied', which tells the counter nothing. The
       // realistic cause is a stale page: somebody else moved this order on another device.
+      const denied = typeof caught === 'object' && caught !== null && 'code' in caught
+      setError(
+        denied
+          ? message('queue.moveFailed')
+          : isMessageError(caught)
+            ? caught.detail
+            : message('order.advanceFailed'),
+      )
+    } finally {
+      setAdvancing(false)
+    }
+  }
+
+  /**
+   * The same shape as `handleAdvance`, and deliberately sharing its `advancing` flag: the two
+   * buttons move the same order, so one being in flight must disable both. Pressing forward
+   * and back together would otherwise race, and whichever landed second would be refused for
+   * a `from` that no longer matched.
+   */
+  async function handleReverse(from: FulfillmentStatus, to: FulfillmentStatus) {
+    if (!profile || !order || !payer) return
+    setError(null)
+    setAdvancing(true)
+    try {
+      await correctFulfillment(order.id, {
+        from,
+        to,
+        user: { uid: profile.uid, displayName: profile.displayName },
+        staff: { id: payer.id, name: payer.name },
+      })
+    } catch (caught) {
       const denied = typeof caught === 'object' && caught !== null && 'code' in caught
       setError(
         denied
@@ -462,6 +507,41 @@ export function OrderDetailPage() {
             <ChefHat aria-hidden="true" />
             {advancing ? t('common.saving') : t(FULFILLMENT_ACTION_KEYS[fulfillment]!)}
           </Button>
+        )}
+
+        {/* Undoing a step, offered to whoever may actually take this one — staff for the two
+            the kitchen owns, an admin also for `delivered → ready`. The gate is the same
+            predicate the rules mirror, so a button is never shown that the server would
+            refuse. Reopening a delivery clears `deliveredAt`, which is exactly what "it was
+            not handed over after all" means and correctly resumes the customer's clock, while
+            `readyAt` is kept: undoing a mis-tapped handover does not un-cook the food. */}
+        {reverse.ok && FULFILLMENT_BACK_ACTION_KEYS[fulfillment] !== null && (
+          <Button
+            variant="ghost"
+            size="lg"
+            className="h-touch text-base"
+            data-testid="reverse-fulfillment"
+            data-previous={reverse.previous}
+            disabled={advancing}
+            onClick={() => void handleReverse(fulfillment, reverse.previous)}
+          >
+            <Undo2 aria-hidden="true" />
+            {advancing ? t('common.saving') : t(FULFILLMENT_BACK_ACTION_KEYS[fulfillment]!)}
+          </Button>
+        )}
+
+        {/* A step back exists here, but not for this account.
+        
+            Now that staff own `preparing → pending` and `ready → preparing`, this is left
+            saying one thing only: a delivered order can be reopened by an admin. Without it
+            the page simply ends — no way forward, because there is none, and no way back,
+            because reopening a handover is not the counter's to take — which reads as the app
+            being broken rather than as a permission. It changes no permission: the button is
+            still withheld, because the server would still refuse the write. */}
+        {!reverse.ok && voided === null && FULFILLMENT_BACK_ACTION_KEYS[fulfillment] !== null && (
+          <p className="basis-full text-sm text-muted-foreground" data-testid="reverse-admin-only">
+            {t('order.reverseAdminOnly')}
+          </p>
         )}
 
         {/* Both roles: taking money is the job of whoever is on the till. Offered only when

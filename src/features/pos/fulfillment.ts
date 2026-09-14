@@ -45,6 +45,22 @@ export const FULFILLMENT_ACTION_KEYS: Record<FulfillmentStatus, TranslationKey |
   delivered: null,
 }
 
+/**
+ * The wording on the button that steps each state BACK — again what the person is about to
+ * do, not the state they are leaving.
+ *
+ * Written out per state rather than composed from "Back to" plus a translated status name:
+ * a sentence assembled from fragments reads badly in some of the languages this ships in,
+ * and translators can see the whole phrase here.
+ */
+export const FULFILLMENT_BACK_ACTION_KEYS: Record<FulfillmentStatus, TranslationKey | null> = {
+  // Nothing precedes pending — it is the absence of a fulfilment document.
+  pending: null,
+  preparing: 'queue.backToPending',
+  ready: 'queue.backToPreparing',
+  delivered: 'queue.backToReady',
+}
+
 export function isFulfillmentStatus(value: unknown): value is FulfillmentStatus {
   return typeof value === 'string' && (FULFILLMENT_STATUSES as readonly string[]).includes(value)
 }
@@ -85,9 +101,30 @@ export function isForwardStep(from: FulfillmentStatus, to: FulfillmentStatus): b
   return nextFulfillment(from) === to
 }
 
-/** Whether a change is a legal single step backward — an admin-only correction. */
+/** Whether a change is a legal single step backward. */
 export function isBackwardStep(from: FulfillmentStatus, to: FulfillmentStatus): boolean {
   return previousFulfillment(from) === to
+}
+
+/**
+ * The backward steps a STAFF account may take unaided.
+ *
+ * The counter and the kitchen own this workflow — they are the ones working it during
+ * service — so correcting a mis-tap must not require finding an admin mid-rush. Both steps
+ * here are recoveries from a slip made moments earlier, and neither can lose anything: the
+ * only timestamp either touches is `readyAt`, which is re-recorded the moment the kitchen
+ * finishes again.
+ *
+ * **`delivered → ready` is deliberately absent.** Handing the order to the customer is the
+ * one step that is not a private kitchen state — it is a claim about the world, it stops the
+ * customer's clock, and it is what makes an order final during service. Undoing it is a
+ * correction to the record rather than a step in the workflow, so it stays with an admin.
+ *
+ * `firestore.rules` mirrors this exactly. Neither is the other's enforcement: this decides
+ * whether a button is offered, the rules decide whether a write is accepted.
+ */
+export function isStaffReversibleStep(from: FulfillmentStatus, to: FulfillmentStatus): boolean {
+  return (from === 'preparing' && to === 'pending') || (from === 'ready' && to === 'preparing')
 }
 
 /**
@@ -200,6 +237,52 @@ export function canAdvanceFulfillment({
   const next = nextFulfillment(current)
   if (!next) return { ok: false, reason: message('validation.alreadyDelivered') }
   return { ok: true, next }
+}
+
+export type FulfillmentReversal =
+  { ok: true; previous: FulfillmentStatus } | { ok: false; reason: Message }
+
+/**
+ * Whether fulfilment may be stepped back, and to what.
+ *
+ * The mirror of `canAdvanceFulfillment`, and like it this decides whether a button is shown
+ * with a reason rather than letting somebody discover the refusal from a failed write. The
+ * server is still the enforcement: firestore.rules permits a backward step only for an admin.
+ *
+ * **What is offered depends on who is asking.** Staff get the two steps the kitchen owns —
+ * `preparing → pending` and `ready → preparing` — so a mis-tap during service is theirs to
+ * fix. `delivered → ready` is an admin's, because undoing a handover is a correction to the
+ * record rather than a step in the workflow. See `isStaffReversibleStep`.
+ *
+ * **`delivered → ready` is safe when an admin does take it.** That one works because
+ * the timestamps already say what it means: `deliveredAt` is cleared, so the order stops
+ * counting as handed over and the customer's clock resumes, while `readyAt` is kept, because
+ * undoing a mis-tapped handover does not un-finish the cooking. Nothing else reads the
+ * fulfilment document to decide money: payment lives in its own document on its own axis, so
+ * reversing a delivery cannot disturb what was taken.
+ *
+ * A voided order is refused for the same reason it cannot be advanced — it is cancelled, and
+ * moving it through the kitchen either way is work on a sale that no longer exists.
+ */
+export function canReverseFulfillment({
+  current,
+  voided,
+  isAdmin,
+}: {
+  current: FulfillmentStatus
+  voided: boolean
+  /** An admin may take any single step back; staff only the two the kitchen owns. */
+  isAdmin: boolean
+}): FulfillmentReversal {
+  if (voided) {
+    return { ok: false, reason: message('validation.voidedNoWork') }
+  }
+  const previous = previousFulfillment(current)
+  if (!previous) return { ok: false, reason: message('validation.nothingToUndo') }
+  if (!isAdmin && !isStaffReversibleStep(current, previous)) {
+    return { ok: false, reason: message('validation.deliveredFinal') }
+  }
+  return { ok: true, previous }
 }
 
 /**

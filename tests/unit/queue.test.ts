@@ -8,6 +8,7 @@ import {
   itemCountOf,
   QUEUE_COLUMNS,
   queueActionFor,
+  queueReverseFor,
 } from '@/features/pos/queue'
 import type { Order, OrderFulfillment, OrderPayment, OrderVoid } from '@/features/pos/types'
 
@@ -230,6 +231,36 @@ describe('queueActionFor', () => {
       sidecars({ payments: new Map([[built.id, payment(built.id)]]) }),
     )
     expect(queueActionFor(paid)).toEqual({ next: 'preparing', labelKey: 'queue.startPreparing' })
+  })
+})
+
+describe('queueReverseFor — the counter correcting its own mis-tap', () => {
+  it('offers the two steps the kitchen owns', () => {
+    expect(queueReverseFor(at('preparing'))).toEqual({
+      previous: 'pending',
+      labelKey: 'queue.backToPending',
+    })
+    expect(queueReverseFor(at('ready'))).toEqual({
+      previous: 'preparing',
+      labelKey: 'queue.backToPreparing',
+    })
+  })
+
+  it('offers nothing at pending, which has nothing behind it', () => {
+    expect(queueReverseFor(at('pending'))).toBeNull()
+  })
+
+  it('offers nothing at delivered, because reopening a handover is an admin correction', () => {
+    expect(queueReverseFor(at('delivered'))).toBeNull()
+  })
+
+  it('never offers a step that skips one', () => {
+    for (const status of FULFILLMENT_STATUSES) {
+      const reversal = queueReverseFor(at(status))
+      if (!reversal) continue
+      const index = FULFILLMENT_STATUSES.indexOf(status)
+      expect(FULFILLMENT_STATUSES.indexOf(reversal.previous)).toBe(index - 1)
+    }
   })
 })
 
