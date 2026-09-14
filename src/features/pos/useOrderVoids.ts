@@ -12,17 +12,14 @@ import { parseOrderVoid, type OrderVoid } from '@/features/pos/types'
  *
  * Scoped to the orders the workspace has loaded — see `chunkOrderIds`.
  */
+const VOIDS_ERROR = message('load.voidsDate')
+
 export function useOrderVoids(chunks: readonly (readonly string[])[]): {
   voids: Map<string, OrderVoid>
   loading: boolean
   error: Message | null
 } {
-  const state = useSidecarDocs<OrderVoid>(
-    'orderVoids',
-    parseOrderVoid,
-    chunks,
-    message('load.voidsDate'),
-  )
+  const state = useSidecarDocs<OrderVoid>('orderVoids', parseOrderVoid, chunks, VOIDS_ERROR)
 
   return { voids: state.records, loading: state.loading, error: state.error }
 }

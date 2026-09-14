@@ -32,6 +32,9 @@ export interface OrderDetail {
 }
 
 const ORDER_ERROR = message('load.order')
+const PAYMENT_ERROR = message('load.payment')
+const VOID_ERROR = message('load.void')
+const FULFILMENT_ERROR = message('load.fulfilment')
 
 export function useOrderDetail(orderId: string | undefined): OrderDetail {
   const orderRef = useMemo(() => (orderId ? doc(db, 'orders', orderId) : null), [orderId])
@@ -43,9 +46,9 @@ export function useOrderDetail(orderId: string | undefined): OrderDetail {
   )
 
   const order = useLiveDoc(orderRef, parseOrder, ORDER_ERROR)
-  const payment = useLiveDoc(paymentRef, parseOrderPayment, message('load.payment'))
-  const voided = useLiveDoc(voidRef, parseOrderVoid, message('load.void'))
-  const fulfillment = useLiveDoc(fulfillmentRef, parseOrderFulfillment, message('load.fulfilment'))
+  const payment = useLiveDoc(paymentRef, parseOrderPayment, PAYMENT_ERROR)
+  const voided = useLiveDoc(voidRef, parseOrderVoid, VOID_ERROR)
+  const fulfillment = useLiveDoc(fulfillmentRef, parseOrderFulfillment, FULFILMENT_ERROR)
 
   const loading = order.loading || payment.loading || voided.loading || fulfillment.loading
 

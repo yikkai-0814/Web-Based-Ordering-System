@@ -17,6 +17,10 @@ import { db } from '@/lib/firebase'
  *
  * Each chunk's rows are held separately and merged on read, so one chunk's snapshot cannot
  * clobber another's.
+ *
+ * As in `use-live-query.ts`, the error message is held in a ref rather than depended on: a
+ * `Message` is rebuilt on every render, and making the reconciliation below react to that
+ * would reopen every chunk's listener on every render.
  */
 export interface SidecarState<T> {
   records: Map<string, T>
@@ -58,6 +62,10 @@ export function useSidecarDocs<T extends { orderId: string }>(
 
   const [pages, setPages] = useState<Map<string, T[]>>(() => new Map())
   const [error, setError] = useState<Message | null>(null)
+  const latestError = useRef(errorMessage)
+  useEffect(() => {
+    latestError.current = errorMessage
+  }, [errorMessage])
   const subscriptions = useRef(new Map<string, Unsubscribe>())
   /**
    * The chunks currently wanted, read by every snapshot callback.
@@ -109,11 +117,11 @@ export function useSidecarDocs<T extends { orderId: string }>(
             })
             setError(null)
           },
-          () => setError(errorMessage),
+          () => setError(latestError.current),
         ),
       )
     }
-  }, [signature, path, parse, errorMessage])
+  }, [signature, path, parse])
 
   // Torn down separately from the reconciliation above, which must NOT close listeners it is
   // about to keep. Clearing the map matters as much as unsubscribing: React's development

@@ -1,6 +1,6 @@
 import { message, type Message } from '@/features/i18n/messages'
 import { useTranslation } from '@/features/i18n/useTranslation'
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { AlertCircle } from 'lucide-react'
 
@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { createMenuItem, updateMenuItem, type CostInput } from '@/features/menu/menu-api'
+import { createMenuItem, updateMenuItem } from '@/features/menu/menu-api'
 import { ModifierGroupsEditor } from '@/features/menu/ModifierGroupsEditor'
 import { useItemCosts } from '@/features/menu/useItemCosts'
 import {
@@ -106,7 +106,11 @@ function MenuItemForm({
   const [description, setDescription] = useState(existing?.description ?? '')
   const [categoryId, setCategoryId] = useState(existing?.categoryId ?? categories[0]?.id ?? '')
   const [priceText, setPriceText] = useState(existing ? toPriceInputValue(existing.price) : '')
-  // Blank means "not recorded", which is deliberately not the same as zero.
+  /**
+   * Cost is mandatory, so this starts blank only for an item that predates the rule — and
+   * that item cannot be saved again until somebody fills it in, which is the point. An
+   * item without a cost turns every margin it appears in into an upper bound.
+   */
   const [costText, setCostText] = useState(
     existingCost === null ? '' : toPriceInputValue(existingCost),
   )
@@ -114,6 +118,15 @@ function MenuItemForm({
   const [active, setActive] = useState(existing?.active ?? true)
 
   const [error, setError] = useState<Message | null>(null)
+  /**
+   * Reported under the field rather than in the banner at the top of the form.
+   *
+   * This is the one check somebody will trip repeatedly — it is a newly required field on a
+   * form they already know — so the message belongs where the cursor is going, and the
+   * cursor is sent there too. The other checks stay in the banner; they are typos.
+   */
+  const [costError, setCostError] = useState<Message | null>(null)
+  const costInput = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState(false)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -144,16 +157,24 @@ function MenuItemForm({
       return
     }
 
-    // Cost is optional. Blank stores no cost document at all rather than a misleading 0.
-    let parsedCost: CostInput = null
-    if (costText.trim() !== '') {
-      const result = parsePriceInput(costText)
-      if (!result.ok) {
-        setError(message('validation.costPrefix', { reason: t(result.error) }))
-        return
-      }
-      parsedCost = result.sen
+    // Cost is mandatory. Blank, whitespace or unparseable all stop the submit here, with
+    // the message under the field and the cursor in it.
+    if (costText.trim() === '') {
+      setError(null)
+      setCostError(message('validation.costRequired'))
+      costInput.current?.focus()
+      return
     }
+    // `parsePriceInput` is the same parser the price field uses: it rejects a negative, a
+    // non-number and more than two decimals, and accepts 0 — which is a real answer.
+    const parsedCostResult = parsePriceInput(costText)
+    if (!parsedCostResult.ok) {
+      setError(null)
+      setCostError(parsedCostResult.error)
+      costInput.current?.focus()
+      return
+    }
+    const parsedCost = parsedCostResult.sen
 
     const parsedSort = Number(sortOrder)
     if (!Number.isInteger(parsedSort)) {
@@ -162,6 +183,7 @@ function MenuItemForm({
     }
 
     setError(null)
+    setCostError(null)
     setPending(true)
     try {
       const input = {
@@ -262,17 +284,44 @@ function MenuItemForm({
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="cost">{t('menu.costCurrency', { currency: CURRENCY_PREFIX })}</Label>
+              <Label htmlFor="cost">
+                {t('menu.costCurrency', { currency: CURRENCY_PREFIX })}{' '}
+                {/* Decoration for the eye only: `required` and `aria-invalid` on the input
+                    are what a screen reader is actually told. */}
+                <span aria-hidden="true" className="text-destructive">
+                  *
+                </span>
+              </Label>
               <Input
+                ref={costInput}
                 id="cost"
                 inputMode="decimal"
+                required
+                aria-invalid={costError !== null}
+                aria-describedby={costError ? 'cost-error' : 'cost-hint'}
                 placeholder={t('menu.costPlaceholder')}
                 className="h-touch text-base"
                 value={costText}
-                onChange={(event) => setCostText(event.target.value)}
+                onChange={(event) => {
+                  setCostText(event.target.value)
+                  setCostError(null)
+                }}
                 disabled={pending}
+                data-testid="cost"
               />
-              <p className="text-xs text-muted-foreground">{t('menu.costBlurb')}</p>
+              {costError && (
+                <p
+                  id="cost-error"
+                  role="alert"
+                  className="text-xs text-destructive"
+                  data-testid="cost-error"
+                >
+                  {t(costError)}
+                </p>
+              )}
+              <p id="cost-hint" className="text-xs text-muted-foreground">
+                {t('menu.costBlurb')}
+              </p>
             </div>
 
             <div className="grid gap-2">

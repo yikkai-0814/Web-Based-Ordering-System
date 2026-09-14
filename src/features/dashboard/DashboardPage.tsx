@@ -210,7 +210,7 @@ function TodayBusinessBands({ businessDate }: { businessDate: string }) {
   // today's heading. One day, so both ends are that day — the same shape rangeFor returns
   // for its own `today` preset.
   const range = useMemo<DateRange>(() => ({ from: businessDate, to: businessDate }), [businessDate])
-  const { report, loading, error, refresh } = useReport(range)
+  const { report, loading, refreshing, error, refresh } = useReport(range)
 
   /**
    * An item sold without a recorded cost.
@@ -230,7 +230,13 @@ function TodayBusinessBands({ businessDate }: { businessDate: string }) {
         title={t('dashboard.costAndProfit')}
         description={t('dashboard.costAndProfitBlurb')}
         action={
-          <Button type="button" size="sm" variant="outline" onClick={refresh} disabled={loading}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={refresh}
+            disabled={loading || refreshing}
+          >
             {t('dashboard.refresh')}
           </Button>
         }

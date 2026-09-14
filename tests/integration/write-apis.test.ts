@@ -846,16 +846,35 @@ describe('the menu write API keeps cost and its journal in step', () => {
     expect(cost.get('cost')).toBe(420)
   })
 
-  it('clearing a cost removes the document and journals the clearing as null', async () => {
+  /**
+   * Cost is mandatory, so clearing one is no longer something this API can express.
+   *
+   * It used to: `next: null` deleted the document and journalled the clearing. That is gone
+   * because an item without a cost quietly turns every margin it appears in into an upper
+   * bound, and the form now refuses to save one. The type refuses `null` at compile time;
+   * this is the runtime half of the same guarantee, for a caller that reached here anyway.
+   */
+  it('refuses to write a missing or nonsensical cost, leaving the existing one alone', async () => {
     await signInAs(admin)
     const itemId = await createMenuItem(ITEM, 380)
-    await updateMenuItem(itemId, ITEM, { next: null, previous: 380 })
+
+    for (const bad of [null, undefined, -1, 4.5, Number.NaN, '380']) {
+      await expect(
+        updateMenuItem(itemId, ITEM, { next: bad as unknown as number, previous: 380 }),
+      ).rejects.toThrow()
+    }
 
     const cost = await getDoc(doc(db, 'menuItemCosts', itemId))
-    expect(cost.exists()).toBe(false)
-    const history = await getDocs(collection(db, 'menuItemCostHistory'))
-    // A clearing is a real event, not an absence — reporting must not fall back past it.
-    expect(history.docs.some((entry) => entry.get('cost') === null)).toBe(true)
+    expect(cost.get('cost')).toBe(380)
+  })
+
+  it('accepts a cost of zero, which is a statement rather than an absence', async () => {
+    await signInAs(admin)
+    const itemId = await createMenuItem(ITEM, 0)
+
+    const cost = await getDoc(doc(db, 'menuItemCosts', itemId))
+    expect(cost.exists()).toBe(true)
+    expect(cost.get('cost')).toBe(0)
   })
 
   it('deletes an item together with its cost', async () => {

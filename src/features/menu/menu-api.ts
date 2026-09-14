@@ -49,22 +49,43 @@ export interface MenuItemInput {
 /**
  * What the café pays, in whole sen, or `null` for "not recorded".
  *
- * Null is meaningfully different from `0`: zero would claim the item is free to make,
- * which would quietly poison any margin figure the reporting phase later derives. An
- * unrecorded cost is stored as no document at all.
+ * `null` is now only ever an *outgoing* value. Every item written through this module
+ * carries a cost, because an item without one silently turns every margin it appears in
+ * into an upper bound — the Reports page has a whole warning band about exactly that. But
+ * items created before the rule existed genuinely have no cost, so `previous` still has to
+ * be able to say so.
+ *
+ * Zero remains meaningfully different from absent: zero claims the item is free to make,
+ * which is a statement, where absent is the lack of one.
  */
 export type CostInput = number | null
 
 /**
  * A cost change, stated as both its new and previous value.
  *
- * Both halves are required. `next` alone would make omitting it silently delete a recorded
- * cost, and `previous` is what lets the history journal record only real changes rather
+ * `next` is a plain number: cost is mandatory, so there is no longer any way to express
+ * "clear it", by accident or on purpose. `previous` stays nullable for the legacy items
+ * described above, and is what lets the history journal record only real changes rather
  * than an entry every time somebody fixes a typo in an item's name.
  */
 export interface CostUpdate {
-  next: CostInput
+  next: number
   previous: CostInput
+}
+
+/**
+ * The backstop behind the form's own validation.
+ *
+ * The form refuses a blank or malformed cost before it gets here, and the type refuses
+ * `null` at compile time — but neither survives contact with a caller written later, or
+ * with `any` arriving from a test or the console. Whole sen and never negative are the same
+ * two invariants the price fields are held to; see src/lib/money.ts.
+ */
+function requireCost(cost: number): number {
+  if (typeof cost !== 'number' || !Number.isInteger(cost) || cost < 0) {
+    throw new MessageError(message('validation.costRequired'))
+  }
+  return cost
 }
 
 /**
@@ -85,12 +106,9 @@ function writeCost(
   opening: OpeningEntry | null = null,
 ): void {
   const reference = doc(db, 'menuItemCosts', itemId)
-  if (cost.next === null) {
-    // Deleting an absent document is a no-op, so this is safe when none was recorded.
-    batch.delete(reference)
-  } else {
-    batch.set(reference, { cost: cost.next, updatedAt: serverTimestamp() })
-  }
+  // Always a write, never a delete: cost is mandatory, so there is no state in which an
+  // item should be left without its cost document.
+  batch.set(reference, { cost: requireCost(cost.next), updatedAt: serverTimestamp() })
 
   if (cost.next === cost.previous) return
 
@@ -160,7 +178,8 @@ export async function deleteCategory(id: string): Promise<void> {
   await deleteDoc(doc(db, 'categories', id))
 }
 
-export async function createMenuItem(input: MenuItemInput, cost: CostInput): Promise<string> {
+/** `cost` is mandatory: an item cannot be created without one. See `requireCost`. */
+export async function createMenuItem(input: MenuItemInput, cost: number): Promise<string> {
   // The id is generated client-side so the item and its cost can share one, and both go in
   // a single batch.
   const itemReference = doc(collection(db, 'menuItems'))
@@ -179,10 +198,9 @@ export async function createMenuItem(input: MenuItemInput, cost: CostInput): Pro
 /**
  * `cost` is **required**, with no default.
  *
- * `next: null` clears a recorded cost, so a default would mean that any caller who simply
- * forgot the argument would silently delete cost data. Forcing every call site to state
- * both the new and previous value makes that impossible to do by accident, and gives the
- * history journal what it needs to record only genuine changes.
+ * Both halves have to be stated. A default for `next` would let a caller who simply forgot
+ * the argument write a cost nobody chose, and `previous` is what the history journal needs
+ * in order to record only genuine changes.
  */
 export async function updateMenuItem(
   id: string,

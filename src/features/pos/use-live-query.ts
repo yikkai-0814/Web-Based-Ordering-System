@@ -1,5 +1,5 @@
 import type { Message } from '@/features/i18n/messages'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { onSnapshot, type DocumentReference, type Query } from 'firebase/firestore'
 
 /**
@@ -14,6 +14,16 @@ import { onSnapshot, type DocumentReference, type Query } from 'firebase/firesto
  * Callers must pass a **memoised** query or reference. Firestore builds a new object on
  * every `query()` call, so an inline one would tear the subscription down and rebuild it on
  * every render.
+ *
+ * **The error message is deliberately NOT a subscription dependency.** It is a string to show
+ * if the read fails, which is no reason to close a listener and open another one. It used to
+ * be a plain string literal, so passing it inline was harmless — two renders produced the
+ * same primitive and the effect stayed put. Translating it turned it into a `Message` object,
+ * and `message('load.orders')` builds a fresh one on every render: reference-unequal every
+ * time, so the effect re-ran, re-subscribed, took a snapshot, set state, and re-rendered —
+ * a loop that never settled. It is held in a ref instead and read only when a snapshot
+ * actually fails, which makes the whole class of mistake impossible rather than fixing the
+ * four call sites that happened to make it.
  *
  * Each hook remembers which query its snapshot came from and only returns it while that
  * query is still the one being asked. Switching the business date therefore reads as
@@ -60,6 +70,11 @@ export function useQueryDocs<T>(
     state: LiveQueryState<T>
   } | null>(null)
 
+  const latestError = useRef(errorMessage)
+  useEffect(() => {
+    latestError.current = errorMessage
+  }, [errorMessage])
+
   useEffect(() => {
     if (!liveQuery) return
 
@@ -76,11 +91,11 @@ export function useQueryDocs<T>(
       () => {
         setReceived({
           source: liveQuery,
-          state: { data: [], loading: false, error: errorMessage },
+          state: { data: [], loading: false, error: latestError.current },
         })
       },
     )
-  }, [liveQuery, parse, errorMessage])
+  }, [liveQuery, parse])
 
   if (!liveQuery) return IDLE as LiveQueryState<T>
   return received?.source === liveQuery ? received.state : (LOADING as LiveQueryState<T>)
@@ -122,6 +137,11 @@ export function useLiveDoc<T>(
     state: LiveDocState<T>
   } | null>(null)
 
+  const latestError = useRef(errorMessage)
+  useEffect(() => {
+    latestError.current = errorMessage
+  }, [errorMessage])
+
   useEffect(() => {
     if (!reference) return
 
@@ -134,11 +154,11 @@ export function useLiveDoc<T>(
       () => {
         setReceived({
           source: reference,
-          state: { data: null, loading: false, error: errorMessage },
+          state: { data: null, loading: false, error: latestError.current },
         })
       },
     )
-  }, [reference, parse, errorMessage])
+  }, [reference, parse])
 
   if (!reference) return DOC_IDLE as LiveDocState<T>
   return received?.source === reference ? received.state : (DOC_LOADING as LiveDocState<T>)

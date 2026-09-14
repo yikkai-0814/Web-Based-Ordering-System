@@ -20,6 +20,9 @@ import { db } from '@/lib/firebase'
  * different field is exactly what would require a composite index, and a day's orders are
  * few enough that sorting them costs nothing.
  */
+/** Module-level so it is one object for the life of the app, not one per render. */
+const ORDERS_ERROR = message('load.orders')
+
 export function useOrders(businessDate: string): {
   orders: Order[]
   loading: boolean
@@ -30,7 +33,7 @@ export function useOrders(businessDate: string): {
     [businessDate],
   )
 
-  const state = useQueryDocs<Order>(ordersQuery, parseOrder, message('load.orders'))
+  const state = useQueryDocs<Order>(ordersQuery, parseOrder, ORDERS_ERROR)
 
   const orders = useMemo(() => [...state.data].sort(byNumberDescending), [state.data])
 

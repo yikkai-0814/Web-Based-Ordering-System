@@ -80,12 +80,21 @@ describe('the account panel', () => {
     expect(nameField().value).toBe('Ada Admin')
   })
 
-  it('shows the email but does not let it be edited', () => {
+  it('does not offer the email as a field', () => {
+    // It was here, read-only, and amounted to a box that could not be used sitting beside
+    // the one that could. The address is still shown in the account menu, under the name.
     renderSettings()
-    const email = screen.getByTestId('account-email') as HTMLInputElement
-    expect(email.value).toBe('ada@example.test')
-    expect(email.readOnly).toBe(true)
-    expect(email.getAttribute('aria-readonly')).toBe('true')
+    expect(screen.queryByTestId('account-email')).toBeNull()
+    expect(screen.queryByLabelText('Email')).toBeNull()
+    expect(screen.queryByText(/The address you sign in with/)).toBeNull()
+    expect(screen.queryByText('ada@example.test')).toBeNull()
+  })
+
+  it('leaves the display name as the only input on the card', () => {
+    renderSettings()
+    const inputs = screen.getByTestId('settings-account').querySelectorAll('input')
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0]?.getAttribute('data-testid')).toBe('display-name')
   })
 
   it('will not save a name that has not changed', () => {

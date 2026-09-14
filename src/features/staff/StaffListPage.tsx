@@ -82,8 +82,6 @@ export function StaffListPage() {
     })
   }
 
-  if (loading) return <Skeleton className="h-96 w-full max-w-3xl" />
-
   return (
     <div className="space-y-6">
       <div>
@@ -121,7 +119,13 @@ export function StaffListPage() {
         </Button>
       </form>
 
-      {staff.length === 0 ? (
+      {/* Only the roster waits. Everything above — the heading, the blurb, the form for
+          adding somebody — is static or usable straight away, so returning a bare skeleton
+          for the whole page meant a navigation here showed nothing at all, not even a title,
+          until Firestore answered. */}
+      {loading ? (
+        <Skeleton className="h-96 w-full max-w-3xl" />
+      ) : staff.length === 0 ? (
         <p className="text-muted-foreground">{t('staff.empty')}</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">

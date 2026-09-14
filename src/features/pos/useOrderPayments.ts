@@ -12,6 +12,8 @@ import { parseOrderPayment, type OrderPayment } from '@/features/pos/types'
  * Scoped to the orders the workspace has loaded rather than the whole collection — the
  * chunks come from `chunkOrderIds`, so exactly one business date's payments are read.
  */
+const PAYMENTS_ERROR = message('load.paymentsDate')
+
 export function useOrderPayments(chunks: readonly (readonly string[])[]): {
   payments: Map<string, OrderPayment>
   loading: boolean
@@ -21,7 +23,7 @@ export function useOrderPayments(chunks: readonly (readonly string[])[]): {
     'orderPayments',
     parseOrderPayment,
     chunks,
-    message('load.paymentsDate'),
+    PAYMENTS_ERROR,
   )
 
   return { payments: state.records, loading: state.loading, error: state.error }

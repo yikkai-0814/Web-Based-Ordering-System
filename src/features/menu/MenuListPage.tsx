@@ -3,7 +3,7 @@ import { message } from '@/features/i18n/messages'
 import { useTranslation } from '@/features/i18n/useTranslation'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { AlertCircle, FolderCog, Pencil, Plus } from 'lucide-react'
+import { AlertCircle, FolderCog, Pencil, Plus, TriangleAlert } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -79,15 +79,6 @@ export function MenuListPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-9 w-48" />
-        <Skeleton className="h-64 w-full max-w-4xl" />
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start gap-3">
@@ -122,110 +113,141 @@ export function MenuListPage() {
         </Alert>
       )}
 
-      {groups.length === 0 && (
+      {/* Only the catalogue waits. The heading, the blurb and the two admin buttons are
+          static, so blanking them while the collections load bought nothing and made a
+          navigation to this page read as a grey rectangle — measured at 611 ms before the
+          heading appeared on a cold client, where the page's own structure could have been
+          on screen in a single frame. The links work immediately now, too. */}
+      {loading && <Skeleton className="h-64 w-full max-w-4xl" />}
+
+      {!loading && groups.length === 0 && (
         <p className="text-muted-foreground">{t(isAdmin ? 'menu.isEmptyAdmin' : 'menu.isEmpty')}</p>
       )}
 
-      {groups.map(({ category, items: groupItems }) => (
-        <section key={category?.id ?? '__uncategorised'} className="space-y-2">
-          <h2 className="flex items-center gap-2 text-lg font-medium">
-            {/* The category name is the vendor's own; only the stand-in is translated. */}
-            {category?.name ?? t('menu.uncategorised')}
-            {category && !category.active && (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                {t('menu.hidden')}
-              </span>
-            )}
-          </h2>
+      {!loading &&
+        groups.map(({ category, items: groupItems }) => (
+          <section key={category?.id ?? '__uncategorised'} className="space-y-2">
+            <h2 className="flex items-center gap-2 text-lg font-medium">
+              {/* The category name is the vendor's own; only the stand-in is translated. */}
+              {category?.name ?? t('menu.uncategorised')}
+              {category && !category.active && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                  {t('menu.hidden')}
+                </span>
+              )}
+            </h2>
 
-          {groupItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('menu.noItemsInCategory')}</p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('menu.columnItem')}</TableHead>
-                    <TableHead className="w-32 text-right">{t('common.price')}</TableHead>
-                    {/* Cost is admin-only, and enforced as such by firestore.rules —
+            {groupItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t('menu.noItemsInCategory')}</p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('menu.columnItem')}</TableHead>
+                      <TableHead className="w-32 text-right">{t('common.price')}</TableHead>
+                      {/* Cost is admin-only, and enforced as such by firestore.rules —
                         this column simply does not exist for staff. */}
-                    {isAdmin && <TableHead className="w-32 text-right">{t('menu.cost')}</TableHead>}
-                    <TableHead className="w-28">{t('menu.columnStatus')}</TableHead>
-                    {isAdmin && (
-                      <TableHead className="w-64 text-right">{t('common.actions')}</TableHead>
-                    )}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {groupItems.map((item) => (
-                    <TableRow key={item.id} data-testid="menu-item-row" data-item-name={item.name}>
-                      <TableCell>
-                        <span className="font-medium">{item.name}</span>
-                        {item.description && (
-                          <span className="block text-xs text-muted-foreground">
-                            {item.description}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums" data-testid="item-price">
-                        {formatMoney(item.price)}
-                      </TableCell>
                       {isAdmin && (
-                        <TableCell
-                          className="text-right tabular-nums text-muted-foreground"
-                          data-testid="item-cost"
-                        >
-                          {costs.has(item.id) ? formatMoney(costs.get(item.id) ?? 0) : '—'}
-                        </TableCell>
+                        <TableHead className="w-32 text-right">{t('menu.cost')}</TableHead>
                       )}
-                      <TableCell>
-                        <span
-                          className={
-                            item.active
-                              ? 'text-sm text-foreground'
-                              : 'text-sm text-muted-foreground'
-                          }
-                        >
-                          {t(item.active ? 'menu.available' : 'menu.archived')}
-                        </span>
-                      </TableCell>
+                      <TableHead className="w-28">{t('menu.columnStatus')}</TableHead>
                       {isAdmin && (
-                        <TableCell className="text-right whitespace-nowrap">
-                          <Button asChild variant="ghost" size="sm">
-                            <Link
-                              to={`/menu/${item.id}/edit`}
-                              aria-label={t('menu.editItemNamed', { name: item.name })}
-                            >
-                              <Pencil aria-hidden="true" />
-                              {t('common.edit')}
-                            </Link>
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => void run(() => setMenuItemActive(item.id, !item.active))}
-                          >
-                            {t(item.active ? 'menu.archive' : 'menu.restore')}
-                          </Button>
-                          <ConfirmDeleteDialog
-                            title={t('menu.deleteTitle', { name: item.name })}
-                            description={t('menu.deleteBlurb')}
-                            onConfirm={() => run(() => deleteMenuItem(item.id))}
-                          >
-                            <Button variant="destructive" size="sm">
-                              {t('common.delete')}
-                            </Button>
-                          </ConfirmDeleteDialog>
-                        </TableCell>
+                        <TableHead className="w-64 text-right">{t('common.actions')}</TableHead>
                       )}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </section>
-      ))}
+                  </TableHeader>
+                  <TableBody>
+                    {groupItems.map((item) => (
+                      <TableRow
+                        key={item.id}
+                        data-testid="menu-item-row"
+                        data-item-name={item.name}
+                      >
+                        <TableCell>
+                          <span className="font-medium">{item.name}</span>
+                          {item.description && (
+                            <span className="block text-xs text-muted-foreground">
+                              {item.description}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums" data-testid="item-price">
+                          {formatMoney(item.price)}
+                        </TableCell>
+                        {isAdmin && (
+                          <TableCell
+                            className="text-right tabular-nums text-muted-foreground"
+                            data-testid="item-cost"
+                          >
+                            {/* An item with no cost is not a blank, it is a job to do: every
+                              margin it appears in is an upper bound until somebody fills it
+                              in. A dash said nothing and read as "zero" at a glance, so the
+                              row now says what is wrong and links to where to fix it. */}
+                            {costs.has(item.id) ? (
+                              formatMoney(costs.get(item.id) ?? 0)
+                            ) : (
+                              <Link
+                                to={`/menu/${item.id}/edit`}
+                                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary ring-1 ring-primary/25 transition-colors hover:bg-primary/20 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                                data-testid="item-missing-cost"
+                              >
+                                <TriangleAlert className="size-3" aria-hidden="true" />
+                                {t('menu.missingCost')}
+                              </Link>
+                            )}
+                          </TableCell>
+                        )}
+                        <TableCell>
+                          <span
+                            className={
+                              item.active
+                                ? 'text-sm text-foreground'
+                                : 'text-sm text-muted-foreground'
+                            }
+                          >
+                            {t(item.active ? 'menu.available' : 'menu.archived')}
+                          </span>
+                        </TableCell>
+                        {isAdmin && (
+                          <TableCell className="text-right whitespace-nowrap">
+                            <Button asChild variant="ghost" size="sm">
+                              <Link
+                                to={`/menu/${item.id}/edit`}
+                                aria-label={t('menu.editItemNamed', { name: item.name })}
+                              >
+                                <Pencil aria-hidden="true" />
+                                {t('common.edit')}
+                              </Link>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                void run(() => setMenuItemActive(item.id, !item.active))
+                              }
+                            >
+                              {t(item.active ? 'menu.archive' : 'menu.restore')}
+                            </Button>
+                            <ConfirmDeleteDialog
+                              title={t('menu.deleteTitle', { name: item.name })}
+                              description={t('menu.deleteBlurb')}
+                              onConfirm={() => run(() => deleteMenuItem(item.id))}
+                            >
+                              <Button variant="destructive" size="sm">
+                                {t('common.delete')}
+                              </Button>
+                            </ConfirmDeleteDialog>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </section>
+        ))}
     </div>
   )
 }

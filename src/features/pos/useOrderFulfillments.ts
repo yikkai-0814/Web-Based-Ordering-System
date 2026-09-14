@@ -16,6 +16,8 @@ import { parseOrderFulfillment, type OrderFulfillment } from '@/features/pos/typ
  *
  * Scoped to the orders the workspace has loaded — see `chunkOrderIds`.
  */
+const FULFILMENTS_ERROR = message('load.fulfilmentDate')
+
 export function useOrderFulfillments(chunks: readonly (readonly string[])[]): {
   fulfillments: Map<string, OrderFulfillment>
   loading: boolean
@@ -25,7 +27,7 @@ export function useOrderFulfillments(chunks: readonly (readonly string[])[]): {
     'orderFulfillment',
     parseOrderFulfillment,
     chunks,
-    message('load.fulfilmentDate'),
+    FULFILMENTS_ERROR,
   )
 
   return { fulfillments: state.records, loading: state.loading, error: state.error }

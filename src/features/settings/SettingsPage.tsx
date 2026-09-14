@@ -52,12 +52,12 @@ export function SettingsPage() {
 }
 
 /**
- * The display name, and the address it is attached to.
+ * The display name — the one thing about an account its owner may change.
  *
- * The email is shown but not editable: it is the sign-in credential, changing it is an
- * account operation rather than a preference, and the rules refuse a self-write to it. A
- * disabled field that says why is more use than no field at all — somebody who wants to
- * change it needs to know who to ask.
+ * Deliberately just the one field. The email was here too, read-only, on the reasoning that
+ * somebody wanting to change it needs to know who to ask; in practice it was a box that
+ * could not be used, taking up half the card next to the field that could. The address is
+ * still visible where it is actually useful — in the account menu, under the name.
  */
 function AccountPanel() {
   const { t } = useTranslation()
@@ -117,7 +117,10 @@ function AccountPanel() {
         </Alert>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      {/* One field, so it is capped rather than stretched: a name is a few words, and an
+          input running the full width of the card invites the eye to expect a paragraph.
+          The button sits directly beneath it, inside the same column. */}
+      <div className="grid max-w-sm gap-4">
         <div className="grid gap-2">
           <Label htmlFor="display-name">{t('settings.displayName')}</Label>
           <Input
@@ -135,47 +138,30 @@ function AccountPanel() {
           />
         </div>
 
-        <div className="grid gap-2">
-          <Label htmlFor="account-email">{t('settings.email')}</Label>
-          {/* Read-only rather than disabled: a disabled input greys its value until it
-              reads as a placeholder, and this is a real value somebody may want to select
-              and copy. It still cannot be edited, and the rules would refuse the write. */}
-          <Input
-            id="account-email"
-            className="h-touch bg-muted/40 text-base"
-            value={profile.email}
-            readOnly
-            tabIndex={-1}
-            aria-readonly="true"
-            data-testid="account-email"
-          />
-          <p className="text-xs text-muted-foreground">{t('settings.emailHint')}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          type="button"
-          size="lg"
-          className="h-touch text-base"
-          disabled={pending || unchanged}
-          onClick={() => void handleSave()}
-          data-testid="save-display-name"
-        >
-          {t(pending ? 'common.saving' : 'common.save')}
-        </Button>
-        {/* Confirmation where the action was, not in a corner of the screen: this is one
-            field and one button, and a toast would be a second place to look. */}
-        {saved && (
-          <span
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-success"
-            role="status"
-            data-testid="display-name-saved"
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            size="lg"
+            className="h-touch text-base"
+            disabled={pending || unchanged}
+            onClick={() => void handleSave()}
+            data-testid="save-display-name"
           >
-            <Check className="size-4" aria-hidden="true" />
-            {t('settings.saved')}
-          </span>
-        )}
+            {t(pending ? 'common.saving' : 'common.save')}
+          </Button>
+          {/* Confirmation where the action was, not in a corner of the screen: this is one
+              field and one button, and a toast would be a second place to look. */}
+          {saved && (
+            <span
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-success"
+              role="status"
+              data-testid="display-name-saved"
+            >
+              <Check className="size-4" aria-hidden="true" />
+              {t('settings.saved')}
+            </span>
+          )}
+        </div>
       </div>
     </Panel>
   )
