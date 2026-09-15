@@ -245,3 +245,200 @@ describe('the cost collection is untouched by any of this', () => {
     await assertFails(getDoc(doc(staffDb(), 'menuItemCosts', ITEM_ID)))
   })
 })
+/**
+ * What an option COSTS lives apart from what it adds to the bill, and is admin-only.
+ *
+ * The separation is not stylistic. `modifierGroups` is staff-readable — the till cannot ask
+ * "extra egg?" without it — and Firestore grants or denies whole documents, so a cost field
+ * beside `priceAdjustment` would be a cost every staff account could read. These tests are
+ * what makes "staff cannot see modifier cost" a checked property rather than a claim.
+ */
+describe('modifier option costs are admin-only', () => {
+  const GROUP_ID = 'existing'
+  const OPTION_ID = 'veg-none'
+  const COST_ID = `${GROUP_ID}__${OPTION_ID}`
+
+  const cost = (over: Record<string, unknown> = {}) => ({
+    groupId: GROUP_ID,
+    optionId: OPTION_ID,
+    cost: 40,
+    updatedAt: new Date(),
+    ...over,
+  })
+
+  async function seedCost() {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'modifierOptionCosts', COST_ID), cost())
+    })
+  }
+
+  it('lets an admin write a cost and read it back', async () => {
+    await seed()
+    await assertSucceeds(setDoc(doc(adminDb(), 'modifierOptionCosts', COST_ID), cost()))
+    const snapshot = await assertSucceeds(getDoc(doc(adminDb(), 'modifierOptionCosts', COST_ID)))
+    expect(snapshot.get('cost')).toBe(40)
+  })
+
+  it('lets an admin update a cost', async () => {
+    await seed()
+    await seedCost()
+    await assertSucceeds(setDoc(doc(adminDb(), 'modifierOptionCosts', COST_ID), cost({ cost: 60 })))
+  })
+
+  it('lets an admin list them, which is what the editor and the report both do', async () => {
+    await seed()
+    await seedCost()
+    const all = await assertSucceeds(getDocs(collection(adminDb(), 'modifierOptionCosts')))
+    expect(all.size).toBe(1)
+  })
+
+  it('refuses STAFF reading one — the whole reason this is a separate collection', async () => {
+    await seed()
+    await seedCost()
+    await assertFails(getDoc(doc(staffDb(), 'modifierOptionCosts', COST_ID)))
+  })
+
+  it('refuses staff listing the collection', async () => {
+    await seed()
+    await seedCost()
+    await assertFails(getDocs(collection(staffDb(), 'modifierOptionCosts')))
+  })
+
+  it('refuses staff writing one', async () => {
+    await seed()
+    await assertFails(setDoc(doc(staffDb(), 'modifierOptionCosts', COST_ID), cost()))
+  })
+
+  it('refuses staff editing a cost that already exists', async () => {
+    await seed()
+    await seedCost()
+    await assertFails(updateDoc(doc(staffDb(), 'modifierOptionCosts', COST_ID), { cost: 0 }))
+  })
+
+  it('refuses an anonymous caller entirely', async () => {
+    await seed()
+    await seedCost()
+    const anon = testEnv.unauthenticatedContext().firestore()
+    await assertFails(getDoc(doc(anon, 'modifierOptionCosts', COST_ID)))
+    await assertFails(setDoc(doc(anon, 'modifierOptionCosts', COST_ID), cost()))
+  })
+
+  it('leaves the GROUP staff-readable, which this change must not have disturbed', async () => {
+    await seed()
+    await seedCost()
+    // Both halves of the design, asserted together: the question is public to the counter,
+    // the cost of answering it is not.
+    await assertSucceeds(getDoc(doc(staffDb(), 'modifierGroups', GROUP_ID)))
+    await assertFails(getDoc(doc(staffDb(), 'modifierOptionCosts', COST_ID)))
+  })
+
+  it('refuses a cost for a group that does not exist', async () => {
+    await seed()
+    await assertFails(
+      setDoc(
+        doc(adminDb(), 'modifierOptionCosts', `ghost__${OPTION_ID}`),
+        cost({ groupId: 'ghost' }),
+      ),
+    )
+  })
+
+  it('refuses a document whose fields disagree with the id it is filed under', async () => {
+    await seed()
+    // Filed under one option, claiming to be another: resolvable two ways, so refused.
+    await assertFails(
+      setDoc(doc(adminDb(), 'modifierOptionCosts', COST_ID), cost({ optionId: 'veg-normal' })),
+    )
+  })
+
+  it('refuses a malformed or negative cost', async () => {
+    await seed()
+    for (const bad of [-1, 12.5, '40', null]) {
+      await assertFails(setDoc(doc(adminDb(), 'modifierOptionCosts', COST_ID), cost({ cost: bad })))
+    }
+  })
+
+  it('refuses a cost carrying a field the app does not write', async () => {
+    await seed()
+    await assertFails(setDoc(doc(adminDb(), 'modifierOptionCosts', COST_ID), cost({ margin: 100 })))
+  })
+})
+
+/**
+ * The journal behind historical resolution, with the same guarantees menuItemCostHistory has.
+ *
+ * Staff cannot read costs, so they cannot stamp one onto an order they ring up — reporting
+ * resolves an option's cost by date from here instead. Append-only, because a trail that
+ * could be rewritten would not be one.
+ */
+describe('modifier option cost history', () => {
+  const GROUP_ID = 'existing'
+  const OPTION_ID = 'veg-none'
+
+  const entry = (uid: string, over: Record<string, unknown> = {}) => ({
+    groupId: GROUP_ID,
+    optionId: OPTION_ID,
+    cost: 40,
+    effectiveFrom: new Date(),
+    recordedBy: uid,
+    ...over,
+  })
+
+  it('lets an admin append an entry and read the journal', async () => {
+    await seed()
+    await assertSucceeds(
+      setDoc(doc(adminDb(), 'modifierOptionCostHistory', 'e1'), entry(ADMIN_UID)),
+    )
+    await assertSucceeds(getDocs(collection(adminDb(), 'modifierOptionCostHistory')))
+  })
+
+  it('accepts a CLEARED cost, which records a real event rather than a gap', async () => {
+    await seed()
+    await assertSucceeds(
+      setDoc(doc(adminDb(), 'modifierOptionCostHistory', 'e1'), entry(ADMIN_UID, { cost: null })),
+    )
+  })
+
+  it('refuses staff reading or writing the journal', async () => {
+    await seed()
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'modifierOptionCostHistory', 'e1'), entry(ADMIN_UID))
+    })
+    await assertFails(getDoc(doc(staffDb(), 'modifierOptionCostHistory', 'e1')))
+    await assertFails(getDocs(collection(staffDb(), 'modifierOptionCostHistory')))
+    await assertFails(setDoc(doc(staffDb(), 'modifierOptionCostHistory', 'e2'), entry(STAFF_UID)))
+  })
+
+  it('refuses an entry credited to somebody else', async () => {
+    await seed()
+    await assertFails(setDoc(doc(adminDb(), 'modifierOptionCostHistory', 'e1'), entry(STAFF_UID)))
+  })
+
+  it('refuses an entry against a group that does not exist', async () => {
+    await seed()
+    await assertFails(
+      setDoc(
+        doc(adminDb(), 'modifierOptionCostHistory', 'e1'),
+        entry(ADMIN_UID, { groupId: 'ghost' }),
+      ),
+    )
+  })
+
+  it('refuses an entry with no effective time, which could not be placed in history', async () => {
+    await seed()
+    await assertFails(
+      setDoc(
+        doc(adminDb(), 'modifierOptionCostHistory', 'e1'),
+        entry(ADMIN_UID, { effectiveFrom: 'yesterday' }),
+      ),
+    )
+  })
+
+  it('is append-only — an entry cannot be edited or deleted, by anyone', async () => {
+    await seed()
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'modifierOptionCostHistory', 'e1'), entry(ADMIN_UID))
+    })
+    await assertFails(updateDoc(doc(adminDb(), 'modifierOptionCostHistory', 'e1'), { cost: 5 }))
+    await assertFails(deleteDoc(doc(adminDb(), 'modifierOptionCostHistory', 'e1')))
+  })
+})

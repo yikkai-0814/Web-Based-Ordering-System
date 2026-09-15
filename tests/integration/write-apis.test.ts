@@ -8,7 +8,7 @@
  * landed — which makes the API's own field names, batching and transaction the thing under
  * test.
  */
-import { collection, doc, getDoc, getDocs, setDoc } from 'firebase/firestore'
+import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from 'firebase/firestore'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { createMenuItem, deleteMenuItem, updateMenuItem } from '@/features/menu/menu-api'
@@ -18,7 +18,9 @@ import {
   createModifierGroupForItem,
   deleteModifierGroup,
   updateModifierGroup,
+  type ModifierGroupInput,
 } from '@/features/menu/menu-api'
+import { modifierCostKey } from '@/features/menu/modifier-cost'
 import { addToCart, EMPTY_CART } from '@/features/pos/cart'
 import type { FulfillmentStatus } from '@/features/pos/fulfillment'
 import {
@@ -1163,8 +1165,8 @@ describe('menu item customisation, through the app’s own writes', () => {
     sortOrder: 0,
     active: true,
     options: [
-      { id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: true },
-      { id: 'veg-none', name: 'No vegetables', priceAdjustment: 0, active: true },
+      { id: 'veg-normal', name: 'Normal', priceAdjustment: 0, cost: 0, active: true },
+      { id: 'veg-none', name: 'No vegetables', priceAdjustment: 0, cost: 0, active: true },
     ],
   }
 
@@ -1175,7 +1177,9 @@ describe('menu item customisation, through the app’s own writes', () => {
     required: false,
     sortOrder: 1,
     active: true,
-    options: [{ id: 'add-chicken', name: 'Extra chicken', priceAdjustment: 300, active: true }],
+    options: [
+      { id: 'add-chicken', name: 'Extra chicken', priceAdjustment: 300, cost: 0, active: true },
+    ],
   }
 
   beforeEach(async () => {
@@ -1301,7 +1305,9 @@ describe('menu item customisation, through the app’s own writes', () => {
     await signInAs(admin)
     await updateModifierGroup(groupId, {
       ...ADDONS,
-      options: [{ id: 'add-chicken', name: 'Extra beef', priceAdjustment: 900, active: false }],
+      options: [
+        { id: 'add-chicken', name: 'Extra beef', priceAdjustment: 900, cost: 0, active: false },
+      ],
     })
     await deleteModifierGroup(groupId)
     expect((await getDoc(doc(db, 'modifierGroups', groupId))).exists()).toBe(false)
@@ -1403,7 +1409,7 @@ describe('menu item customisation, through the app’s own writes', () => {
         required: true,
         sortOrder: 0,
         active: true,
-        options: [{ id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: true }],
+        options: [{ id: 'veg-normal', name: 'Normal', priceAdjustment: 0, cost: 0, active: true }],
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -1454,5 +1460,179 @@ describe('menu item customisation, through the app’s own writes', () => {
     expect(payment.get('amount')).toBe(1100)
     expect(payment.get('changeGiven')).toBe(900)
     expect((await getDoc(doc(db, 'orderFulfillment', created.id))).get('status')).toBe('preparing')
+  })
+})
+
+/**
+ * Modifier option costs, written by the API that actually writes them.
+ *
+ * The rules suite proves the database accepts the shape and refuses staff; the unit suite
+ * proves the arithmetic. What only this suite can prove is that `updateModifierGroup` puts
+ * the group and its costs in ONE batch, under the field names the rules and the report both
+ * expect — a mismatch there would leave both of the other suites green.
+ */
+describe('modifier option costs, through the app’s own writes', () => {
+  const RICE = 'item-braised-pork-rice'
+
+  const ADDON = (over: Partial<ModifierGroupInput> = {}): ModifierGroupInput => ({
+    shared: true,
+    name: 'Add-on',
+    selection: 'multiple',
+    required: false,
+    sortOrder: 0,
+    active: true,
+    options: [
+      { id: 'opt-egg', name: 'Egg', priceAdjustment: 150, cost: 40, active: true },
+      { id: 'opt-duck', name: 'Smoked Duck', priceAdjustment: 400, cost: 200, active: true },
+    ],
+    ...over,
+  })
+
+  beforeEach(async () => {
+    await seed(async (context) => {
+      await setDoc(doc(context.firestore(), 'menuItems', RICE), {
+        name: 'Braised Pork Rice',
+        categoryId: 'cat-mains',
+        price: 900,
+        sortOrder: 1,
+        active: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    })
+    await signInAs(admin)
+  })
+
+  const costOf = async (groupId: string, optionId: string) =>
+    getDoc(doc(db, 'modifierOptionCosts', modifierCostKey(groupId, optionId)))
+
+  const journalFor = async (groupId: string) => {
+    const all = await getDocs(collection(db, 'modifierOptionCostHistory'))
+    return all.docs.map((entry) => entry.data()).filter((entry) => entry.groupId === groupId)
+  }
+
+  it('writes a cost document per option when the group is created', async () => {
+    const groupId = await createModifierGroupForItem(RICE, ADDON())
+
+    const egg = await costOf(groupId, 'opt-egg')
+    expect(egg.exists()).toBe(true)
+    expect(egg.get('cost')).toBe(40)
+    expect(egg.get('groupId')).toBe(groupId)
+    expect(egg.get('optionId')).toBe('opt-egg')
+
+    expect((await costOf(groupId, 'opt-duck')).get('cost')).toBe(200)
+  })
+
+  it('keeps the cost OUT of the group document, which staff can read', async () => {
+    const groupId = await createModifierGroupForItem(RICE, ADDON())
+
+    const group = await getDoc(doc(db, 'modifierGroups', groupId))
+    const options = group.get('options') as Record<string, unknown>[]
+    // The selling price is there, as it must be — the till needs it. The cost is not.
+    expect(options[0]?.priceAdjustment).toBe(150)
+    for (const option of options) expect(option).not.toHaveProperty('cost')
+  })
+
+  it('journals the opening figure for every option a new group introduces', async () => {
+    const groupId = await createModifierGroupForItem(RICE, ADDON())
+
+    const journal = await journalFor(groupId)
+    expect(journal).toHaveLength(2)
+    expect(journal.map((entry) => entry.optionId).sort()).toEqual(['opt-duck', 'opt-egg'])
+    for (const entry of journal) expect(entry.recordedBy).toBe(admin.uid)
+  })
+
+  it('appends an entry when a cost changes, and leaves the unchanged one alone', async () => {
+    const groupId = await createModifierGroupForItem(RICE, ADDON())
+
+    const group = ADDON()
+    await updateModifierGroup(groupId, {
+      ...group,
+      options: [{ ...group.options[0]!, cost: 90 }, group.options[1]!],
+    })
+
+    expect((await costOf(groupId, 'opt-egg')).get('cost')).toBe(90)
+    expect((await costOf(groupId, 'opt-duck')).get('cost')).toBe(200)
+
+    // Two openings plus one change. The duck did not move, so it journalled nothing:
+    // a journal records events, not saves.
+    const journal = await journalFor(groupId)
+    expect(journal).toHaveLength(3)
+    expect(journal.filter((entry) => entry.optionId === 'opt-egg')).toHaveLength(2)
+    expect(journal.filter((entry) => entry.optionId === 'opt-duck')).toHaveLength(1)
+  })
+
+  it('does not regenerate option ids when only the cost changes', async () => {
+    const groupId = await createModifierGroupForItem(RICE, ADDON())
+    const group = ADDON()
+    await updateModifierGroup(groupId, {
+      ...group,
+      options: [{ ...group.options[0]!, cost: 90 }, group.options[1]!],
+    })
+
+    // The ids are snapshotted onto every order line that chose them, so a changed cost must
+    // not mint new ones — the cost would then attach to an option no past sale mentions.
+    const saved = await getDoc(doc(db, 'modifierGroups', groupId))
+    const ids = (saved.get('options') as Record<string, unknown>[]).map((o) => o.id)
+    expect(ids).toEqual(['opt-egg', 'opt-duck'])
+    expect((await costOf(groupId, 'opt-egg')).exists()).toBe(true)
+  })
+
+  it('backfills an opening entry for an option costed before the journal existed', async () => {
+    // The state Phase 3 left behind, reproduced exactly: a group whose option has a current
+    // cost, recorded at a known moment, and no history at all. Seeded with rules disabled
+    // because the API cannot produce it any more — every write it makes now journals.
+    const groupId = await createModifierGroupForItem(RICE, {
+      ...ADDON(),
+      options: [{ id: 'opt-egg', name: 'Egg', priceAdjustment: 150, cost: 40, active: true }],
+    })
+    const recordedAt = (await costOf(groupId, 'opt-egg')).get('updatedAt')
+    await seed(async (context) => {
+      const raw = context.firestore()
+      const entries = await getDocs(collection(raw, 'modifierOptionCostHistory'))
+      await Promise.all(entries.docs.map((entry) => deleteDoc(entry.ref)))
+    })
+    expect(await journalFor(groupId)).toHaveLength(0)
+
+    await updateModifierGroup(groupId, {
+      ...ADDON(),
+      options: [{ id: 'opt-egg', name: 'Egg', priceAdjustment: 150, cost: 90, active: true }],
+    })
+
+    const journal = await journalFor(groupId)
+    expect(journal).toHaveLength(2)
+    const opening = journal.find((entry) => entry.cost === 40)
+    expect(opening).toBeDefined()
+    // Dated when the OLD figure was recorded, and never the moment of the edit — otherwise
+    // every sale made before this edit would flip from costed to uncosted, which is the whole
+    // point of the backfill.
+    expect(opening?.effectiveFrom.isEqual(recordedAt)).toBe(true)
+  })
+
+  it('leaves a removed option’s cost in place, so old sales stay costed', async () => {
+    const groupId = await createModifierGroupForItem(RICE, ADDON())
+    const group = ADDON()
+
+    await updateModifierGroup(groupId, { ...group, options: [group.options[0]!] })
+
+    // The duck is gone from the menu. Orders that already chose it still resolve its cost
+    // through this document, so deleting it would leave those sales suddenly uncosted.
+    expect((await costOf(groupId, 'opt-duck')).get('cost')).toBe(200)
+  })
+
+  it('refuses a STAFF account writing an option cost, through the same API', async () => {
+    const groupId = await createModifierGroupForItem(RICE, ADDON())
+
+    await signInAs(staff)
+    await expect(
+      updateModifierGroup(groupId, {
+        ...ADDON(),
+        options: [{ id: 'opt-egg', name: 'Egg', priceAdjustment: 150, cost: 0, active: true }],
+      }),
+    ).rejects.toThrow()
+
+    // Nothing moved: the whole batch was refused, group and costs together.
+    await signInAs(admin)
+    expect((await costOf(groupId, 'opt-egg')).get('cost')).toBe(40)
   })
 })

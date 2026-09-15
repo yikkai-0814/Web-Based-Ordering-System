@@ -77,7 +77,7 @@ describe('Sidebar: collapsing', () => {
 
     await user.click(toggle())
     expect(linkNames()).toEqual(before)
-    expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue', 'Settings'])
+    expect(linkNames()).toEqual(['New Order', 'Queue', 'Orders', 'Settings'])
   })
 
   it('keeps an admin’s full navigation too', async () => {
@@ -93,7 +93,7 @@ describe('Sidebar: collapsed still says what each icon is', () => {
     const { user } = renderSidebar('staff')
     await user.click(toggle())
 
-    for (const label of ['New Order', 'Orders', 'Queue']) {
+    for (const label of ['New Order', 'Queue', 'Orders']) {
       expect(screen.getByRole('link', { name: label })).not.toBeNull()
     }
   })

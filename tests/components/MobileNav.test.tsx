@@ -44,7 +44,7 @@ const linkNames = () =>
 describe('MobileNav', () => {
   it('offers staff exactly New Order, Orders and Queue, in order', () => {
     renderNav('staff')
-    expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue', 'Settings'])
+    expect(linkNames()).toEqual(['New Order', 'Queue', 'Orders', 'Settings'])
   })
 
   it('offers an admin exactly the five office sections, Dashboard first', () => {

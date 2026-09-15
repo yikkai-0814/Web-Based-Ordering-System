@@ -31,7 +31,9 @@ import {
   type ModifierGroup,
   type SelectionMode,
 } from '@/features/menu/modifiers'
+import { modifierCostKey } from '@/features/menu/modifier-cost'
 import { useModifierGroups } from '@/features/menu/useModifierGroups'
+import { useModifierOptionCosts } from '@/features/menu/useModifierOptionCosts'
 import { CURRENCY_PREFIX, parsePriceInput, toPriceInputValue } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
@@ -51,6 +53,15 @@ import { cn } from '@/lib/utils'
 export function ModifierGroupsEditor({ item }: { item: MenuItem }) {
   const { t } = useTranslation()
   const { groups, loading } = useModifierGroups()
+  /**
+   * The costs the form seeds its inputs from.
+   *
+   * They cannot come from `groups`: a group document is staff-readable and deliberately
+   * carries no cost at all. This subscription is admin-only and is the only thing on this
+   * screen that reads the cost collection, which is why the form itself stays a controlled
+   * component that touches no Firestore.
+   */
+  const { costs } = useModifierOptionCosts()
   const [editing, setEditing] = useState<ModifierGroup | 'new' | null>(null)
   const [error, setError] = useState<Message | null>(null)
   const [picked, setPicked] = useState('')
@@ -122,7 +133,12 @@ ${t('modifierAdmin.detachNotDelete')}`)
   }
 
   return (
-    <Card className="w-full max-w-xl" data-testid="modifier-editor">
+    /* Wider than the rest of the form's cards on purpose: this one holds a four-column
+       table, and every column but the name is a fixed width, so the name gets whatever is
+       left. At max-w-xl that remainder was around 50px and a name like "Cheese Sausage" was
+       unreadable. See OPTION_COLUMNS, and see MenuItemFormPage for the column track that
+       has to allow this much. */
+    <Card className="w-full max-w-2xl" data-testid="modifier-editor">
       <CardHeader>
         <CardTitle className="text-xl">{t('modifierAdmin.title')}</CardTitle>
         <CardDescription>{t('modifierAdmin.blurb')}</CardDescription>
@@ -181,6 +197,7 @@ ${t('modifierAdmin.detachNotDelete')}`)
               {editing !== 'new' && editing?.id === group.id ? (
                 <GroupForm
                   group={group}
+                  costs={costs}
                   onCancel={() => setEditing(null)}
                   onSave={(input) => run(() => updateModifierGroup(group.id, input))}
                 />
@@ -299,9 +316,27 @@ ${t('modifierAdmin.detachNotDelete')}`)
   )
 }
 
+/**
+ * The option table's four columns, shared verbatim by the header and by every row.
+ *
+ * One string used in both places because they are separate grids, and two grids only agree
+ * when every track is an explicit length: `minmax(0,1fr)` for the name, fixed widths for the
+ * rest. An `auto` track would size to its own content, so the header's "Actions" would land
+ * nowhere near the buttons beneath it.
+ *
+ * `minmax(0,1fr)` rather than `1fr` is what stops the name column being pushed narrower than
+ * its content and the input spilling into the next column — a grid item's automatic minimum
+ * size is `auto`, and this is the standard way to override it.
+ *
+ * Below `sm` the row falls back to two columns and stacks; see the row itself.
+ */
+const OPTION_COLUMNS = 'sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_8.75rem]'
+
 interface DraftOption extends ModifierOptionInput {
   /** The price as typed, in ringgit, converted to sen only on save. */
   priceText: string
+  /** The cost as typed, in ringgit, converted to sen only on save. A separate figure. */
+  costText: string
 }
 
 /**
@@ -313,10 +348,20 @@ interface DraftOption extends ModifierOptionInput {
  */
 export function GroupForm({
   group,
+  costs,
   onSave,
   onCancel,
 }: {
   group: ModifierGroup | null
+  /**
+   * Current option costs by `modifierCostKey`, for seeding the cost inputs.
+   *
+   * Optional, and empty when a group is being invented on the new-item form: options that do
+   * not exist yet have no cost recorded, so every field starts at zero. Passing the map in
+   * rather than subscribing here is what keeps this component free of Firestore, which is
+   * what lets the new-item form reuse it verbatim.
+   */
+  costs?: ReadonlyMap<string, number>
   onSave: (input: ModifierGroupInput) => void
   onCancel: () => void
 }) {
@@ -334,13 +379,25 @@ export function GroupForm({
   const [shared, setShared] = useState(true)
   const [options, setOptions] = useState<DraftOption[]>(() =>
     group
-      ? group.options.map((option) => ({
-          id: option.id,
-          name: option.name,
-          priceAdjustment: option.priceAdjustment,
-          active: option.active,
-          priceText: option.priceAdjustment === 0 ? '' : toPriceInputValue(option.priceAdjustment),
-        }))
+      ? group.options.map((option) => {
+          // Absent means no cost has been recorded for this option yet — an option that
+          // predates costing. It seeds as zero, and saving the group records that as its
+          // first real figure; see the note on `effectiveFrom` in menu-api.ts.
+          const cost = costs?.get(modifierCostKey(group.id, option.id)) ?? 0
+          return {
+            id: option.id,
+            name: option.name,
+            priceAdjustment: option.priceAdjustment,
+            cost,
+            active: option.active,
+            priceText:
+              option.priceAdjustment === 0 ? '' : toPriceInputValue(option.priceAdjustment),
+            // Shown in full rather than blanked at zero, unlike the price: a blank price
+            // means "adds nothing", which is the common case, whereas a blank cost would be
+            // indistinguishable from one nobody has got round to entering.
+            costText: toPriceInputValue(cost),
+          }
+        })
       : [blankOption()],
   )
   const [error, setError] = useState<Message | null>(null)
@@ -379,10 +436,29 @@ export function GroupForm({
         }
         adjustment = result.sen
       }
+      // Cost is its own figure and is parsed through the same money helper, so it is whole
+      // sen and never a float. Blank reads as zero rather than as an error: an option that
+      // costs the café nothing is a real answer, and the field is seeded with one.
+      let optionCost = 0
+      if (option.costText.trim() !== '') {
+        const result = parsePriceInput(option.costText)
+        if (!result.ok) {
+          setError(
+            message('validation.optionCostPrefix', {
+              option: option.name.trim() || t('common.option'),
+              reason: t(result.error),
+            }),
+          )
+          return
+        }
+        optionCost = result.sen
+      }
+
       parsed.push({
         id: option.id,
         name: option.name.trim(),
         priceAdjustment: adjustment,
+        cost: optionCost,
         active: option.active,
       })
     }
@@ -486,10 +562,43 @@ export function GroupForm({
 
       <div className="space-y-2">
         <span className="text-sm font-medium">{t('modifierAdmin.options')}</span>
+
+        {/* The column headings, written once.
+
+            They used to be repeated on every row, which is what the row grid below replaces.
+            `aria-hidden` because each input keeps its own real <label>: without it a screen
+            reader would announce every column name twice. Hidden outright on a phone, where
+            a four-column table does not fit and each row stacks with its labels visible. */}
+        <div
+          className={cn('hidden gap-2 text-xs text-muted-foreground sm:grid', OPTION_COLUMNS)}
+          aria-hidden="true"
+          data-testid="option-columns"
+        >
+          <span>{t('common.name')}</span>
+          <span>{t('modifierAdmin.adds', { currency: CURRENCY_PREFIX })}</span>
+          <span>{t('modifierAdmin.optionCost', { currency: CURRENCY_PREFIX })}</span>
+          <span className="text-right">{t('common.actions')}</span>
+        </div>
+
         {options.map((option, index) => (
-          <div key={option.id} className="flex flex-wrap items-end gap-2" data-testid="option-row">
-            <div className="grid min-w-0 flex-1 gap-1.5">
-              <Label htmlFor={`option-name-${option.id}`} className="text-xs">
+          /* One grid, four columns, every field in a column of its own.
+
+             This was `flex flex-wrap` with a `flex-1 min-w-0` name cell and fixed-width money
+             cells. Adding the cost column pushed the fixed content past the line, and because
+             the flexible cell has a basis of 0 it absorbed the shortfall instead of wrapping —
+             collapsing to a few pixels, from where the label and the input text overflowed
+             across the next column. A grid cannot do that: the tracks are declared up front,
+             and no cell can take another's space.
+
+             Two columns and stacked below `sm`, four across from there, so the same row works
+             on a phone and on the counter's screen. */
+          <div
+            key={option.id}
+            className={cn('grid grid-cols-2 items-end gap-2 sm:items-center', OPTION_COLUMNS)}
+            data-testid="option-row"
+          >
+            <div className="col-span-2 grid min-w-0 gap-1.5 sm:col-span-1">
+              <Label htmlFor={`option-name-${option.id}`} className="text-xs sm:sr-only">
                 {t('common.name')}
               </Label>
               <Input
@@ -500,8 +609,8 @@ export function GroupForm({
                 onChange={(event) => update(index, { name: event.target.value })}
               />
             </div>
-            <div className="grid w-32 gap-1.5">
-              <Label htmlFor={`option-price-${option.id}`} className="text-xs">
+            <div className="grid min-w-0 gap-1.5">
+              <Label htmlFor={`option-price-${option.id}`} className="text-xs sm:sr-only">
                 {t('modifierAdmin.adds', { currency: CURRENCY_PREFIX })}
               </Label>
               <Input
@@ -512,38 +621,64 @@ export function GroupForm({
                 onChange={(event) => update(index, { priceText: event.target.value })}
               />
             </div>
-            {/* Both the indicator and the control, which is why it stays a Button and is
-                not replaced by a badge: its label has always been the current state and
-                clicking it flips that state. It is now drawn in the same two tones as the
-                badges — green for active, red for inactive — so the state is visible at a
-                glance without adding a second thing that says the same word. */}
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="option-toggle-active"
-              data-status={option.active ? 'active' : 'inactive'}
-              className={cn(
-                'rounded-full',
-                option.active
-                  ? 'border-success/30 bg-success/10 text-success hover:bg-success/20 hover:text-success'
-                  : 'border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive',
-              )}
-              onClick={() => update(index, { active: !option.active })}
-            >
-              {t(option.active ? 'common.active' : 'common.inactive')}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t('modifierAdmin.removeOption', {
-                name: option.name || t('common.option'),
-              })}
-              onClick={() =>
-                setOptions((current) => current.filter((_, position) => position !== index))
-              }
-            >
-              <Trash2 aria-hidden="true" />
-            </Button>
+            {/* Cost sits beside the price and is labelled as plainly as possible, because the
+                two are easy to confuse and getting them the wrong way round would overstate
+                or understate every margin the option appears in. This screen is admin-only —
+                the route is behind the admin guard and the figures come from an admin-only
+                collection — so no staff account ever renders it. */}
+            <div className="grid min-w-0 gap-1.5">
+              <Label htmlFor={`option-cost-${option.id}`} className="text-xs sm:sr-only">
+                {t('modifierAdmin.optionCost', { currency: CURRENCY_PREFIX })}
+              </Label>
+              <Input
+                id={`option-cost-${option.id}`}
+                inputMode="decimal"
+                data-testid="option-cost"
+                value={option.costText}
+                placeholder={t('modifierAdmin.optionCostPlaceholder')}
+                onChange={(event) => update(index, { costText: event.target.value })}
+              />
+            </div>
+            <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
+              {/* Both the indicator and the control, which is why it stays a Button and is
+                  not replaced by a badge: its label has always been the current state and
+                  clicking it flips that state. It is now drawn in the same two tones as the
+                  badges — green for active, red for inactive — so the state is visible at a
+                  glance without adding a second thing that says the same word. */}
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="option-toggle-active"
+                data-status={option.active ? 'active' : 'inactive'}
+                className={cn(
+                  'min-w-0 rounded-full',
+                  option.active
+                    ? 'border-success/30 bg-success/10 text-success hover:bg-success/20 hover:text-success'
+                    : 'border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive',
+                )}
+                onClick={() => update(index, { active: !option.active })}
+              >
+                {/* Truncated rather than allowed to widen the column: the word is longer in
+                    some of the languages this ships in, and a button that grew would push the
+                    row back out of its tracks. */}
+                <span className="truncate">
+                  {t(option.active ? 'common.active' : 'common.inactive')}
+                </span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                aria-label={t('modifierAdmin.removeOption', {
+                  name: option.name || t('common.option'),
+                })}
+                onClick={() =>
+                  setOptions((current) => current.filter((_, position) => position !== index))
+                }
+              >
+                <Trash2 aria-hidden="true" />
+              </Button>
+            </div>
           </div>
         ))}
         {options.length < MAX_OPTIONS_PER_GROUP && (
@@ -586,8 +721,12 @@ function blankOption(): DraftOption {
     id: `opt-${Math.random().toString(36).slice(2, 10)}`,
     name: '',
     priceAdjustment: 0,
+    cost: 0,
     active: true,
     priceText: '',
+    // A new option costs nothing until somebody says otherwise, stated rather than left
+    // blank so the figure that gets journalled is one the admin actually saw.
+    costText: toPriceInputValue(0),
   }
 }
 

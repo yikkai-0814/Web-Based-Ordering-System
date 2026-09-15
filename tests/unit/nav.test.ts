@@ -21,8 +21,10 @@ const pathsFor = (role: Parameters<typeof navItemsForRole>[0]) =>
  */
 describe('navItemsForRole', () => {
   it('gives staff the three things the counter does, then Settings, in order', () => {
-    expect(labelsFor('staff')).toEqual(['New Order', 'Orders', 'Queue', 'Settings'])
-    expect(pathsFor('staff')).toEqual(['/pos', '/orders', '/queue', '/settings'])
+    // Queue before Orders: the board is the screen a counter works from — what still has to
+    // be made — where Orders is the record of what has already been sold.
+    expect(labelsFor('staff')).toEqual(['New Order', 'Queue', 'Orders', 'Settings'])
+    expect(pathsFor('staff')).toEqual(['/pos', '/queue', '/orders', '/settings'])
   })
 
   it('gives an admin the five things the office does, then Settings, in order', () => {

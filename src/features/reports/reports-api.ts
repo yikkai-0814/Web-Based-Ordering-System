@@ -3,10 +3,13 @@ import { Timestamp, collection, getDocs, orderBy, query, where } from 'firebase/
 import { chunkOrderIds, type ChunkableOrder } from '@/features/pos/order-sidecars'
 import { resolvePaymentState } from '@/features/pos/payments'
 import { parseOrder, parseOrderPayment, parseOrderVoid, type Order } from '@/features/pos/types'
+import { parseModifierOptionCost } from '@/features/menu/modifier-cost'
 import {
   indexCostHistory,
+  indexModifierCostHistory,
   type CostHistoryEntry,
   type CostHistoryIndex,
+  type ModifierCostHistoryEntry,
   type ReportOrder,
   type ReportVoidInfo,
 } from '@/features/reports/aggregate'
@@ -29,6 +32,11 @@ import { db } from '@/lib/firebase'
  *   * `menuItemCosts` and `menuItemCostHistory` — read whole, and legitimately so: both are
  *     bounded by the size of the menu and the number of times a price or a cost has been
  *     edited, neither of which grows with how much the café sells.
+ *   * `modifierOptionCosts` and `modifierOptionCostHistory` — read whole for exactly the
+ *     same reason, and bounded by the same thing: a café has tens of options, not one per
+ *     sale. They are indexed once here into a map keyed by `groupId__optionId`, so costing
+ *     a line's options is a lookup per option rather than a read — an order of a thousand
+ *     lines still costs the four cost queries below and no more.
  *
  * **Why the sidecars are fetched by order id.** They were previously read whole, on the
  * reasoning that they are small. That is true of voids and false of payments: there is one
@@ -57,6 +65,9 @@ export interface ReportData {
   voids: Map<string, ReportVoidInfo>
   history: CostHistoryIndex
   currentCosts: Map<string, number>
+  /** Modifier option costs, both keyed by `groupId__optionId`. */
+  modifierHistory: CostHistoryIndex
+  modifierCurrentCosts: Map<string, number>
 }
 
 function toDate(value: unknown): Date | null {
@@ -77,6 +88,25 @@ function parseCostHistoryEntry(data: Record<string, unknown>): CostHistoryEntry 
   if (!when) return null
 
   return { itemId, cost: cost as number | null, effectiveFrom: when }
+}
+
+/** The same validation, for an entry identified by its group and option rather than an item. */
+function parseModifierCostHistoryEntry(
+  data: Record<string, unknown>,
+): ModifierCostHistoryEntry | null {
+  const { groupId, optionId, cost, effectiveFrom } = data
+
+  if (typeof groupId !== 'string' || groupId === '') return null
+  if (typeof optionId !== 'string' || optionId === '') return null
+  // A null cost is meaningful: it records the cost being cleared.
+  if (cost !== null && (typeof cost !== 'number' || !Number.isInteger(cost) || cost < 0)) {
+    return null
+  }
+
+  const when = toDate(effectiveFrom)
+  if (!when) return null
+
+  return { groupId, optionId, cost: cost as number | null, effectiveFrom: when }
 }
 
 /**
@@ -154,10 +184,12 @@ export async function fetchReportData(range: DateRange): Promise<ReportData> {
 
   // The cost collections do not depend on which orders come back, so they ride along in the
   // first wave rather than waiting for it.
-  const [orderDocs, historyDocs, costDocs] = await Promise.all([
+  const [orderDocs, historyDocs, costDocs, optionHistoryDocs, optionCostDocs] = await Promise.all([
     getDocs(ordersQuery),
     getDocs(collection(db, 'menuItemCostHistory')),
     getDocs(collection(db, 'menuItemCosts')),
+    getDocs(collection(db, 'modifierOptionCostHistory')),
+    getDocs(collection(db, 'modifierOptionCosts')),
   ])
 
   // Parsed before the sidecars are fetched, because it is the parsed orders that say which
@@ -224,5 +256,27 @@ export async function fetchReportData(range: DateRange): Promise<ReportData> {
     }
   }
 
-  return { orders, voids, history: indexCostHistory(historyEntries), currentCosts }
+  const modifierHistoryEntries: ModifierCostHistoryEntry[] = []
+  for (const document of optionHistoryDocs.docs) {
+    const parsed = parseModifierCostHistoryEntry(document.data())
+    if (parsed) modifierHistoryEntries.push(parsed)
+  }
+
+  // Keyed by the document id, which IS `groupId__optionId` — the same key the history index
+  // and `costOfLine` use. `parseModifierOptionCost` refuses a document whose fields
+  // disagree with that id, so the two lookups can never resolve to different options.
+  const modifierCurrentCosts = new Map<string, number>()
+  for (const document of optionCostDocs.docs) {
+    const parsed = parseModifierOptionCost(document.id, document.data())
+    if (parsed) modifierCurrentCosts.set(document.id, parsed.cost)
+  }
+
+  return {
+    orders,
+    voids,
+    history: indexCostHistory(historyEntries),
+    currentCosts,
+    modifierHistory: indexModifierCostHistory(modifierHistoryEntries),
+    modifierCurrentCosts,
+  }
 }

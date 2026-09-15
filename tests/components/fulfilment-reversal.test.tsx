@@ -169,6 +169,68 @@ describe('staff step an order back', () => {
   })
 })
 
+/**
+ * Where the two controls sit, which is a separate question from which of them exists.
+ *
+ * The pair reads in the direction the workflow runs: the step back on the left, the step
+ * forward on its right, so `← Pending` always sits beside `Ready →` rather than after it.
+ * Asserted through document order rather than by inspecting classes, because that is what
+ * actually decides which one a person sees first in a left-to-right flex row.
+ *
+ * Nothing here touches what the buttons DO. The transitions, the permission and the
+ * timestamps are covered by the suites above and are untouched by this ordering.
+ */
+describe('the back control sits to the left of the forward one', () => {
+  const precedes = (first: HTMLElement, second: HTMLElement) =>
+    Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING)
+
+  it('puts ← Pending before Ready → at preparing', () => {
+    status = 'preparing'
+    renderDetail()
+
+    const backButton = back() as HTMLElement
+    const forwardButton = forward() as HTMLElement
+    expect(backButton.getAttribute('data-previous')).toBe('pending')
+    expect(forwardButton.getAttribute('data-next')).toBe('ready')
+    expect(precedes(backButton, forwardButton)).toBe(true)
+  })
+
+  it('puts ← Preparing before Delivered → at ready', () => {
+    status = 'ready'
+    renderDetail()
+
+    const backButton = back() as HTMLElement
+    const forwardButton = forward() as HTMLElement
+    expect(backButton.getAttribute('data-previous')).toBe('preparing')
+    expect(forwardButton.getAttribute('data-next')).toBe('delivered')
+    expect(precedes(backButton, forwardButton)).toBe(true)
+  })
+
+  it('leaves pending with the forward control alone — nothing precedes it', () => {
+    status = 'pending'
+    renderDetail()
+
+    expect(back()).toBeNull()
+    expect((forward() as HTMLElement).getAttribute('data-next')).toBe('preparing')
+  })
+
+  it('leaves delivered with neither', () => {
+    status = 'delivered'
+    renderDetail()
+
+    expect(back()).toBeNull()
+    expect(forward()).toBeNull()
+  })
+
+  it('keeps both controls in the same row as the rest of the actions', () => {
+    status = 'ready'
+    renderDetail()
+
+    // One flex row, so the reordering is a change of position and not of structure.
+    expect((back() as HTMLElement).parentElement).toBe((forward() as HTMLElement).parentElement)
+  })
+})
+
 describe('staff drive the order forward', () => {
   it('1. pending to preparing', async () => {
     status = 'pending'

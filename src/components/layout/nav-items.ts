@@ -29,11 +29,11 @@ export interface NavItem {
  * **The array order is not either role's order — it is the one order that yields both.**
  * Each role sees this list filtered, so the sequence has to satisfy two requirements at
  * once: an admin must read Dashboard, Reports, Orders, Menu, Staff, Settings, and a staff
- * member must read New Order, Orders, Queue, Settings. `Orders` and `Settings` are the items
+ * member must read New Order, Queue, Orders, Settings. `Orders` and `Settings` are the items
  * they share, so everything either role sees above Orders is listed before it and everything
- * below it after — which is why New Order sits between Reports and Orders, and Queue sits
- * after Staff. Settings is last because both roles end on it. Both orders are asserted
- * exactly in tests/unit/nav.test.ts; change this array and one of them will tell you.
+ * below it after — which is why New Order and Queue both sit between Reports and Orders, and
+ * Menu and Staff after it. Settings is last because both roles end on it. Both orders are
+ * asserted exactly in tests/unit/nav.test.ts; change this array and one of them will tell you.
  *
  * The two roles now share exactly one destination. An admin runs the business — figures,
  * catalogue, roster, and the sales record — and does not work the counter; a staff member
@@ -68,6 +68,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
     roles: ['staff'],
   },
   {
+    to: '/queue',
+    labelKey: 'nav.queue',
+    icon: ChefHat,
+    // Staff only: the kitchen board is worked by whoever is making the food, and the route
+    // refuses an admin as well. Above Orders because the board is the counter's working
+    // screen — what still has to be made — where Orders is the record of what was sold.
+    roles: ['staff'],
+  },
+  {
     to: '/orders',
     labelKey: 'nav.orders',
     icon: ReceiptText,
@@ -90,14 +99,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: IdCard,
     // Admin only: creating and retiring till operators is a management function.
     roles: ['admin'],
-  },
-  {
-    to: '/queue',
-    labelKey: 'nav.queue',
-    icon: ChefHat,
-    // Staff only: the kitchen board is worked by whoever is making the food, and the route
-    // refuses an admin as well.
-    roles: ['staff'],
   },
   {
     to: '/settings',

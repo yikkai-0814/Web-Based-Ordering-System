@@ -52,7 +52,7 @@ const linkNames = () =>
 describe('Sidebar: what each role is offered', () => {
   it('shows staff New Order, Orders, Queue and Settings — and nothing else', () => {
     renderSidebar('staff')
-    expect(linkNames()).toEqual(['New Order', 'Orders', 'Queue', 'Settings'])
+    expect(linkNames()).toEqual(['New Order', 'Queue', 'Orders', 'Settings'])
   })
 
   it('does not offer staff the Dashboard', () => {

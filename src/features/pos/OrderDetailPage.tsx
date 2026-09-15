@@ -496,29 +496,18 @@ export function OrderDetailPage() {
           <Link to="/orders">{t('order.backToOrders')}</Link>
         </Button>
 
-        {/* Moving the order along the kitchen workflow. Staff only, one step at a time, and
-            only when the rules would accept it — a delivered or voided order gets no button.
-            The label says what is about to happen, not the state being left. */}
-        {ownsFulfillment && advance.ok && FULFILLMENT_ACTION_KEYS[fulfillment] !== null && (
-          <Button
-            variant="outline"
-            size="lg"
-            className="h-touch text-base"
-            data-testid="advance-fulfillment"
-            data-next={advance.next}
-            disabled={advancing}
-            onClick={() => void handleAdvance(fulfillment, advance.next)}
-          >
-            <ChefHat aria-hidden="true" />
-            {advancing ? t('common.saving') : t(FULFILLMENT_ACTION_KEYS[fulfillment]!)}
-          </Button>
-        )}
+        {/* The two fulfilment controls, in the order the workflow reads: the step BACK on the
+            left, the step FORWARD on its right, so the pair always points the same way —
+            `← Pending` beside `Ready →`, `← Preparing` beside `Delivered →`. Only the
+            positions changed; which button appears, and what it does, is decided exactly as
+            before by `canReverseFulfillment` and `canAdvanceFulfillment`.
 
-        {/* Undoing a step: `preparing → pending` and `ready → preparing`, the two the
+            Undoing a step is `preparing → pending` and `ready → preparing`, the two the
             kitchen owns, and only for the staff account that owns them. Stepping back clears
             `readyAt` — the order is being worked on again, so it must stop claiming to be
             finished — and never touches the order's `createdAt`, so the customer's clock
-            runs on undisturbed. There is no third case: a delivered order has no way back. */}
+            runs on undisturbed. There is no third case: a delivered order has no way back,
+            which is why `delivered` shows neither of these buttons. */}
         {ownsFulfillment && reverse.ok && FULFILLMENT_BACK_ACTION_KEYS[fulfillment] !== null && (
           <Button
             variant="ghost"
@@ -531,6 +520,25 @@ export function OrderDetailPage() {
           >
             <Undo2 aria-hidden="true" />
             {advancing ? t('common.saving') : t(FULFILLMENT_BACK_ACTION_KEYS[fulfillment]!)}
+          </Button>
+        )}
+
+        {/* Moving the order along the kitchen workflow. Staff only, one step at a time, and
+            only when the rules would accept it — a delivered or voided order gets no button.
+            The label says what is about to happen, not the state being left. At `pending`
+            there is nothing behind the order, so this is the only control on the row. */}
+        {ownsFulfillment && advance.ok && FULFILLMENT_ACTION_KEYS[fulfillment] !== null && (
+          <Button
+            variant="outline"
+            size="lg"
+            className="h-touch text-base"
+            data-testid="advance-fulfillment"
+            data-next={advance.next}
+            disabled={advancing}
+            onClick={() => void handleAdvance(fulfillment, advance.next)}
+          >
+            <ChefHat aria-hidden="true" />
+            {advancing ? t('common.saving') : t(FULFILLMENT_ACTION_KEYS[fulfillment]!)}
           </Button>
         )}
 

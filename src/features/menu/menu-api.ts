@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore'
 
 import { openingEntryFrom, type OpeningEntry } from '@/features/menu/cost-history'
+import { modifierCostKey, parseModifierOptionCost } from '@/features/menu/modifier-cost'
 import type { SelectionMode } from '@/features/menu/modifiers'
 import { auth, db } from '@/lib/firebase'
 
@@ -103,16 +104,75 @@ function requireCost(cost: number): number {
  * at the time of the sale. Unchanged costs append nothing — a journal should record events
  * that happened.
  */
+/**
+ * Where one kind of cost is kept: the current value, its journal, and the fields that
+ * identify what the cost is FOR.
+ *
+ * Menu items and modifier options are costed identically — same mandatory value, same
+ * append-only journal, same opening-entry backfill — and differ only in which collections
+ * they live in and how the thing being costed is named. Stating that difference as data is
+ * what lets one `writeCost` serve both instead of a second copy of the journal logic
+ * drifting away from the first.
+ */
+interface CostTarget {
+  /** Holds the current value, keyed by `docId`. */
+  costPath: string
+  /** Append-only journal of every change. */
+  historyPath: string
+  /** The document id under `costPath`. */
+  docId: string
+  /**
+   * Identifying fields written onto the CURRENT-value document, beside `cost`.
+   *
+   * Empty for a menu item, whose id alone says what it is a cost for and whose rule names
+   * exactly `cost` and `updatedAt` — adding a redundant `itemId` would be refused, and
+   * rightly: it would be the document id recorded a second time, able to disagree with
+   * itself. An option's id is a composite, so its two halves are stored as well, which is
+   * what lets one query fetch every cost belonging to a group.
+   */
+  costFields: Record<string, string>
+  /** Identifying fields written onto every journal entry. A journal row has no telling id. */
+  historyFields: Record<string, string>
+  /** The field `resolveOpeningEntry` asks the journal about. */
+  historyQueryField: string
+}
+
+const itemCostTarget = (itemId: string): CostTarget => ({
+  costPath: 'menuItemCosts',
+  historyPath: 'menuItemCostHistory',
+  docId: itemId,
+  costFields: {},
+  historyFields: { itemId },
+  historyQueryField: 'itemId',
+})
+
+const optionCostTarget = (groupId: string, optionId: string): CostTarget => ({
+  costPath: 'modifierOptionCosts',
+  historyPath: 'modifierOptionCostHistory',
+  // One document per option, not per (item, option): a shared group's option costs the same
+  // whichever item offers it. See src/features/menu/modifier-cost.ts.
+  docId: modifierCostKey(groupId, optionId),
+  costFields: { groupId, optionId },
+  historyFields: { groupId, optionId },
+  // Only ever used by the item path; options resolve their opening entries in bulk. See
+  // resolveOptionCostChanges.
+  historyQueryField: 'groupId',
+})
+
 function writeCost(
   batch: WriteBatch,
-  itemId: string,
+  target: CostTarget,
   cost: CostUpdate,
   opening: OpeningEntry | null = null,
 ): void {
-  const reference = doc(db, 'menuItemCosts', itemId)
+  const reference = doc(db, target.costPath, target.docId)
   // Always a write, never a delete: cost is mandatory, so there is no state in which an
   // item should be left without its cost document.
-  batch.set(reference, { cost: requireCost(cost.next), updatedAt: serverTimestamp() })
+  batch.set(reference, {
+    ...target.costFields,
+    cost: requireCost(cost.next),
+    updatedAt: serverTimestamp(),
+  })
 
   if (cost.next === cost.previous) return
 
@@ -123,16 +183,16 @@ function writeCost(
   // does not erase what earlier sales already resolved to. See cost-history.ts. It goes in
   // the SAME batch as the new entry, so the journal can never gain one without the other.
   if (opening) {
-    batch.set(doc(collection(db, 'menuItemCostHistory')), {
-      itemId,
+    batch.set(doc(collection(db, target.historyPath)), {
+      ...target.historyFields,
       cost: opening.cost,
       effectiveFrom: opening.effectiveFrom,
       recordedBy,
     })
   }
 
-  batch.set(doc(collection(db, 'menuItemCostHistory')), {
-    itemId,
+  batch.set(doc(collection(db, target.historyPath)), {
+    ...target.historyFields,
     cost: cost.next,
     effectiveFrom: serverTimestamp(),
     recordedBy,
@@ -142,17 +202,31 @@ function writeCost(
 /**
  * Looks up what the journal needs before the batch is built.
  *
- * Two reads, only on a genuine cost change: does this item have any history at all, and
+ * Two reads, only on a genuine cost change: does this subject have any history at all, and
  * when was its current cost recorded. Both are cheap and happen rarely — a cost edit is an
  * admin action, not a per-sale one.
+ *
+ * History existence is asked by `historyQueryField`, which is `itemId` for a menu item and
+ * identifies exactly one item. Modifier options deliberately do not come through here: the
+ * only field that identifies a group's journal in one query is `groupId`, which would answer
+ * "has this GROUP any history" rather than "has this option any", and asking per option would
+ * be two reads per option on every group save. `resolveOptionCostChanges` asks both
+ * questions once for the whole group instead.
  */
-async function resolveOpeningEntry(itemId: string, cost: CostUpdate): Promise<OpeningEntry | null> {
+async function resolveOpeningEntry(
+  target: CostTarget,
+  cost: CostUpdate,
+): Promise<OpeningEntry | null> {
   if (cost.next === cost.previous || cost.previous === null) return null
 
   const existing = await getDocs(
-    query(collection(db, 'menuItemCostHistory'), where('itemId', '==', itemId), limit(1)),
+    query(
+      collection(db, target.historyPath),
+      where(target.historyQueryField, '==', target.historyFields[target.historyQueryField]),
+      limit(1),
+    ),
   )
-  const costDocument = await getDoc(doc(db, 'menuItemCosts', itemId))
+  const costDocument = await getDoc(doc(db, target.costPath, target.docId))
   const recordedAt = costDocument.exists() ? costDocument.data().updatedAt : null
 
   return openingEntryFrom(
@@ -217,6 +291,8 @@ export async function createMenuItem(
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     })
+    // Brand-new options, so there is nothing to read first and no opening entry to write.
+    writeOptionCosts(batch, groupReference.id, group.options)
     if (group.shared) createdGroupIds.push(groupReference.id)
   }
 
@@ -227,7 +303,7 @@ export async function createMenuItem(
     updatedAt: serverTimestamp(),
   })
   // A brand-new item has no previous cost, so any value at all is a real change.
-  writeCost(batch, itemReference.id, { next: cost, previous: null })
+  writeCost(batch, itemCostTarget(itemReference.id), { next: cost, previous: null })
   await batch.commit()
   return itemReference.id
 }
@@ -246,14 +322,14 @@ export async function updateMenuItem(
 ): Promise<void> {
   // Read before the batch: a batch cannot read, and the journal needs to know whether this
   // item has any history yet.
-  const opening = await resolveOpeningEntry(id, cost)
+  const opening = await resolveOpeningEntry(itemCostTarget(id), cost)
 
   const batch = writeBatch(db)
   batch.update(doc(db, 'menuItems', id), {
     ...input,
     updatedAt: serverTimestamp(),
   })
-  writeCost(batch, id, cost, opening)
+  writeCost(batch, itemCostTarget(id), cost, opening)
   await batch.commit()
 }
 
@@ -321,6 +397,19 @@ export interface ModifierOptionInput {
   name: string
   /** Whole sen. May be 0 ("No egg") and is never a float. */
   priceAdjustment: number
+  /**
+   * What the café pays to provide this option, in whole sen — nothing to do with what it
+   * adds to the bill. An extra egg might sell for RM1.50 and cost RM0.40.
+   *
+   * Mandatory, exactly as a menu item's cost is, and 0 for a new option. An option with no
+   * cost at all would silently turn every margin it appears in into an upper bound, which
+   * is the condition the Reports coverage warning exists to surface.
+   *
+   * It is NOT written into the group document — see modifier-cost.ts for why that would put
+   * cost in front of every staff account — so it travels here and lands in its own
+   * collection.
+   */
+  cost: number
   active: boolean
 }
 
@@ -371,6 +460,96 @@ function modifierGroupFields(input: ModifierGroupInput) {
 }
 
 /**
+ * What each option's cost should become, and the opening entry it may need first.
+ *
+ * Keyed by option id, because that is what the caller has in hand.
+ */
+type OptionCostChanges = Map<string, { cost: CostUpdate; opening: OpeningEntry | null }>
+
+/**
+ * Reads the current option costs for one group and works out what each save has to journal.
+ *
+ * **Two queries for the whole group, never two per option.** Both are answered by the
+ * automatic single-field index on `groupId`, and both are bounded by the size of the group
+ * and by how often its costs have been edited — neither grows with trading.
+ *
+ * The per-option opening entry is the same rule menu items follow: an option that already
+ * has a cost but no journal gets its outgoing value written first, dated from when that
+ * value was actually recorded. Without it, the first edit to a long-standing option would
+ * flip every earlier sale of it from costed to uncosted, because the previous figure would
+ * have nowhere left to live. See cost-history.ts.
+ */
+async function resolveOptionCostChanges(
+  groupId: string,
+  options: readonly ModifierOptionInput[],
+): Promise<OptionCostChanges> {
+  const [costDocs, historyDocs] = await Promise.all([
+    getDocs(query(collection(db, 'modifierOptionCosts'), where('groupId', '==', groupId))),
+    getDocs(query(collection(db, 'modifierOptionCostHistory'), where('groupId', '==', groupId))),
+  ])
+
+  const previous = new Map<string, { cost: number | null; recordedAt: Date | null }>()
+  for (const document of costDocs.docs) {
+    const parsed = parseModifierOptionCost(document.id, document.data())
+    if (!parsed) continue
+    previous.set(parsed.optionId, {
+      cost: parsed.cost,
+      recordedAt: parsed.updatedAt ? parsed.updatedAt.toDate() : null,
+    })
+  }
+
+  // Which options have a journal, asked per option rather than per group: a group may be
+  // years old and still contain an option whose cost has never once been edited.
+  const journalled = new Set<string>()
+  for (const document of historyDocs.docs) {
+    const optionId = document.data().optionId
+    if (typeof optionId === 'string' && optionId !== '') journalled.add(optionId)
+  }
+
+  const changes: OptionCostChanges = new Map()
+  for (const option of options) {
+    const before = previous.get(option.id) ?? { cost: null, recordedAt: null }
+    changes.set(option.id, {
+      cost: { next: option.cost, previous: before.cost },
+      opening: openingEntryFrom(before.cost, journalled.has(option.id), before.recordedAt),
+    })
+  }
+  return changes
+}
+
+/**
+ * Adds every option's cost document, and any journal entry it warrants, to `batch`.
+ *
+ * Always in the same batch as the group itself, so an option and its cost cannot drift
+ * apart: a saved group can never be missing the cost of an option it just introduced, and a
+ * refused save writes neither.
+ *
+ * **Costs are written for the options that exist now, and never deleted for ones that do
+ * not.** Removing an option from a group does not remove the sales that chose it, and those
+ * sales still resolve their cost through this collection. Deleting the record would flip
+ * them from costed to uncosted — the very failure the opening entry above exists to
+ * prevent — so a departed option simply keeps its cost, unread until a report asks about an
+ * order old enough to mention it.
+ */
+function writeOptionCosts(
+  batch: WriteBatch,
+  groupId: string,
+  options: readonly ModifierOptionInput[],
+  changes: OptionCostChanges | null = null,
+): void {
+  for (const option of options) {
+    const change = changes?.get(option.id)
+    writeCost(
+      batch,
+      optionCostTarget(groupId, option.id),
+      // A group being created has nothing before it, so any value is a real change.
+      change?.cost ?? { next: option.cost, previous: null },
+      change?.opening ?? null,
+    )
+  }
+}
+
+/**
  * Writes a new shared definition and attaches it to one item, in a single batch.
  *
  * Used by the editor on an existing item, which saves immediately. Both halves have to land
@@ -391,6 +570,8 @@ export async function createModifierGroupForItem(
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })
+  // The group's options are new, so every cost is an opening value with nothing before it.
+  writeOptionCosts(batch, groupReference.id, input.options)
   // Only a shared definition is listed on the item. An item-specific one is reached through
   // its owner, so listing it as well would be the same fact recorded twice.
   if (input.shared) {
@@ -465,10 +646,17 @@ export async function itemsUsingGroup(groupId: string): Promise<string[]> {
  * chosen, so no receipt moves. That is the whole reason selections are copied onto the line.
  */
 export async function updateModifierGroup(id: string, input: ModifierGroupInput): Promise<void> {
-  await updateDoc(doc(db, 'modifierGroups', id), {
+  // Read before the batch, because a batch cannot read: what each option's cost was, and
+  // whether it has a journal yet, decides what this save has to append.
+  const changes = await resolveOptionCostChanges(id, input.options)
+
+  const batch = writeBatch(db)
+  batch.update(doc(db, 'modifierGroups', id), {
     ...modifierGroupFields(input),
     updatedAt: serverTimestamp(),
   })
+  writeOptionCosts(batch, id, input.options, changes)
+  await batch.commit()
 }
 
 export async function setModifierGroupActive(id: string, active: boolean): Promise<void> {
@@ -488,6 +676,14 @@ export async function setModifierGroupActive(id: string, active: boolean): Promi
  * resolve to nothing and be skipped, so nothing would break — but the item documents would
  * quietly disagree with the catalogue, and a later group reusing that id is not worth
  * reasoning about. `itemsUsingGroup` is what the caller should have shown the admin first.
+ */
+/**
+ * Note what is NOT removed: the options' cost documents, and their journal.
+ *
+ * A deleted group's options still appear on every order that chose one, and reporting
+ * resolves those costs by `(groupId, optionId)` long after the definition itself has gone.
+ * Deleting the costs would leave yesterday's sales suddenly uncosted, so they are left in
+ * place — admin-only, tiny, and read only by a report reaching back far enough to need them.
  */
 export async function deleteModifierGroup(id: string): Promise<void> {
   const usedBy = await itemsUsingGroup(id)

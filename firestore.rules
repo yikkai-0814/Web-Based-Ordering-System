@@ -207,6 +207,13 @@ service cloud.firestore {
     // onto the order line at the time of sale, so an admin editing, deactivating or deleting
     // a group changes what the next customer is offered and nothing that has already been
     // rung up.
+    //
+    // **And note what is NOT here: what an option COSTS.** This document is staff-readable —
+    // the till cannot ask "extra egg?" without it — so a cost beside priceAdjustment would be
+    // a cost every staff account could read, which is the same trap that kept cost off
+    // menuItems. Option costs live in modifierOptionCosts, below, admin-only. The inability
+    // to iterate a list makes the point twice over: a cost held in this array could not be
+    // validated here even if it were safe to put here.
 
     function validModifierGroup() {
       let d = request.resource.data;
@@ -319,6 +326,102 @@ service cloud.firestore {
     match /menuItemCostHistory/{entryId} {
       allow read: if isAdmin();
       allow create: if isAdmin() && validCostHistory();
+      allow update, delete: if false;
+    }
+
+    // ---- Modifier option cost (admin only) ---------------------------------
+    // What the café pays to provide ONE customisation option — a fried egg, an extra scoop
+    // of rice — as opposed to what that option adds to the bill, which lives on the option
+    // itself in the staff-readable group document.
+    //
+    // The split is the same one menuItemCosts makes, for the same reason and with the same
+    // force: rules grant or deny a whole document, staff must read modifierGroups to take an
+    // order, so the only way "staff cannot see cost" is actually true is for the cost to be
+    // somewhere staff cannot read at all.
+    //
+    // **Keyed by the option, not by the menu item.** A group is a shared definition attached
+    // to many items, and an egg costs what an egg costs whichever dish it joins. Option ids
+    // are unique only within their group, so the document id combines the two as
+    // {groupId}__{optionId} — see src/features/menu/modifier-cost.ts, which is where the app
+    // builds the same key. Both halves are also stored as fields, which is what lets one
+    // query fetch every cost for a group when it is edited, and what the checks below can
+    // actually compare against.
+
+    function validOptionCost() {
+      let d = request.resource.data;
+      // Key set from writeCost in src/features/menu/menu-api.ts, which uses set(), so this
+      // document is always written whole.
+      return hasFields(['groupId', 'optionId', 'cost', 'updatedAt'], [])
+        && d.groupId is string && d.groupId.size() > 0
+        && d.optionId is string && d.optionId.size() > 0
+        && d.cost is int && d.cost >= 0
+        && d.updatedAt is timestamp;
+    }
+
+    // The fields must agree with the id they are filed under, or the same option would be
+    // addressable two ways and reporting could resolve a different figure from the one an
+    // admin edited. The app's parser refuses such a document too; this stops it being
+    // written in the first place.
+    function costIdMatches(costId) {
+      let d = request.resource.data;
+      return costId == d.groupId + '__' + d.optionId;
+    }
+
+    // A cost must belong to a real group, so an orphan cannot be created against a typo.
+    //
+    // existsAfter rather than exists, for exactly the reason menuItemExistsAfter uses it: a
+    // brand-new group and its options' costs are written in ONE batch, and exists reads the
+    // state before the batch commits, so it would refuse a new group's own costs.
+    //
+    // Note the deliberate asymmetry with menuItemCosts, which the item delete rule forces to
+    // be removed along with its item. Nothing forces these to go when a group is deleted, and
+    // nothing should: a deleted group's options still appear on orders already placed, and
+    // reporting resolves those costs by this key long afterwards. Removing them would leave
+    // past sales suddenly uncosted.
+    function modifierGroupExistsAfter(groupId) {
+      return existsAfter(/databases/$(database)/documents/modifierGroups/$(groupId));
+    }
+
+    match /modifierOptionCosts/{costId} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin()
+        && validOptionCost()
+        && costIdMatches(costId)
+        && modifierGroupExistsAfter(request.resource.data.groupId);
+      allow delete: if isAdmin();
+    }
+
+    // ---- Modifier option cost history (admin only, append-only) ------------
+    // The same journal menuItemCostHistory keeps, for the same reason: an option's cost
+    // changes, and the margin on a sale made before the change is unanswerable unless the
+    // figure in force at the time was recorded. Staff cannot read costs and therefore cannot
+    // stamp one onto an order they ring up, so resolution is by date, from here.
+    //
+    // The orphan guard matters as much as it does for items: reporting resolves an order
+    // line's option costs by groupId__optionId, so an entry journalled against a group that
+    // does not exist is a cost that silently applies to nothing while looking like a real
+    // one — and the journal is append-only, so it could never be removed.
+
+    function validOptionCostHistory() {
+      let d = request.resource.data;
+      // Key set from writeCost in src/features/menu/menu-api.ts.
+      return hasFields(['groupId', 'optionId', 'cost', 'effectiveFrom', 'recordedBy'], [])
+        && d.groupId is string && d.groupId.size() > 0
+        && d.optionId is string && d.optionId.size() > 0
+        // Null is a real value here and means the cost was CLEARED, which reporting treats
+        // as "unknown from this moment" rather than falling back to the current figure.
+        && (d.cost == null || (d.cost is int && d.cost >= 0))
+        && d.effectiveFrom is timestamp
+        // Who recorded it is the caller, always. An entry credited to somebody else would
+        // make the journal's attribution worthless.
+        && d.recordedBy == request.auth.uid
+        && modifierGroupExistsAfter(d.groupId);
+    }
+
+    match /modifierOptionCostHistory/{entryId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() && validOptionCostHistory();
+      // Append-only: correcting history is not editing it.
       allow update, delete: if false;
     }
 

@@ -5,21 +5,72 @@ import {
   buildReport,
   indexCostHistory,
   resolveCostAtTime,
+  indexModifierCostHistory,
   type CostHistoryEntry,
+  type ModifierCostHistoryEntry,
   type ReportOrder,
+  type ReportOrderLine,
   type ReportVoidInfo,
 } from '@/features/reports/aggregate'
+import { modifierCostKey } from '@/features/menu/modifier-cost'
 import { escapeCsvField, toCsv } from '@/features/reports/csv'
 import { MAX_RANGE_DAYS, rangeFor, validateCustomRange } from '@/features/reports/ranges'
 
 const at = (iso: string) => new Date(iso)
+
+/**
+ * A plain line: no customisation, so its base IS what was charged.
+ *
+ * `basePrice` and `modifiers` are what `parseOrder` guarantees on every order document,
+ * including ones written before customisation existed — those parse with the base defaulted
+ * to the unit price and no options, which is exactly what this produces.
+ */
+const line = (
+  menuItemId: string,
+  name: string,
+  unitPrice: number,
+  quantity: number,
+): ReportOrderLine => ({
+  menuItemId,
+  name,
+  basePrice: unitPrice,
+  unitPrice,
+  modifiers: [],
+  quantity,
+})
+
+/** One chosen option, priced as it was charged. */
+const chose = (groupId: string, optionId: string, priceAdjustment: number) => ({
+  groupId,
+  optionId,
+  priceAdjustment,
+})
+
+/**
+ * A line with options on it: the base, the choices, and the unit price the till actually
+ * charged — which is the base plus every adjustment, exactly as `unitPriceWith` computes it.
+ */
+const customised = (
+  menuItemId: string,
+  basePrice: number,
+  modifiers: readonly { groupId: string; optionId: string; priceAdjustment: number }[],
+  quantity = 1,
+  name = 'Configured',
+): ReportOrderLine => ({
+  menuItemId,
+  name,
+  basePrice,
+  unitPrice: basePrice + modifiers.reduce((sum, m) => sum + m.priceAdjustment, 0),
+  modifiers,
+  quantity,
+})
 
 const order = (over: Partial<ReportOrder> = {}): ReportOrder => ({
   id: 'o1',
   number: 1,
   businessDate: '2026-09-10',
   createdAt: at('2026-09-10T10:00:00'),
-  lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 1 }],
+  lines: [line('i1', 'Flat White', 1250, 1)],
   total: 1250,
   // Paid by default so every pre-existing expectation below still describes the same
   // scenario it did before payment became a separate step: a settled cash sale. Tests that
@@ -34,6 +85,9 @@ const unpaidOrder = (over: Partial<ReportOrder> = {}): ReportOrder =>
   order({ paid: false, paymentMethod: null, ...over })
 
 const history = (...entries: CostHistoryEntry[]) => indexCostHistory(entries)
+const modifierHistory = (...entries: ModifierCostHistoryEntry[]) =>
+  indexModifierCostHistory(entries)
+const noModifierCosts = new Map<string, number>()
 const noVoids = new Map<string, ReportVoidInfo>()
 const noCosts = new Map<string, number>()
 
@@ -167,7 +221,7 @@ describe('buildReport: revenue and voids', () => {
           number: 2,
           total: 690,
           paymentMethod: 'ewallet',
-          lines: [{ menuItemId: 'i2', name: 'Croissant', unitPrice: 690, quantity: 1 }],
+          lines: [line('i2', 'Croissant', 690, 1)],
         }),
       ],
       voids,
@@ -251,10 +305,7 @@ describe('buildReport: cost, profit, margin and coverage', () => {
         order({
           id: 'a',
           total: 2000,
-          lines: [
-            { menuItemId: 'i1', name: 'Known', unitPrice: 1000, quantity: 1 },
-            { menuItemId: 'i2', name: 'Unknown', unitPrice: 1000, quantity: 1 },
-          ],
+          lines: [line('i1', 'Known', 1000, 1), line('i2', 'Unknown', 1000, 1)],
         }),
       ],
       voids: noVoids,
@@ -276,7 +327,7 @@ describe('buildReport: cost, profit, margin and coverage', () => {
       orders: [
         order({
           total: 3750,
-          lines: [{ menuItemId: 'i1', name: 'Flat White', unitPrice: 1250, quantity: 3 }],
+          lines: [line('i1', 'Flat White', 1250, 3)],
         }),
       ],
       voids: noVoids,
@@ -292,10 +343,7 @@ describe('buildReport: cost, profit, margin and coverage', () => {
       orders: [
         order({
           total: 1150 * 3 + 235 * 7,
-          lines: [
-            { menuItemId: 'a', name: 'A', unitPrice: 1150, quantity: 3 },
-            { menuItemId: 'b', name: 'B', unitPrice: 235, quantity: 7 },
-          ],
+          lines: [line('a', 'A', 1150, 3), line('b', 'B', 235, 7)],
         }),
       ],
       voids: noVoids,
@@ -320,7 +368,7 @@ describe('buildReport: margin is suppressed when no cost is known', () => {
       orders: [
         order({
           total: 500,
-          lines: [{ menuItemId: 'nocost', name: 'Muffin', unitPrice: 500, quantity: 1 }],
+          lines: [line('nocost', 'Muffin', 500, 1)],
         }),
       ],
       voids: noVoids,
@@ -342,10 +390,7 @@ describe('buildReport: margin is suppressed when no cost is known', () => {
       orders: [
         order({
           total: 2000,
-          lines: [
-            { menuItemId: 'known', name: 'Known', unitPrice: 1000, quantity: 1 },
-            { menuItemId: 'nocost', name: 'Unknown', unitPrice: 1000, quantity: 1 },
-          ],
+          lines: [line('known', 'Known', 1000, 1), line('nocost', 'Unknown', 1000, 1)],
         }),
       ],
       voids: noVoids,
@@ -362,7 +407,7 @@ describe('buildReport: margin is suppressed when no cost is known', () => {
       orders: [
         order({
           total: 1000,
-          lines: [{ menuItemId: 'k', name: 'K', unitPrice: 1000, quantity: 1 }],
+          lines: [line('k', 'K', 1000, 1)],
         }),
       ],
       voids: noVoids,
@@ -374,6 +419,364 @@ describe('buildReport: margin is suppressed when no cost is known', () => {
   })
 })
 
+/**
+ * Historical resolution, asked of a modifier option rather than a menu item.
+ *
+ * The same walk answers both — `resolveCostAtTime` takes an identity and knows nothing about
+ * what kind of thing it names — so these cases exist to prove the option index is built with
+ * the key the report actually looks up, not to re-test the algorithm.
+ */
+describe('resolveCostAtTime: modifier options', () => {
+  const EGG = modifierCostKey('g1', 'opt-egg')
+
+  it('uses a cost recorded before the order', () => {
+    const index = modifierHistory({
+      groupId: 'g1',
+      optionId: 'opt-egg',
+      cost: 40,
+      effectiveFrom: at('2026-09-01T00:00:00'),
+    })
+    expect(resolveCostAtTime(EGG, at('2026-09-10T10:00:00'), index, noModifierCosts)).toBe(40)
+  })
+
+  it('leaves an older sale on the older cost when the option is repriced', () => {
+    const index = modifierHistory(
+      {
+        groupId: 'g1',
+        optionId: 'opt-egg',
+        cost: 40,
+        effectiveFrom: at('2026-09-01T00:00:00'),
+      },
+      {
+        groupId: 'g1',
+        optionId: 'opt-egg',
+        cost: 60,
+        effectiveFrom: at('2026-09-08T00:00:00'),
+      },
+    )
+    // The sale that happened before the change keeps what it cost then...
+    expect(resolveCostAtTime(EGG, at('2026-09-05T10:00:00'), index, noModifierCosts)).toBe(40)
+    // ...and a later one gets the new figure.
+    expect(resolveCostAtTime(EGG, at('2026-09-09T10:00:00'), index, noModifierCosts)).toBe(60)
+  })
+
+  it('treats a cleared cost as unknown from that moment, never falling back', () => {
+    const index = modifierHistory(
+      {
+        groupId: 'g1',
+        optionId: 'opt-egg',
+        cost: 40,
+        effectiveFrom: at('2026-09-01T00:00:00'),
+      },
+      {
+        groupId: 'g1',
+        optionId: 'opt-egg',
+        cost: null,
+        effectiveFrom: at('2026-09-08T00:00:00'),
+      },
+    )
+    const current = new Map([[EGG, 99]])
+    expect(resolveCostAtTime(EGG, at('2026-09-09T10:00:00'), index, current)).toBeNull()
+    // Clearing is an event, not a gap: before it, the cost is still what it was.
+    expect(resolveCostAtTime(EGG, at('2026-09-05T10:00:00'), index, current)).toBe(40)
+  })
+
+  it('falls back to the current cost when the option has no history at all', () => {
+    expect(
+      resolveCostAtTime(EGG, at('2026-09-10T10:00:00'), modifierHistory(), new Map([[EGG, 40]])),
+    ).toBe(40)
+  })
+
+  it('is unknown when history exists but every entry is later than the order', () => {
+    const index = modifierHistory({
+      groupId: 'g1',
+      optionId: 'opt-egg',
+      cost: 40,
+      effectiveFrom: at('2026-09-20T00:00:00'),
+    })
+    // A figure recorded afterwards is a guess about that sale, not a fact.
+    expect(
+      resolveCostAtTime(EGG, at('2026-09-10T10:00:00'), index, new Map([[EGG, 40]])),
+    ).toBeNull()
+  })
+
+  it('is unknown when the order carries no timestamp', () => {
+    const index = modifierHistory({
+      groupId: 'g1',
+      optionId: 'opt-egg',
+      cost: 40,
+      effectiveFrom: at('2026-09-01T00:00:00'),
+    })
+    expect(resolveCostAtTime(EGG, null, index, noModifierCosts)).toBeNull()
+  })
+
+  it('keys on group AND option, so the same option id in another group is a different cost', () => {
+    const index = modifierHistory(
+      { groupId: 'g1', optionId: 'opt-a', cost: 40, effectiveFrom: at('2026-09-01T00:00:00') },
+      { groupId: 'g2', optionId: 'opt-a', cost: 250, effectiveFrom: at('2026-09-01T00:00:00') },
+    )
+    const when = at('2026-09-10T10:00:00')
+    expect(resolveCostAtTime(modifierCostKey('g1', 'opt-a'), when, index, noModifierCosts)).toBe(40)
+    expect(resolveCostAtTime(modifierCostKey('g2', 'opt-a'), when, index, noModifierCosts)).toBe(
+      250,
+    )
+  })
+})
+
+/**
+ * What a configured line costs: the item plus everything chosen with it.
+ *
+ * Revenue is NOT touched by any of this. A line's `unitPrice` has always included its
+ * options' adjustments, so the money side of these reports is exactly what it was before
+ * modifier costs existed — what changes is how much of that money is accounted for.
+ */
+describe('buildReport: modifier costs', () => {
+  const EGG = modifierCostKey('g1', 'opt-egg')
+  const CHICKEN = modifierCostKey('g1', 'opt-chicken')
+
+  const withOptions = (
+    modifiers: readonly { groupId: string; optionId: string; priceAdjustment: number }[],
+    quantity = 1,
+  ) => {
+    const lines = [customised('i1', 600, modifiers, quantity)]
+    return order({ lines, total: lines[0]!.unitPrice * quantity })
+  }
+
+  it('costs the item alone when the line has no options', () => {
+    const report = buildReport({
+      orders: [order({ total: 1250 })],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 500]]),
+      modifierCurrentCosts: new Map([[EGG, 40]]),
+    })
+    // The egg is costed and sitting right there in the index; this line simply has none.
+    expect(report.estimatedCost).toBe(500)
+    expect(report.coverage.complete).toBe(true)
+  })
+
+  it('adds a single option to the item cost', () => {
+    const report = buildReport({
+      orders: [withOptions([chose('g1', 'opt-egg', 100)])],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 250]]),
+      modifierCurrentCosts: new Map([[EGG, 40]]),
+    })
+
+    expect(report.revenue).toBe(700)
+    expect(report.estimatedCost).toBe(290)
+    expect(report.estimatedProfit).toBe(410)
+    expect(report.coverage.complete).toBe(true)
+  })
+
+  /** The worked example: RM6.00 item, RM1.00 egg, RM3.00 chicken. */
+  it('adds several options, and profit comes out at revenue less every component', () => {
+    const report = buildReport({
+      orders: [withOptions([chose('g1', 'opt-egg', 100), chose('g1', 'opt-chicken', 300)])],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 250]]),
+      modifierCurrentCosts: new Map([
+        [EGG, 40],
+        [CHICKEN, 120],
+      ]),
+    })
+
+    expect(report.revenue).toBe(1000)
+    expect(report.estimatedCost).toBe(410)
+    expect(report.estimatedProfit).toBe(590)
+    expect(report.coverage.complete).toBe(true)
+  })
+
+  it('costs an option even when the ITEM has no cost recorded', () => {
+    const report = buildReport({
+      orders: [withOptions([chose('g1', 'opt-chicken', 300)])],
+      voids: noVoids,
+      history: history(),
+      currentCosts: noCosts,
+      modifierCurrentCosts: new Map([[CHICKEN, 120]]),
+    })
+
+    // Only the option is known, so only the option's cost and its own revenue are counted.
+    expect(report.estimatedCost).toBe(120)
+    expect(report.coverage.knownRevenue).toBe(300)
+    expect(report.coverage.totalRevenue).toBe(900)
+    expect(report.coverage.complete).toBe(false)
+  })
+
+  it('multiplies every component by the line quantity', () => {
+    const report = buildReport({
+      orders: [withOptions([chose('g1', 'opt-egg', 100), chose('g1', 'opt-chicken', 300)], 3)],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 250]]),
+      modifierCurrentCosts: new Map([
+        [EGG, 40],
+        [CHICKEN, 120],
+      ]),
+    })
+
+    // Three portions, each with an egg and a chicken.
+    expect(report.revenue).toBe(3000)
+    expect(report.estimatedCost).toBe(1230)
+    expect(report.estimatedProfit).toBe(1770)
+    expect(report.coverage.complete).toBe(true)
+  })
+
+  it('handles a free option that costs nothing — "No egg" is known, not unknown', () => {
+    const report = buildReport({
+      orders: [withOptions([chose('g1', 'opt-none', 0)])],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 250]]),
+      modifierCurrentCosts: new Map([[modifierCostKey('g1', 'opt-none'), 0]]),
+    })
+
+    expect(report.estimatedCost).toBe(250)
+    // Zero cost is a statement, so the line is fully accounted for.
+    expect(report.coverage.complete).toBe(true)
+  })
+
+  it('leaves an uncosted option out of the cost, and out of known revenue', () => {
+    const report = buildReport({
+      orders: [withOptions([chose('g1', 'opt-chicken', 300)])],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 250]]),
+      modifierCurrentCosts: noModifierCosts,
+    })
+
+    expect(report.estimatedCost).toBe(250)
+    // Profit is a ceiling: the chicken really did cost something, and it is not in here.
+    expect(report.estimatedProfit).toBe(650)
+    expect(report.coverage.knownRevenue).toBe(600)
+    expect(report.coverage.totalRevenue).toBe(900)
+    expect(report.coverage.percent).toBeCloseTo(66.67)
+    expect(report.coverage.complete).toBe(false)
+  })
+
+  it('counts the known options and not the unknown ones, on the same line', () => {
+    const report = buildReport({
+      orders: [withOptions([chose('g1', 'opt-egg', 100), chose('g1', 'opt-chicken', 300)])],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 250]]),
+      modifierCurrentCosts: new Map([[EGG, 40]]),
+    })
+
+    // Item 250 + egg 40. The chicken contributes neither cost nor covered revenue.
+    expect(report.estimatedCost).toBe(290)
+    expect(report.coverage.knownRevenue).toBe(700)
+    expect(report.coverage.totalRevenue).toBe(1000)
+    expect(report.coverage.percent).toBe(70)
+  })
+
+  it('resolves each option against the cost in force when the order was rung up', () => {
+    const report = buildReport({
+      orders: [
+        {
+          ...withOptions([chose('g1', 'opt-egg', 100)]),
+          id: 'a',
+          createdAt: at('2026-09-05T10:00:00'),
+        },
+        {
+          ...withOptions([chose('g1', 'opt-egg', 100)]),
+          id: 'b',
+          number: 2,
+          createdAt: at('2026-09-10T10:00:00'),
+        },
+      ],
+      voids: noVoids,
+      history: history({ itemId: 'i1', cost: 250, effectiveFrom: at('2026-09-01T00:00:00') }),
+      currentCosts: noCosts,
+      modifierHistory: modifierHistory(
+        { groupId: 'g1', optionId: 'opt-egg', cost: 40, effectiveFrom: at('2026-09-01T00:00:00') },
+        { groupId: 'g1', optionId: 'opt-egg', cost: 90, effectiveFrom: at('2026-09-08T00:00:00') },
+      ),
+    })
+
+    // 250+40 for the earlier sale, 250+90 for the later one. Repricing the egg today did not
+    // reach back and rewrite what last week's order cost.
+    expect(report.estimatedCost).toBe(630)
+    expect(report.coverage.complete).toBe(true)
+  })
+
+  it('rolls option costs into the ITEM performance row rather than a row of their own', () => {
+    const report = buildReport({
+      orders: [withOptions([chose('g1', 'opt-chicken', 300)])],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 400]]),
+      modifierCurrentCosts: new Map([[CHICKEN, 200]]),
+    })
+
+    expect(report.items).toHaveLength(1)
+    const row = report.items[0]!
+    expect(row.menuItemId).toBe('i1')
+    expect(row.revenue).toBe(900)
+    // The dish and the duck that went on it, on one line of the table.
+    expect(row.estimatedCost).toBe(600)
+    expect(row.estimatedProfit).toBe(300)
+    expect(row.coverage.complete).toBe(true)
+  })
+
+  it('costs a legacy line — no base price, no options — exactly as it always did', () => {
+    // What `parseOrder` produces for an order written before customisation existed.
+    const report = buildReport({
+      orders: [order({ lines: [line('i1', 'Flat White', 1250, 2)], total: 2500 })],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 500]]),
+    })
+
+    expect(report.estimatedCost).toBe(1000)
+    expect(report.coverage.complete).toBe(true)
+  })
+
+  /**
+   * The clamped line, which the split cannot describe honestly.
+   *
+   * `unitPriceWith` floors a unit price at zero, so a hand-written order whose negative
+   * adjustments exceed its base charges less than its components add up to. Attributing
+   * revenue component-wise would then mark more money as covered than the line took, so such
+   * a line is costed all-or-nothing instead.
+   */
+  it('falls back to all-or-nothing when the components do not sum to what was charged', () => {
+    const clamped = {
+      menuItemId: 'i1',
+      name: 'Odd',
+      basePrice: 600,
+      // Charged 0 after clamping, though the parts say -400.
+      unitPrice: 0,
+      modifiers: [chose('g1', 'opt-weird', -1000)],
+      quantity: 1,
+    }
+
+    const everything = buildReport({
+      orders: [order({ lines: [clamped], total: 0 })],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 250]]),
+      modifierCurrentCosts: new Map([[modifierCostKey('g1', 'opt-weird'), 10]]),
+    })
+    // Every component known, so the whole line is costed and nothing exceeds its revenue.
+    expect(everything.estimatedCost).toBe(260)
+    expect(everything.coverage.knownRevenue).toBe(0)
+
+    const partial = buildReport({
+      orders: [order({ lines: [clamped], total: 0 })],
+      voids: noVoids,
+      history: history(),
+      currentCosts: new Map([['i1', 250]]),
+      modifierCurrentCosts: noModifierCosts,
+    })
+    // One component missing, so the line contributes nothing rather than a misleading share.
+    expect(partial.estimatedCost).toBe(0)
+    expect(partial.coverage.knownRevenue).toBe(0)
+  })
+})
+
 describe('buildReport: item performance', () => {
   it('groups a renamed item into ONE row, keeping the most recent name', () => {
     const report = buildReport({
@@ -382,14 +785,14 @@ describe('buildReport: item performance', () => {
           id: 'a',
           createdAt: at('2026-09-05T10:00:00'),
           total: 690,
-          lines: [{ menuItemId: 'i1', name: 'Croissant', unitPrice: 690, quantity: 1 }],
+          lines: [line('i1', 'Croissant', 690, 1)],
         }),
         order({
           id: 'b',
           number: 2,
           createdAt: at('2026-09-09T10:00:00'),
           total: 990,
-          lines: [{ menuItemId: 'i1', name: 'Almond Croissant', unitPrice: 990, quantity: 1 }],
+          lines: [line('i1', 'Almond Croissant', 990, 1)],
         }),
       ],
       voids: noVoids,
@@ -409,10 +812,7 @@ describe('buildReport: item performance', () => {
       orders: [
         order({
           total: 1690,
-          lines: [
-            { menuItemId: 'small', name: 'Small', unitPrice: 690, quantity: 1 },
-            { menuItemId: 'big', name: 'Big', unitPrice: 1000, quantity: 1 },
-          ],
+          lines: [line('small', 'Small', 690, 1), line('big', 'Big', 1000, 1)],
         }),
       ],
       voids: noVoids,
@@ -427,10 +827,7 @@ describe('buildReport: item performance', () => {
       orders: [
         order({
           total: 2000,
-          lines: [
-            { menuItemId: 'i1', name: 'Known', unitPrice: 1000, quantity: 1 },
-            { menuItemId: 'i2', name: 'Unknown', unitPrice: 1000, quantity: 1 },
-          ],
+          lines: [line('i1', 'Known', 1000, 1), line('i2', 'Unknown', 1000, 1)],
         }),
       ],
       voids: noVoids,

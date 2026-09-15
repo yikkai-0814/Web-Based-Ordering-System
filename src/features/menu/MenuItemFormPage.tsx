@@ -231,9 +231,21 @@ function MenuItemForm({
 
   return (
     /* Details on the left, customisation on the right, so the horizontal space is used and
-       the form does not become a very tall single column. One column below `lg`, where two
-       would leave neither enough room. */
-    <div className="grid w-full max-w-6xl items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)]">
+       the form does not become a very tall single column.
+
+       **The split starts at `xl`, not `lg`, and the right column is 42rem.** The customisation
+       card carries a four-column option table — name, adds, cost, actions — whose last three
+       columns are fixed, so the name column is whatever the card has left over. The old 28rem
+       track capped that card at 448px however wide the window was, leaving the name about
+       50px wide and long option names unreadable.
+
+       Widening the track alone would have been worse between 1024px and 1280px: the two
+       columns together would not fit, and the details form would have been squeezed to its
+       minimum content width instead. So the breakpoint moved up with it. Below `xl` this is
+       one column, where each card reaches its own max-width — 42rem for the customisation
+       card, which is exactly the track it gets above `xl`. The same editor at the same width,
+       either side of the breakpoint; only the arrangement changes. */
+    <div className="grid w-full max-w-6xl items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,42rem)]">
       <Card className="w-full">
         <CardHeader>
           <CardTitle className="text-xl">
