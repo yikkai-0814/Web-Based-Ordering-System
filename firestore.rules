@@ -31,6 +31,13 @@ service cloud.firestore {
       return isActive() && profile().role == 'admin';
     }
 
+    // The counter and the kitchen. Named explicitly rather than expressed as "not an admin",
+    // because the fulfilment workflow below is granted to this role and to nothing else: a
+    // future third role would otherwise inherit the kitchen by accident.
+    function isStaff() {
+      return isActive() && profile().role == 'staff';
+    }
+
     function isSelf(uid) {
       return isSignedIn() && request.auth.uid == uid;
     }
@@ -723,9 +730,10 @@ service cloud.firestore {
     // must not require finding an admin mid-rush. Both steps are named explicitly rather than
     // derived from the index, because "one step back" is NOT the rule: `delivered → ready`
     // is also one step back and is deliberately not here. Handing the order over is the step
-    // that stops the customer's clock and makes the sale final during service, so undoing it
-    // is a correction to the record rather than a step in the workflow, and stays with an
-    // admin.
+    // that stops the customer's clock and makes the sale final during service, so it is the
+    // end of the workflow: NO role can undo it, an admin included. A delivered order that is
+    // genuinely wrong is a void, which is a counter-entry with a reason and an authoriser,
+    // not a quiet rewind of the kitchen's record.
     //
     // Timestamps are not relaxed by any of this. validPreparationUpdate() still pins readyAt
     // to null on both of these steps and validDeliveredAt() still pins deliveredAt, so a
@@ -737,21 +745,37 @@ service cloud.firestore {
         || (from == 'ready' && to == 'preparing');
     }
 
+    // ---- Who owns fulfilment -------------------------------------------------
+    // Staff, and only staff. The kitchen workflow belongs to the people working the service:
+    // they are the ones at the counter while it is running, and they take every step of it,
+    // forward and back.
+    //
+    // An admin is a back-office account — menu, costing, reports, the roster — used mostly
+    // outside operating hours, and it READS orders like any other. It does not move them.
+    // That is written as an explicit isStaff() rather than as the absence of an admin check:
+    // `isActive()` alone would grant the workflow to every present and future role, and
+    // "not an admin" would do the same. Naming the role means a third role added later
+    // inherits nothing here until somebody decides it should.
+    //
+    // There is deliberately no override, for any role. The backward steps are exactly the two
+    // in staffReversibleStep(); `delivered → ready` is not among them and is reachable by
+    // nobody, so a handover cannot be rewritten after the fact by anyone at all.
     match /orderFulfillment/{orderId} {
+      // Reading is the exception, and stays with every active account: an admin has to be
+      // able to see where an order stands to read the day's takings or answer a question
+      // about it. Seeing is not moving.
       allow read: if isActive();
-      allow create: if isActive()
+      allow create: if isStaff()
         && validFulfillmentFields(orderId)
         && validFulfillmentStart()
         && validPreparationCreate();
-      allow update: if isActive()
+      allow update: if isStaff()
         && validFulfillmentFields(orderId)
         && validPreparationUpdate()
         && validDeliveredAt()
-        && (fulfillmentStepChange() == 1
-            // An admin may correct any single step, `delivered → ready` included.
-            || (isAdmin() && fulfillmentStepChange() == -1)
-            // Staff may take only the two the kitchen owns.
-            || staffReversibleStep());
+        // One step forward, or one of the two backward steps the kitchen owns. Nothing else:
+        // no role-dependent extra clause, so `delivered → ready` has no path in.
+        && (fulfillmentStepChange() == 1 || staffReversibleStep());
       // A record of how an order progressed is not something to erase.
       allow delete: if false;
 
@@ -790,7 +814,10 @@ service cloud.firestore {
 
       match /transitions/{transitionId} {
         allow read: if isActive();
-        allow create: if isActive() && validTransition(orderId);
+        // Written in the same batch as the parent, so it is gated by the same role. Without
+        // isStaff() here an admin could still append to the trail on its own — the entry
+        // would describe a move they are not permitted to make.
+        allow create: if isStaff() && validTransition(orderId);
         // Append-only: a trail that could be rewritten would not be a trail.
         allow update, delete: if false;
       }

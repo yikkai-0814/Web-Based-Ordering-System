@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 /**
- * Undoing a fulfilment step, on the one screen both roles can reach.
+ * Who may work an order's fulfilment, on the one screen both roles can reach.
  *
- * The domain already modelled backward steps — `previousFulfillment`, `isBackwardStep` and the
- * timestamp tables all covered them — and `correctFulfillment` already wrote them, journalled,
- * with firestore.rules permitting a step back only for an admin. What was missing was any way
- * to ask for one: the page offered the forward button alone, so "Mark ready" was a one-way
- * door.
+ * The permission model this pins: the kitchen workflow is STAFF's, end to end. They take it
+ * forward, they take back the two steps the kitchen owns, and nobody — staff or admin —
+ * reopens a delivered order. An admin is a back-office account: it reads the receipt, takes
+ * money and voids, but it does not move food through the kitchen, so this page offers it no
+ * fulfilment control at any status.
  *
- * These tests pin the seam that was added: who is offered the control, what it asks for, and
- * that the two buttons cannot race each other.
+ * `delivered → ready` is gone entirely rather than moved to another role. A handover that
+ * was wrong is corrected by VOIDING the sale — a counter-entry with a reason and an
+ * authoriser — not by rewinding the record behind it.
  */
 import { screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
@@ -27,7 +28,7 @@ vi.mock('@/features/pos/fulfillment-api', async (importOriginal) => {
 vi.mock('@/features/pos/payment-api', () => ({ recordPayment: vi.fn() }))
 vi.mock('@/features/pos/void-api', () => ({ voidOrder: vi.fn() }))
 
-let role: 'admin' | 'staff' = 'admin'
+let role: 'admin' | 'staff' = 'staff'
 vi.mock('@/features/auth/useAuth', () => ({
   useAuth: () => ({
     role,
@@ -45,7 +46,8 @@ vi.mock('@/features/staff/useStaffSession', () => ({
 }))
 
 const ORDER_ID = 'order-1'
-let status: 'pending' | 'preparing' | 'ready' | 'delivered' = 'ready'
+const STATUSES = ['pending', 'preparing', 'ready', 'delivered'] as const
+let status: (typeof STATUSES)[number] = 'ready'
 
 vi.mock('@/features/pos/useOrderDetail', () => ({
   useOrderDetail: () => ({
@@ -108,12 +110,12 @@ beforeEach(() => {
   setFulfillment.mockResolvedValue(undefined)
   correctFulfillment.mockReset()
   correctFulfillment.mockResolvedValue(undefined)
-  role = 'admin'
+  role = 'staff'
   status = 'ready'
 })
 
-describe('stepping an order back', () => {
-  it('3. reverses ready to preparing', async () => {
+describe('staff step an order back', () => {
+  it('4. reverses ready to preparing', async () => {
     const { user } = renderDetail()
     expect(back()?.getAttribute('data-previous')).toBe('preparing')
 
@@ -128,7 +130,7 @@ describe('stepping an order back', () => {
     expect(setFulfillment).not.toHaveBeenCalled()
   })
 
-  it('4. reverses preparing to pending', async () => {
+  it('2. reverses preparing to pending', async () => {
     status = 'preparing'
     const { user } = renderDetail()
     expect(back()?.getAttribute('data-previous')).toBe('pending')
@@ -140,16 +142,6 @@ describe('stepping an order back', () => {
     expect(params.to).toBe('pending')
   })
 
-  it('reverses delivered to ready', async () => {
-    status = 'delivered'
-    const { user } = renderDetail()
-    await user.click(back() as HTMLElement)
-
-    const [, params] = correctFulfillment.mock.calls[0] as [string, Record<string, unknown>]
-    expect(params.from).toBe('delivered')
-    expect(params.to).toBe('ready')
-  })
-
   it('offers nothing to undo at the first step', () => {
     status = 'pending'
     renderDetail()
@@ -158,63 +150,26 @@ describe('stepping an order back', () => {
     expect(forward()).not.toBeNull()
   })
 
-  it('offers the two kitchen steps to staff as well', () => {
-    role = 'staff'
-    status = 'ready'
-    renderDetail()
-    // The counter owns recovering from its own mis-tap; it does not need an admin mid-rush.
-    expect(back()?.getAttribute('data-previous')).toBe('preparing')
-    expect(forward()).not.toBeNull()
-  })
-
   /**
-   * The bug this page actually had.
+   * 6. The handover is the end of the road.
    *
-   * A delivered order offers no way forward — there is none — and no way back, because the
-   * rules reserve corrections for an admin. Staff were therefore shown a screen with no
-   * actions and no reason, which reads as the feature being broken rather than as a
-   * permission: exactly how it was reported. Verified against live emulator data before the
-   * fix, on a real delivered order, signed in as staff.
+   * Staff took this order all the way through the kitchen and cannot take the last step
+   * back — nor can anyone else. A delivered order with nothing left to press is the correct
+   * reading of the screen, not a permission being withheld from this account: there is no
+   * other account it is being held for. Correcting a delivered sale is a void.
    */
-  it('withholds only the delivered reopen from staff, and says why', () => {
-    role = 'staff'
+  it('gives staff no way to reopen a delivered order', () => {
     status = 'delivered'
     renderDetail()
 
-    // Reopening a handover is a correction to the record, not a step in the workflow.
     expect(back()).toBeNull()
-    // Delivered is the end of the forward path, so this really is a screen with no actions —
-    // which is exactly why it has to explain itself rather than simply ending.
     expect(forward()).toBeNull()
-    expect(screen.getByTestId('reverse-admin-only')).toBeTruthy()
-  })
-
-  it('says nothing to staff on a step they CAN take', () => {
-    role = 'staff'
-    status = 'preparing'
-    renderDetail()
-    expect(back()?.getAttribute('data-previous')).toBe('pending')
+    // The line that used to point at an admin is gone: it would now be untrue.
     expect(screen.queryByTestId('reverse-admin-only')).toBeNull()
-  })
-
-  it('does not tell an admin that, because they have the button', () => {
-    status = 'delivered'
-    renderDetail()
-    expect(back()).not.toBeNull()
-    expect(screen.queryByTestId('reverse-admin-only')).toBeNull()
-  })
-
-  it('says nothing at the first step, where there is genuinely nothing to undo', () => {
-    role = 'staff'
-    status = 'pending'
-    renderDetail()
-    expect(screen.queryByTestId('reverse-admin-only')).toBeNull()
-    // The way forward is still offered, so the screen is not empty.
-    expect(forward()).not.toBeNull()
   })
 })
 
-describe('the forward steps are untouched', () => {
+describe('staff drive the order forward', () => {
   it('1. pending to preparing', async () => {
     status = 'pending'
     const { user } = renderDetail()
@@ -226,7 +181,7 @@ describe('the forward steps are untouched', () => {
     expect(correctFulfillment).not.toHaveBeenCalled()
   })
 
-  it('2. preparing to ready', async () => {
+  it('3. preparing to ready', async () => {
     status = 'preparing'
     const { user } = renderDetail()
     await user.click(forward() as HTMLElement)
@@ -234,7 +189,7 @@ describe('the forward steps are untouched', () => {
     expect(params).toMatchObject({ from: 'preparing', to: 'ready' })
   })
 
-  it('ready to delivered', async () => {
+  it('5. ready to delivered', async () => {
     const { user } = renderDetail()
     await user.click(forward() as HTMLElement)
     const [, params] = setFulfillment.mock.calls[0] as [string, Record<string, unknown>]
@@ -242,7 +197,80 @@ describe('the forward steps are untouched', () => {
   })
 })
 
-describe('8. in-flight protection', () => {
+/**
+ * 7, 8, 9. The admin half of the change.
+ *
+ * An admin reaches this page — Orders is on their navigation and the receipt is what they
+ * read to answer a question about a sale — so the page has to keep working for them. What it
+ * must not do is offer a single control that moves the food, at any status, in either
+ * direction. firestore.rules refuses such a write from an admin account, so a button here
+ * would be an offer of a refusal.
+ */
+describe('7, 8. an admin is offered no fulfilment control at all', () => {
+  beforeEach(() => {
+    role = 'admin'
+  })
+
+  it.each(STATUSES)('shows neither direction at %s', (current) => {
+    status = current
+    renderDetail()
+
+    expect(forward()).toBeNull()
+    expect(back()).toBeNull()
+  })
+
+  it('cannot reopen a delivered order, and is told nothing that suggests otherwise', () => {
+    status = 'delivered'
+    renderDetail()
+
+    expect(back()).toBeNull()
+    expect(screen.queryByTestId('reverse-admin-only')).toBeNull()
+  })
+
+  it('writes nothing through either fulfilment API', () => {
+    status = 'preparing'
+    renderDetail()
+
+    expect(setFulfillment).not.toHaveBeenCalled()
+    expect(correctFulfillment).not.toHaveBeenCalled()
+  })
+})
+
+describe('9, 10. what an admin can still do here is untouched', () => {
+  beforeEach(() => {
+    role = 'admin'
+    status = 'preparing'
+  })
+
+  it('reads the whole receipt — number, lines, total and status', () => {
+    renderDetail()
+
+    expect(screen.getByTestId('receipt-number')).toBeTruthy()
+    expect(screen.getByTestId('receipt-total')).toBeTruthy()
+    expect(screen.getByTestId('status-summary')).toBeTruthy()
+    expect(screen.getByTestId('receipt-line')).toBeTruthy()
+    expect(screen.getByTestId('receipt-operator')).toBeTruthy()
+  })
+
+  it('still sees the payment state, which is a separate axis from fulfilment', () => {
+    renderDetail()
+    // Unpaid, and the order is only being prepared: fulfilment says nothing about money.
+    expect(screen.getByTestId('receipt-unpaid')).toBeTruthy()
+    expect(screen.getByTestId('record-payment')).toBeTruthy()
+  })
+
+  it('still sees the elapsed timer, which is read from the order rather than the workflow', () => {
+    renderDetail()
+    expect(screen.getByTestId('order-elapsed')).toBeTruthy()
+  })
+
+  it('still sees the void control — correcting a sale is the admin path that remains', () => {
+    renderDetail()
+    expect(screen.getByTestId('void-order')).toBeTruthy()
+  })
+})
+
+describe('in-flight protection', () => {
   it('disables BOTH directions while a move is in flight, so they cannot race', async () => {
     let release: () => void = () => {}
     correctFulfillment.mockImplementation(

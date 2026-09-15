@@ -386,14 +386,43 @@ describe('fulfilment rules: the forward path', () => {
     expect(final.data()?.status).toBe('delivered')
   })
 
-  it('lets an admin drive the workflow too', async () => {
+  /**
+   * 7. The admin half of the permission model, stated at the first step.
+   *
+   * An admin is a back-office account — menu, costing, reports, the roster — used mostly
+   * outside operating hours. The kitchen workflow is the counter's, so an admin cannot even
+   * start an order preparing, let alone finish or hand one over. The rule says isStaff()
+   * rather than "not an admin" precisely so this is a decision about who owns the workflow
+   * rather than a hole shaped like one role.
+   */
+  it('refuses to let an ADMIN start the workflow', async () => {
     await seed()
-    await assertSucceeds(
+    await assertFails(
       setDoc(
         doc(adminDb(), 'orderFulfillment', ORDER_ID),
         await stepAt(adminDb(), 'preparing', ADMIN_UID, ORDER_ID),
       ),
     )
+  })
+
+  it('7. refuses an ADMIN every forward step, not just the first', async () => {
+    await seed()
+
+    for (const [from, to] of [
+      ['preparing', 'ready'],
+      ['ready', 'delivered'],
+    ] as const) {
+      await seedAt(from)
+      await assertFails(
+        updateDoc(
+          doc(adminDb(), 'orderFulfillment', ORDER_ID),
+          await stepAt(adminDb(), to, ADMIN_UID, ORDER_ID),
+        ),
+      )
+      // The refusal changed nothing: the order is where the kitchen left it.
+      const after = await getDoc(doc(adminDb(), 'orderFulfillment', ORDER_ID))
+      expect(after.data()?.status).toBe(from)
+    }
   })
 
   it('lets both roles read fulfilment — the kitchen and the counter share a board', async () => {
@@ -636,20 +665,52 @@ describe('fulfilment rules: a voided order stops', () => {
   })
 })
 
-describe('fulfilment rules: an admin may correct a mis-tap', () => {
-  // The forward path is otherwise a one-way door; see fulfillment-api.ts.
-  it('lets an admin step back exactly one place', async () => {
+/**
+ * 7, 8. An admin corrects nothing here.
+ *
+ * The backward steps are the counter's two, and `delivered → ready` is nobody's. That leaves
+ * an admin with no fulfilment write at all: not forward, not back, not on a delivered order,
+ * not on a voided one. What an admin still has for a sale that went wrong is the VOID — a
+ * counter-entry carrying a reason and their own authorisation — which is a different
+ * document, a different rule, and untouched by any of this.
+ */
+describe('fulfilment rules: an admin may not correct anything', () => {
+  it('8. refuses an admin reopening a delivered order', async () => {
     await seed()
     await seedAt('delivered')
-    await assertSucceeds(
+    await assertFails(
       updateDoc(
         doc(adminDb(), 'orderFulfillment', ORDER_ID),
         await stepAt(adminDb(), 'ready', ADMIN_UID, ORDER_ID),
       ),
     )
+
+    // Still delivered. A refused write leaves the record exactly as it was.
+    const after = await getDoc(doc(adminDb(), 'orderFulfillment', ORDER_ID))
+    expect(after.data()?.status).toBe('delivered')
   })
 
-  it('does not let an admin rewind further than one step', async () => {
+  it('refuses an admin the two steps the KITCHEN owns, which are staff-only', async () => {
+    await seed()
+
+    await seedAt('preparing')
+    await assertFails(
+      updateDoc(
+        doc(adminDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(adminDb(), 'pending', ADMIN_UID, ORDER_ID),
+      ),
+    )
+
+    await seedAt('ready')
+    await assertFails(
+      updateDoc(
+        doc(adminDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(adminDb(), 'preparing', ADMIN_UID, ORDER_ID),
+      ),
+    )
+  })
+
+  it('does not let an admin rewind further than one step either', async () => {
     await seed()
     await seedAt('delivered')
     await assertFails(
@@ -675,6 +736,61 @@ describe('fulfilment rules: an admin may correct a mis-tap', () => {
         await stepAt(adminDb(), 'ready', ADMIN_UID, VOIDED_ORDER_ID),
       ),
     )
+  })
+
+  /**
+   * 6. And the step is not staff's either, so it belongs to nobody.
+   *
+   * Asserted here, beside the admin refusal, because that adjacency IS the property: the two
+   * together say there is no role for which `delivered → ready` is permitted, which a pair
+   * of refusals filed in separate describes would only imply.
+   */
+  it('6. refuses STAFF reopening a delivered order, so no role can', async () => {
+    await seed()
+    await seedAt('delivered')
+    await assertFails(
+      updateDoc(
+        doc(staffDb(), 'orderFulfillment', ORDER_ID),
+        await stepAt(staffDb(), 'ready', STAFF_UID, ORDER_ID),
+      ),
+    )
+  })
+})
+
+/**
+ * 9. Reading is the one thing an admin keeps.
+ *
+ * Losing the write must not cost them the view: the dashboard, the reports and the receipt
+ * all read where an order stands, and an admin answering a question about a sale needs to
+ * see it. `allow read: if isActive()` is deliberately unchanged.
+ */
+describe('fulfilment rules: an admin still reads orders normally', () => {
+  it('9. reads a fulfilment record, and the whole collection', async () => {
+    await seed()
+    await seedAt('ready')
+
+    const one = await assertSucceeds(getDoc(doc(adminDb(), 'orderFulfillment', ORDER_ID)))
+    expect(one.data()?.status).toBe('ready')
+
+    const all = await assertSucceeds(getDocs(collection(adminDb(), 'orderFulfillment')))
+    expect(all.size).toBe(1)
+  })
+
+  it('9. reads the transition journal — who did which step', async () => {
+    await seed()
+    await assertSucceeds(move(staffDb(), { from: 'pending', to: 'preparing' }))
+
+    const entries = await assertSucceeds(
+      getDocs(collection(adminDb(), 'orderFulfillment', ORDER_ID, 'transitions')),
+    )
+    expect(entries.size).toBe(1)
+    expect(entries.docs[0]!.data().to).toBe('preparing')
+  })
+
+  it('9. reads the order and its payment, which this change never touched', async () => {
+    await seed()
+    await assertSucceeds(getDoc(doc(adminDb(), 'orders', ORDER_ID)))
+    await assertSucceeds(getDoc(doc(adminDb(), 'orderVoids', VOIDED_ORDER_ID)))
   })
 })
 
@@ -702,9 +818,11 @@ describe('fulfilment rules: who moved it must be a real, active operator', () =>
     )
   })
 
-  it('lets an admin move an order with no named operator selected', async () => {
+  it('refuses the self form for an ADMIN, however well-formed the identity is', async () => {
+    // The operator is real, active and correctly named — and it still fails, because the
+    // account making the write is not staff. Identity was never the thing being withheld.
     await seed()
-    await assertSucceeds(
+    await assertFails(
       setDoc(
         doc(adminDb(), 'orderFulfillment', ORDER_ID),
         step('preparing', ADMIN_UID, ORDER_ID, { id: ADMIN_UID, name: 'Ada Admin' }),
@@ -712,9 +830,9 @@ describe('fulfilment rules: who moved it must be a real, active operator', () =>
     )
   })
 
-  it('lets an admin record a named operator when one IS selected', async () => {
+  it('refuses an ADMIN naming a rostered operator, too', async () => {
     await seed()
-    await assertSucceeds(
+    await assertFails(
       setDoc(
         doc(adminDb(), 'orderFulfillment', ORDER_ID),
         step('preparing', ADMIN_UID, ORDER_ID, { id: 'bob', name: 'Bob' }),
@@ -982,31 +1100,44 @@ describe('fulfilment rules: the transition journal', () => {
     await assertFails(move(anon, { from: 'pending', to: 'preparing', operator: ALICE }))
   })
 
-  it('journals an admin rollback rather than quietly rewinding', async () => {
+  it('journals a staff rollback rather than quietly rewinding', async () => {
+    await seed()
+    await seedAt('ready')
+    await assertSucceeds(move(staffDb(), { from: 'ready', to: 'preparing', operator: ALICE }))
+
+    const entries = await getDocs(
+      collection(staffDb(), 'orderFulfillment', ORDER_ID, 'transitions'),
+    )
+    expect(entries.size).toBe(1)
+    expect(entries.docs[0]!.data().from).toBe('ready')
+    expect(entries.docs[0]!.data().to).toBe('preparing')
+    expect(entries.docs[0]!.data().updatedByStaffName).toBe('Alice')
+  })
+
+  it('6. still refuses a batched reopen of a delivered order, journal or not', async () => {
     await seed()
     await seedAt('delivered')
-    await assertSucceeds(
+    await assertFails(move(staffDb(), { from: 'delivered', to: 'ready', operator: ALICE }))
+  })
+
+  it('7. refuses an admin appending to the trail, even for a step it could not make', async () => {
+    // The journal entry and the parent land in one batch, so they share a role gate. Without
+    // isStaff() on the subcollection an admin could still write the trail on its own — an
+    // entry describing a move they are not permitted to perform.
+    await seed()
+    await assertFails(
       move(adminDb(), {
-        from: 'delivered',
-        to: 'ready',
+        from: 'pending',
+        to: 'preparing',
         uid: ADMIN_UID,
         operator: { id: ADMIN_UID, name: 'Ada Admin' },
       }),
     )
 
     const entries = await getDocs(
-      collection(adminDb(), 'orderFulfillment', ORDER_ID, 'transitions'),
+      collection(staffDb(), 'orderFulfillment', ORDER_ID, 'transitions'),
     )
-    expect(entries.size).toBe(1)
-    expect(entries.docs[0]!.data().from).toBe('delivered')
-    expect(entries.docs[0]!.data().to).toBe('ready')
-    expect(entries.docs[0]!.data().updatedByStaffName).toBe('Ada Admin')
-  })
-
-  it('still refuses a staff rollback, journal or not', async () => {
-    await seed()
-    await seedAt('delivered')
-    await assertFails(move(staffDb(), { from: 'delivered', to: 'ready', operator: ALICE }))
+    expect(entries.size).toBe(0)
   })
 
   it('still refuses a batched move on a voided order', async () => {
@@ -1079,7 +1210,8 @@ describe('fulfilment rules: the exact shape of a move', () => {
  * completed, or quietly drop one it has already been credited with.
  */
 describe('fulfilment rules: preparation timing', () => {
-  const ADMIN_OP = { id: ADMIN_UID, name: 'Ada Admin' }
+  // Every backward step below is the counter's own, so it is taken as the counter.
+  const ALICE = { id: 'alice', name: 'Alice' }
 
   async function readFulfillment(db: ReturnType<typeof staffDb>, orderId = ORDER_ID) {
     return getDoc(doc(db, 'orderFulfillment', orderId))
@@ -1111,38 +1243,44 @@ describe('fulfilment rules: preparation timing', () => {
     expect((await readFulfillment(db)).get('readyAt').toDate()).toEqual(SEEDED_READY_AT)
   })
 
-  it('keeps it when an admin corrects delivered back to ready', async () => {
+  it('11. leaves both stamps alone when a reopen is refused, for either role', async () => {
     await seed()
     await seedAt('delivered')
-    const db = adminDb()
-    await assertSucceeds(
-      move(db, { from: 'delivered', to: 'ready', uid: ADMIN_UID, operator: ADMIN_OP }),
+
+    await assertFails(move(staffDb(), { from: 'delivered', to: 'ready', operator: ALICE }))
+    await assertFails(
+      move(adminDb(), {
+        from: 'delivered',
+        to: 'ready',
+        uid: ADMIN_UID,
+        operator: { id: ADMIN_UID, name: 'Ada Admin' },
+      }),
     )
 
-    // Not a second finish: the order was finished when it was finished.
-    expect((await readFulfillment(db)).get('readyAt').toDate()).toEqual(SEEDED_READY_AT)
+    // Refused writes change nothing. The finish is still the finish, and — the one that
+    // matters for the timer — the handover is still recorded, so the clock stays stopped.
+    const record = await readFulfillment(staffDb())
+    expect(record.get('status')).toBe('delivered')
+    expect(record.get('readyAt').toDate()).toEqual(SEEDED_READY_AT)
+    expect(record.get('deliveredAt').toDate()).toEqual(SEEDED_DELIVERED_AT)
   })
 
-  it('clears the finish when ready is corrected back to preparing', async () => {
+  it('11. clears the finish when ready is corrected back to preparing', async () => {
     await seed()
     await seedAt('ready')
-    const db = adminDb()
-    await assertSucceeds(
-      move(db, { from: 'ready', to: 'preparing', uid: ADMIN_UID, operator: ADMIN_OP }),
-    )
+    const db = staffDb()
+    await assertSucceeds(move(db, { from: 'ready', to: 'preparing', operator: ALICE }))
 
     // The order is being worked on again, so it must stop claiming to be done. The clock
     // resumes from the order's creation, which nothing here can touch.
     expect((await readFulfillment(db)).get('readyAt')).toBeNull()
   })
 
-  it('clears it when the order is corrected all the way back to pending', async () => {
+  it('11. clears it when the order is corrected all the way back to pending', async () => {
     await seed()
     await seedAt('preparing')
-    const db = adminDb()
-    await assertSucceeds(
-      move(db, { from: 'preparing', to: 'pending', uid: ADMIN_UID, operator: ADMIN_OP }),
-    )
+    const db = staffDb()
+    await assertSucceeds(move(db, { from: 'preparing', to: 'pending', operator: ALICE }))
 
     expect((await readFulfillment(db)).get('readyAt')).toBeNull()
   })
@@ -1151,11 +1289,10 @@ describe('fulfilment rules: preparation timing', () => {
     await seed()
     await seedAt('ready')
     await assertFails(
-      move(adminDb(), {
+      move(staffDb(), {
         from: 'ready',
         to: 'preparing',
-        uid: ADMIN_UID,
-        operator: ADMIN_OP,
+        operator: ALICE,
         prep: { readyAt: SEEDED_READY_AT, deliveredAt: null },
       }),
     )
@@ -1262,9 +1399,7 @@ describe('fulfilment rules: preparation timing', () => {
   it('lets a legacy record be corrected backward too', async () => {
     await seed()
     await seedLegacyAt('ready')
-    await assertSucceeds(
-      move(adminDb(), { from: 'ready', to: 'preparing', uid: ADMIN_UID, operator: ADMIN_OP }),
-    )
+    await assertSucceeds(move(staffDb(), { from: 'ready', to: 'preparing', operator: ALICE }))
   })
 
   it('tolerates a stale preparingAt left behind by an earlier version', async () => {
@@ -1289,7 +1424,7 @@ describe('fulfilment rules: preparation timing', () => {
  * only thing allowed to decide it. Every value below is checked against `request.time`.
  */
 describe('fulfilment rules: the delivery stamp', () => {
-  const ADMIN_OP = { id: ADMIN_UID, name: 'Ada Admin' }
+  const ALICE = { id: 'alice', name: 'Alice' }
 
   async function readFulfillment(db: ReturnType<typeof staffDb>, orderId = ORDER_ID) {
     return getDoc(doc(db, 'orderFulfillment', orderId))
@@ -1320,16 +1455,25 @@ describe('fulfilment rules: the delivery stamp', () => {
     expect(record.get('readyAt').toDate()).toEqual(SEEDED_READY_AT)
   })
 
-  it('is cleared when an admin corrects delivered back to ready', async () => {
+  it('6, 11. survives, because no role can step back out of delivered', async () => {
     await seed()
     await seedAt('delivered')
-    const db = adminDb()
-    await assertSucceeds(
-      move(db, { from: 'delivered', to: 'ready', uid: ADMIN_UID, operator: ADMIN_OP }),
+
+    await assertFails(move(staffDb(), { from: 'delivered', to: 'ready', operator: ALICE }))
+    await assertFails(
+      move(adminDb(), {
+        from: 'delivered',
+        to: 'ready',
+        uid: ADMIN_UID,
+        operator: { id: ADMIN_UID, name: 'Ada Admin' },
+      }),
     )
 
-    // It was not handed over after all, so the clock starts running again.
-    expect((await readFulfillment(db)).get('deliveredAt')).toBeNull()
+    // The clock stopped at the handover and stays stopped: the one write that used to clear
+    // this stamp is no longer reachable by anybody.
+    expect((await readFulfillment(staffDb())).get('deliveredAt').toDate()).toEqual(
+      SEEDED_DELIVERED_AT,
+    )
   })
 
   it('refuses a client-chosen handover time', async () => {
@@ -1381,14 +1525,16 @@ describe('fulfilment rules: the delivery stamp', () => {
   })
 
   it('refuses keeping a stale handover when stepping back out of delivered', async () => {
+    // Refused twice over: the transition belongs to no role, and the stamp it carries is one
+    // the server would not accept anyway. Kept as the second guard — if the step were ever
+    // reopened, the timestamp half of the rule is still asserted here.
     await seed()
     await seedAt('delivered')
     await assertFails(
-      move(adminDb(), {
+      move(staffDb(), {
         from: 'delivered',
         to: 'ready',
-        uid: ADMIN_UID,
-        operator: ADMIN_OP,
+        operator: ALICE,
         prep: { readyAt: SEEDED_READY_AT, deliveredAt: SEEDED_DELIVERED_AT },
       }),
     )

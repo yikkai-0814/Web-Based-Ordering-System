@@ -208,7 +208,6 @@ export const ms: Dictionary = {
   'order.title': 'Pesanan #{{number}}',
   'order.notFound': 'Pesanan tidak dijumpai',
   'order.notFoundBlurb': 'Tiada jualan yang sepadan dengan alamat itu.',
-  'order.reverseAdminOnly': 'Pentadbir boleh mengundurkan pesanan ini satu langkah.',
   'order.backToOrders': 'Kembali ke pesanan',
   'order.lastMovedBy': 'Digerakkan terakhir oleh',
   'order.timeTaken': 'Masa diambil',
@@ -230,7 +229,6 @@ export const ms: Dictionary = {
   'queue.startPreparing': 'Mula sediakan',
   'queue.backToPending': 'Kembali ke menunggu',
   'queue.backToPreparing': 'Kembali ke menyediakan',
-  'queue.backToReady': 'Kembali ke sedia',
   'queue.markReady': 'Tanda sedia',
   'queue.markDelivered': 'Tanda diserahkan',
   'queue.takenBy': 'Diambil oleh {{name}}',
@@ -627,7 +625,8 @@ export const ms: Dictionary = {
   'validation.chooseOnlyOne': 'Pilih satu pilihan sahaja untuk {{group}}.',
   'validation.optionWithdrawn': 'Pilihan {{group}} itu tidak lagi ditawarkan.',
   'validation.optionUnknown': 'Pilihan itu tidak lagi ditawarkan.',
-  'validation.deliveredFinal': 'Hanya pentadbir boleh membuka semula pesanan yang telah dihantar.',
+  'validation.deliveredFinal':
+    'Pesanan yang telah dihantar adalah muktamad dan tidak boleh dibuka semula.',
   'validation.nothingToUndo':
     'Pesanan ini berada pada langkah pertama; tiada apa untuk dibatalkan.',
   'validation.voidedNoWork': 'Jualan ini telah dibatalkan, jadi ia tidak boleh diusahakan lagi.',

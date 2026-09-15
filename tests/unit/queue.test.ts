@@ -250,7 +250,7 @@ describe('queueReverseFor — the counter correcting its own mis-tap', () => {
     expect(queueReverseFor(at('pending'))).toBeNull()
   })
 
-  it('offers nothing at delivered, because reopening a handover is an admin correction', () => {
+  it('offers nothing at delivered, because nothing leads back out of a handover', () => {
     expect(queueReverseFor(at('delivered'))).toBeNull()
   })
 

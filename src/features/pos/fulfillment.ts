@@ -58,7 +58,9 @@ export const FULFILLMENT_BACK_ACTION_KEYS: Record<FulfillmentStatus, Translation
   pending: null,
   preparing: 'queue.backToPending',
   ready: 'queue.backToPreparing',
-  delivered: 'queue.backToReady',
+  // Nothing leads back out of delivered either: a handover is final and no role can undo it,
+  // so there is no button to name. See `isStaffReversibleStep`.
+  delivered: null,
 }
 
 export function isFulfillmentStatus(value: unknown): value is FulfillmentStatus {
@@ -83,7 +85,7 @@ export function nextFulfillment(current: FulfillmentStatus): FulfillmentStatus |
   return FULFILLMENT_STATUSES[index + 1] ?? null
 }
 
-/** The one before, or null at the start. Used only for an admin correcting a mis-tap. */
+/** The one before, or null at the start. Used only for the counter correcting a mis-tap. */
 export function previousFulfillment(current: FulfillmentStatus): FulfillmentStatus | null {
   const index = FULFILLMENT_STATUSES.indexOf(current)
   return index <= 0 ? null : (FULFILLMENT_STATUSES[index - 1] ?? null)
@@ -107,18 +109,23 @@ export function isBackwardStep(from: FulfillmentStatus, to: FulfillmentStatus): 
 }
 
 /**
- * The backward steps a STAFF account may take unaided.
+ * The backward steps a STAFF account may take — which is to say, the only backward steps
+ * this system has.
  *
- * The counter and the kitchen own this workflow — they are the ones working it during
- * service — so correcting a mis-tap must not require finding an admin mid-rush. Both steps
- * here are recoveries from a slip made moments earlier, and neither can lose anything: the
- * only timestamp either touches is `readyAt`, which is re-recorded the moment the kitchen
- * finishes again.
+ * The counter and the kitchen own this workflow outright: they are the ones working it
+ * during service, so correcting a mis-tap must not require finding an admin mid-rush. Both
+ * steps here are recoveries from a slip made moments earlier, and neither can lose anything:
+ * the only timestamp either touches is `readyAt`, which is re-recorded the moment the
+ * kitchen finishes again.
  *
- * **`delivered → ready` is deliberately absent.** Handing the order to the customer is the
- * one step that is not a private kitchen state — it is a claim about the world, it stops the
- * customer's clock, and it is what makes an order final during service. Undoing it is a
- * correction to the record rather than a step in the workflow, so it stays with an admin.
+ * **`delivered → ready` is deliberately absent, and belongs to nobody.** Handing the order
+ * to the customer is the one step that is not a private kitchen state — it is a claim about
+ * the world, it stops the customer's clock, and it is what makes an order final during
+ * service. No role may take it back, an admin included: an admin is a back-office account
+ * that reads orders rather than works them, and a second, privileged path into the same
+ * document would be exactly the override this workflow is meant not to have. A delivered
+ * order that is genuinely wrong is a VOID — a counter-entry carrying a reason and an
+ * authoriser — not a quiet rewind.
  *
  * `firestore.rules` mirrors this exactly. Neither is the other's enforcement: this decides
  * whether a button is offered, the rules decide whether a write is accepted.
@@ -247,19 +254,14 @@ export type FulfillmentReversal =
  *
  * The mirror of `canAdvanceFulfillment`, and like it this decides whether a button is shown
  * with a reason rather than letting somebody discover the refusal from a failed write. The
- * server is still the enforcement: firestore.rules permits a backward step only for an admin.
+ * server is still the enforcement: firestore.rules permits a backward step only to a staff
+ * account, and only the two steps named in `isStaffReversibleStep`.
  *
- * **What is offered depends on who is asking.** Staff get the two steps the kitchen owns —
- * `preparing → pending` and `ready → preparing` — so a mis-tap during service is theirs to
- * fix. `delivered → ready` is an admin's, because undoing a handover is a correction to the
- * record rather than a step in the workflow. See `isStaffReversibleStep`.
- *
- * **`delivered → ready` is safe when an admin does take it.** That one works because
- * the timestamps already say what it means: `deliveredAt` is cleared, so the order stops
- * counting as handed over and the customer's clock resumes, while `readyAt` is kept, because
- * undoing a mis-tapped handover does not un-finish the cooking. Nothing else reads the
- * fulfilment document to decide money: payment lives in its own document on its own axis, so
- * reversing a delivery cannot disturb what was taken.
+ * **It does not ask who is calling, because the answer no longer varies.** The two steps the
+ * kitchen owns — `preparing → pending` and `ready → preparing` — are staff's, and
+ * `delivered → ready` is nobody's. There is deliberately no role parameter: a predicate that
+ * took one would imply some caller for whom the answer is different, and the point is that
+ * there is not one.
  *
  * A voided order is refused for the same reason it cannot be advanced — it is cancelled, and
  * moving it through the kitchen either way is work on a sale that no longer exists.
@@ -267,19 +269,16 @@ export type FulfillmentReversal =
 export function canReverseFulfillment({
   current,
   voided,
-  isAdmin,
 }: {
   current: FulfillmentStatus
   voided: boolean
-  /** An admin may take any single step back; staff only the two the kitchen owns. */
-  isAdmin: boolean
 }): FulfillmentReversal {
   if (voided) {
     return { ok: false, reason: message('validation.voidedNoWork') }
   }
   const previous = previousFulfillment(current)
   if (!previous) return { ok: false, reason: message('validation.nothingToUndo') }
-  if (!isAdmin && !isStaffReversibleStep(current, previous)) {
+  if (!isStaffReversibleStep(current, previous)) {
     return { ok: false, reason: message('validation.deliveredFinal') }
   }
   return { ok: true, previous }
@@ -338,13 +337,13 @@ export type TimestampInstruction = 'now' | 'keep' | null
  * | Step                | deliveredAt | Why                                             |
  * | ------------------- | ----------- | ----------------------------------------------- |
  * | ready → delivered   | now         | the customer has it; the wait is over           |
- * | delivered → ready   | null        | it was not handed over after all; clock resumes |
+ * | delivered → ready   | null        | unreachable; kept so the table is total         |
  * | every other step    | null        | the order is not delivered, so it cannot claim  |
  *
  * There is no `keep`, and that is what makes the rule total: an order is delivered or it is
- * not, `delivered` is reachable only from `ready`, and the only way out of it clears the
- * stamp. A re-delivery after an admin correction records the second handover, which is the
- * one that actually happened.
+ * not, and `delivered` is reachable only from `ready`. Nothing leads back out of it — the
+ * handover is final for every role — so a written stamp is in practice never cleared; the
+ * rule is stated as a total function anyway rather than as a special case.
  */
 export function nextDeliveredAt(
   _from: FulfillmentStatus,
@@ -361,14 +360,15 @@ export function nextDeliveredAt(
  * | pending → preparing    | null    | not finished                                     |
  * | preparing → ready      | now     | the kitchen finished it                          |
  * | ready → delivered      | keep    | handing over does not un-finish it               |
- * | delivered → ready      | keep    | a fulfilment correction, not a remake            |
+ * | delivered → ready      | keep    | unreachable; kept so the table is total          |
  * | ready → preparing      | null    | it is being worked on again                      |
  * | preparing → pending    | null    | already null; stated so the table is total       |
  */
 export function nextReadyAt(from: FulfillmentStatus, to: FulfillmentStatus): TimestampInstruction {
   if (to === 'ready') {
-    // Arriving from `preparing` is the kitchen finishing. Arriving from `delivered` is an
-    // admin undoing a mis-tap, which must not overwrite the time it was really finished.
+    // Arriving from `preparing` is the kitchen finishing. The `delivered` row is kept so the
+    // table stays total — no role can take that step any more — and it says what it always
+    // said: a correction must not overwrite the time the food was really finished.
     return from === 'preparing' ? 'now' : 'keep'
   }
   if (to === FINAL_FULFILLMENT) return 'keep'

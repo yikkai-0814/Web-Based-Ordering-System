@@ -347,13 +347,13 @@ describe('fulfilment moved from the queue', () => {
   })
 
   /**
-   * The role split changed deliberately.
+   * The role split, as it now stands.
    *
-   * Staff work the queue during service, so recovering from a mis-tap made moments earlier is
-   * theirs — waiting for an admin mid-rush is not a workflow. What is NOT theirs is reopening
-   * a delivered order: handing over stops the customer's clock and makes the sale final
-   * during service, so undoing it is a correction to the record rather than a step in the
-   * kitchen's workflow. `staffReversibleStep()` names the two, and nothing else.
+   * Staff work the queue during service and own the whole workflow, forward and back —
+   * waiting for an admin mid-rush is not a workflow. What belongs to NOBODY is reopening a
+   * delivered order: handing over stops the customer's clock and makes the sale final, so it
+   * is the end of the path rather than a step with an undo. `staffReversibleStep()` names
+   * the two backward steps there are, and nothing else names any more.
    */
   it('lets staff take the two backward steps the kitchen owns', async () => {
     await seed()
@@ -386,11 +386,28 @@ describe('fulfilment moved from the queue', () => {
     await assertSucceeds(move(staffDb(), { from: 'ready', to: 'preparing', orderId: 'today-1' }))
   })
 
-  it('lets an admin correct a mis-tap by exactly one step back', async () => {
+  it('7. refuses an admin the same step, because fulfilment is staff-only', async () => {
+    // The transition itself is legal — staff take it in the test above. What is refused is
+    // the ACCOUNT: an admin reads the board and does not work it.
     await seed()
-    await assertSucceeds(
+    await assertFails(
       move(adminDb(), { from: 'preparing', to: 'pending', orderId: 'today-1', uid: ADMIN_UID }),
     )
+  })
+
+  it('7. refuses an admin driving the board forward either', async () => {
+    await seed()
+    await assertFails(
+      move(adminDb(), { from: 'preparing', to: 'ready', orderId: 'today-1', uid: ADMIN_UID }),
+    )
+  })
+
+  it('9. still lets an admin READ the board it cannot move', async () => {
+    await seed()
+    const snapshot = await assertSucceeds(
+      sidecarsFor(adminDb(), 'orderFulfillment', ['today-1', 'today-2']),
+    )
+    expect(snapshot.docs.map((document) => document.id)).toEqual(['today-1'])
   })
 
   it('refuses any move on a voided sale', async () => {

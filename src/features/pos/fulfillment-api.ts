@@ -132,8 +132,8 @@ function stamp(field: string, instruction: TimestampInstruction): Record<string,
  * `preparing`) from a later one (`update`, one step at a time) without having to trust a
  * field the client supplied.
  *
- * Backward moves are not offered here. An admin correcting a mis-tap uses
- * `correctFulfillment`, which the rules permit only for them.
+ * Backward moves are not offered here. The counter correcting a mis-tap uses
+ * `correctFulfillment`, which takes the two steps the kitchen owns.
  *
  * A voided order is refused at the server, as is any step that is not exactly one place
  * forward and any operator who is not who they say they are — none of those checks is
@@ -152,13 +152,19 @@ export interface CorrectFulfillmentParams extends Mover {
 }
 
 /**
- * Steps an order **back** one place. Admin-only, enforced by firestore.rules rather than
- * here — a staff account calling this gets permission-denied from the server.
+ * Steps an order **back** one place — `preparing → pending` or `ready → preparing`, and
+ * nothing else. Staff-only, enforced by firestore.rules rather than here: an admin calling
+ * this gets permission-denied from the server, as does anybody asking for
+ * `delivered → ready`, which no role may take.
  *
- * This exists because the forward path is otherwise a one-way door: a mis-tapped "Mark
- * delivered" on a busy counter would strand the order in a state nobody could undo. Keeping
- * the correction with admins means the person fixing the mistake is not the person who made
- * it, which is the same reasoning that keeps voiding away from the till.
+ * This exists because the kitchen half of the path would otherwise be a one-way door: a
+ * mis-tapped "Mark ready" mid-rush would strand the order until somebody else could fix it.
+ * The counter works the queue during service, so recovering from its own slip is its own
+ * job, and waiting for a back-office account is not a workflow.
+ *
+ * The handover is the exception and stays a one-way door on purpose. Correcting a delivered
+ * order is a VOID — a counter-entry with a reason and an admin's authorisation — not a
+ * rewind, so there is no call that produces `delivered → ready` at all.
  *
  * The correction is journalled like any other step, so the trail shows that it happened and
  * who did it rather than quietly rewinding.

@@ -164,7 +164,7 @@ export function QueuePage() {
    * The same shape as `handleAdvance` and sharing its in-flight map, so a card cannot be sent
    * two ways at once — `claim` is keyed by order and target, so the two buttons on one card
    * lock each other out. It writes through `correctFulfillment`, which the rules judge by a
-   * different clause: a staff account may take only the two steps the kitchen owns, and
+   * different clause: the two steps the kitchen owns and nothing else, and
    * `queueReverseFor` offers no button for the rest.
    */
   async function handleReverse(view: OrderView, to: FulfillmentStatus) {

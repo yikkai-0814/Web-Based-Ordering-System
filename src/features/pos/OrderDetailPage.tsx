@@ -93,19 +93,24 @@ export function OrderDetailPage() {
   } = view
 
   const isAdmin = role === 'admin'
+  /**
+   * Fulfilment is the counter's, and this page offers it to nobody else.
+   *
+   * An admin reads orders here — the figures, the timestamps, the payment, the void — but
+   * does not work them: the kitchen workflow belongs to whoever is on the floor during
+   * service, and firestore.rules now refuses a fulfilment write that does not arrive from a
+   * staff account. Showing the buttons to an admin would be offering a refusal.
+   *
+   * This is a mirror of the rule, not the enforcement. The server decides.
+   */
+  const ownsFulfillment = role === 'staff'
   const eligibility = canRecordPayment({ state: paymentState, voided: voided !== null })
   const advance = canAdvanceFulfillment({ current: fulfillment, voided: voided !== null })
-  /**
-   * Stepping back is an ADMIN correction, and that is not a decision made here: firestore.rules
-   * accepts a backward step only from an admin, so offering the button to anyone else would
-   * be offering a refusal. The check mirrors the rule rather than replacing it.
-   */
-  // Asked as the signed-in role: staff own the two steps the kitchen takes back, and an
-  // admin may also reopen a delivered order. The rules judge the write by the same split.
+  // The two steps the kitchen owns. `delivered → ready` is nobody's — a handover is final,
+  // and a delivered order that is genuinely wrong is a void rather than a rewind.
   const reverse = canReverseFulfillment({
     current: fulfillment,
     voided: voided !== null,
-    isAdmin,
   })
 
   /**
@@ -491,10 +496,10 @@ export function OrderDetailPage() {
           <Link to="/orders">{t('order.backToOrders')}</Link>
         </Button>
 
-        {/* Moving the order along the kitchen workflow. Both roles, one step at a time, and
+        {/* Moving the order along the kitchen workflow. Staff only, one step at a time, and
             only when the rules would accept it — a delivered or voided order gets no button.
             The label says what is about to happen, not the state being left. */}
-        {advance.ok && FULFILLMENT_ACTION_KEYS[fulfillment] !== null && (
+        {ownsFulfillment && advance.ok && FULFILLMENT_ACTION_KEYS[fulfillment] !== null && (
           <Button
             variant="outline"
             size="lg"
@@ -509,13 +514,12 @@ export function OrderDetailPage() {
           </Button>
         )}
 
-        {/* Undoing a step, offered to whoever may actually take this one — staff for the two
-            the kitchen owns, an admin also for `delivered → ready`. The gate is the same
-            predicate the rules mirror, so a button is never shown that the server would
-            refuse. Reopening a delivery clears `deliveredAt`, which is exactly what "it was
-            not handed over after all" means and correctly resumes the customer's clock, while
-            `readyAt` is kept: undoing a mis-tapped handover does not un-cook the food. */}
-        {reverse.ok && FULFILLMENT_BACK_ACTION_KEYS[fulfillment] !== null && (
+        {/* Undoing a step: `preparing → pending` and `ready → preparing`, the two the
+            kitchen owns, and only for the staff account that owns them. Stepping back clears
+            `readyAt` — the order is being worked on again, so it must stop claiming to be
+            finished — and never touches the order's `createdAt`, so the customer's clock
+            runs on undisturbed. There is no third case: a delivered order has no way back. */}
+        {ownsFulfillment && reverse.ok && FULFILLMENT_BACK_ACTION_KEYS[fulfillment] !== null && (
           <Button
             variant="ghost"
             size="lg"
@@ -528,20 +532,6 @@ export function OrderDetailPage() {
             <Undo2 aria-hidden="true" />
             {advancing ? t('common.saving') : t(FULFILLMENT_BACK_ACTION_KEYS[fulfillment]!)}
           </Button>
-        )}
-
-        {/* A step back exists here, but not for this account.
-        
-            Now that staff own `preparing → pending` and `ready → preparing`, this is left
-            saying one thing only: a delivered order can be reopened by an admin. Without it
-            the page simply ends — no way forward, because there is none, and no way back,
-            because reopening a handover is not the counter's to take — which reads as the app
-            being broken rather than as a permission. It changes no permission: the button is
-            still withheld, because the server would still refuse the write. */}
-        {!reverse.ok && voided === null && FULFILLMENT_BACK_ACTION_KEYS[fulfillment] !== null && (
-          <p className="basis-full text-sm text-muted-foreground" data-testid="reverse-admin-only">
-            {t('order.reverseAdminOnly')}
-          </p>
         )}
 
         {/* Both roles: taking money is the job of whoever is on the till. Offered only when

@@ -118,28 +118,30 @@ describe('the fulfilment progression', () => {
 })
 
 describe('canReverseFulfillment — undoing a step', () => {
-  const asStaff = (current: FulfillmentStatus, voided = false) =>
-    canReverseFulfillment({ current, voided, isAdmin: false })
-  const asAdmin = (current: FulfillmentStatus, voided = false) =>
-    canReverseFulfillment({ current, voided, isAdmin: true })
+  const reverse = (current: FulfillmentStatus, voided = false) =>
+    canReverseFulfillment({ current, voided })
 
-  it('offers nothing to undo at the first step, to either role', () => {
-    expect(asStaff('pending').ok).toBe(false)
-    expect(asAdmin('pending').ok).toBe(false)
+  it('offers nothing to undo at the first step', () => {
+    expect(reverse('pending').ok).toBe(false)
   })
 
-  it('lets STAFF take the two steps the kitchen owns', () => {
-    expect(asStaff('preparing')).toEqual({ ok: true, previous: 'pending' })
-    expect(asStaff('ready')).toEqual({ ok: true, previous: 'preparing' })
+  it('2. offers the two steps the kitchen owns', () => {
+    expect(reverse('preparing')).toEqual({ ok: true, previous: 'pending' })
+    expect(reverse('ready')).toEqual({ ok: true, previous: 'preparing' })
   })
 
-  it('does NOT let staff reopen a delivered order', () => {
-    // Handing over stops the customer's clock and makes the sale final during service.
-    expect(asStaff('delivered').ok).toBe(false)
-  })
-
-  it('lets an ADMIN reopen a delivered order', () => {
-    expect(asAdmin('delivered')).toEqual({ ok: true, previous: 'ready' })
+  /**
+   * 6, 8. The handover is where the workflow ends, for everybody.
+   *
+   * There is no role parameter to vary any more: the predicate takes only the order's own
+   * state, so there is no caller — admin, staff or otherwise — for whom this answers
+   * differently. A delivered order that is genuinely wrong is a void, not a rewind.
+   */
+  it('refuses delivered → ready, and takes no role that could change that', () => {
+    expect(reverse('delivered').ok).toBe(false)
+    const refusal = reverse('delivered')
+    expect(refusal.ok).toBe(false)
+    if (!refusal.ok) expect(refusal.reason.key).toBe('validation.deliveredFinal')
   })
 
   it('names exactly the two staff-reversible steps, and no others', () => {
@@ -153,17 +155,17 @@ describe('canReverseFulfillment — undoing a step', () => {
     expect(isStaffReversibleStep('ready', 'pending')).toBe(false)
   })
 
-  it('refuses to move a voided order either way, for either role', () => {
-    expect(asStaff('ready', true).ok).toBe(false)
-    expect(asAdmin('ready', true).ok).toBe(false)
+  it('refuses to move a voided order either way', () => {
+    expect(reverse('ready', true).ok).toBe(false)
     expect(canAdvanceFulfillment({ current: 'ready', voided: true }).ok).toBe(false)
   })
 
-  it('names a button for every state that has one, and none for the first', () => {
+  it('names a button only for the two states that have one', () => {
     expect(FULFILLMENT_BACK_ACTION_KEYS.pending).toBeNull()
     expect(FULFILLMENT_BACK_ACTION_KEYS.preparing).toBe('queue.backToPending')
     expect(FULFILLMENT_BACK_ACTION_KEYS.ready).toBe('queue.backToPreparing')
-    expect(FULFILLMENT_BACK_ACTION_KEYS.delivered).toBe('queue.backToReady')
+    // Nothing leads back out of delivered, so there is no label for it.
+    expect(FULFILLMENT_BACK_ACTION_KEYS.delivered).toBeNull()
   })
 })
 

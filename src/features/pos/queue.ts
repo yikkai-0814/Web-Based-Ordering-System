@@ -107,17 +107,17 @@ export interface QueueReversal {
 }
 
 /**
- * The backward action on a card, or null when there is none for staff to take.
+ * The backward action on a card, or null when there is none to take.
  *
- * Null at `pending`, which has nothing behind it, and null at `delivered`, which is an
- * admin's correction rather than a step in the kitchen's workflow — see
- * `isStaffReversibleStep`. The board is staff-only, so this asks as a staff account.
+ * Null at `pending`, which has nothing behind it, and null at `delivered`, which nothing
+ * leads back out of — see `isStaffReversibleStep`. Delivered orders leave the board anyway,
+ * so that second case is a statement about the domain rather than a branch this screen
+ * reaches.
  */
 export function queueReverseFor(view: OrderView): QueueReversal | null {
   const reverse = canReverseFulfillment({
     current: view.fulfillment,
     voided: view.voided !== null,
-    isAdmin: false,
   })
   if (!reverse.ok) return null
 
