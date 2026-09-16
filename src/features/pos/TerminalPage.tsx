@@ -19,6 +19,7 @@ import { CartPanel } from '@/features/pos/CartPanel'
 import { OrderTypePanel } from '@/features/pos/OrderTypePanel'
 import { orderTypeSummaryOf, validatePlacement, type OrderType } from '@/features/pos/order-type'
 import { Button } from '@/components/ui/button'
+import { getLocalizedMenuItemName } from '@/features/menu/item-names'
 import {
   addToCart,
   cartTotal,
@@ -64,7 +65,7 @@ function OrderPlacedAlert({ order }: { order: PlacedOrder }) {
 }
 
 export function TerminalPage() {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const { profile } = useAuth()
   const { operator, loading: staffLoading } = useStaffSession()
   const { categories, loading: categoriesLoading } = useCategories()
@@ -132,7 +133,14 @@ export function TerminalPage() {
     setCart((current) =>
       addToCart(current, {
         menuItemId: item.id,
-        name: item.name,
+        /**
+         * Snapshotted here, in the language the till was speaking — the name the customer
+         * was shown when they ordered. From this point it is history: `addToCart` copies it
+         * onto the line, the line is written onto the order, and nothing ever resolves it
+         * against the menu again. An admin renaming or retranslating the item tomorrow does
+         * not touch it.
+         */
+        name: getLocalizedMenuItemName(item, language),
         basePrice: item.price,
         modifiers,
       }),
@@ -261,12 +269,17 @@ export function TerminalPage() {
                   key={item.id}
                   type="button"
                   data-testid="pos-item"
+                  /* The canonical English name, so a test or a script can find the tile
+                     whatever language the till is set to. The label below is what the
+                     person at the counter reads. */
                   data-item-name={item.name}
                   onClick={() => addItem(item)}
                   disabled={pending}
                   className="flex h-touch-lg flex-col justify-center gap-0.5 rounded-xl border bg-card px-3 py-2 text-left shadow-xs transition-[box-shadow,border-color,background-color,transform] duration-100 hover:border-primary/40 hover:bg-primary/[0.04] hover:shadow-sm focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.98] active:bg-primary/[0.08] disabled:opacity-50"
                 >
-                  <span className="line-clamp-2 text-sm leading-snug font-medium">{item.name}</span>
+                  <span className="line-clamp-2 text-sm leading-snug font-medium">
+                    {getLocalizedMenuItemName(item, language)}
+                  </span>
                   <span className="text-sm font-semibold tabular-nums text-muted-foreground">
                     {formatMoney(item.price)}
                   </span>

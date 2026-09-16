@@ -141,6 +141,25 @@ service cloud.firestore {
         && d.updatedAt is timestamp;
     }
 
+    // `names` holds the item's name in the other languages the interface speaks, and ONLY
+    // those: English is `name`, above, so an item is never named twice in one document.
+    // Optional throughout — absent on every item written before translations existed, and on
+    // every item whose admin has not typed one — and each entry must actually say something,
+    // because an empty translation would render as a gap on a till rather than falling back.
+    //
+    // Mirrors src/features/menu/item-names.ts; keep the two in step, including the 80
+    // characters, which is `ITEM_NAME_MAX` and the same limit `name` is held to above.
+    function validItemNames() {
+      let d = request.resource.data;
+      return !('names' in d.keys())
+        || (d.names is map
+            && d.names.keys().hasOnly(['ms', 'zh'])
+            && (!('ms' in d.names.keys())
+                || (d.names.ms is string && d.names.ms.size() > 0 && d.names.ms.size() <= 80))
+            && (!('zh' in d.names.keys())
+                || (d.names.zh is string && d.names.zh.size() > 0 && d.names.zh.size() <= 80)));
+    }
+
     function validMenuItem() {
       let d = request.resource.data;
       // Key set from createMenuItem/updateMenuItem in src/features/menu/menu-api.ts.
@@ -153,9 +172,10 @@ service cloud.firestore {
       // of a screen rather than a catalogue.
       return hasFields(
           ['name', 'categoryId', 'price', 'sortOrder', 'active', 'createdAt', 'updatedAt'],
-          ['description', 'modifierGroupIds'])
+          ['description', 'modifierGroupIds', 'names'])
         && (!('modifierGroupIds' in d.keys())
             || (d.modifierGroupIds is list && d.modifierGroupIds.size() <= 30))
+        && validItemNames()
         && d.createdAt is timestamp
         && d.updatedAt is timestamp
         && d.name is string && d.name.size() > 0 && d.name.size() <= 80

@@ -100,6 +100,7 @@ describe('the editor card is wide enough for the name column', () => {
   const item = {
     id: 'i1',
     name: 'Braised Pork Rice',
+    names: { en: 'Braised Pork Rice', ms: '', zh: '' },
     description: '',
     categoryId: 'c1',
     price: 900,

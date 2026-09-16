@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore'
 
 import { openingEntryFrom, type OpeningEntry } from '@/features/menu/cost-history'
+import type { ItemNameTranslations } from '@/features/menu/item-names'
 import { modifierCostKey, parseModifierOptionCost } from '@/features/menu/modifier-cost'
 import type { SelectionMode } from '@/features/menu/modifiers'
 import { auth, db } from '@/lib/firebase'
@@ -40,7 +41,17 @@ export interface CategoryInput {
 }
 
 export interface MenuItemInput {
+  /** The English name. Required, and what every other language falls back to. */
   name: string
+  /**
+   * The translations of that name, trimmed, with blank ones left out — see
+   * `storedTranslations`. Required on the way in, though it may be empty: a caller that
+   * could omit it would silently wipe an item's translations on the next save.
+   *
+   * Written as a whole map, so the admin's two fields are the whole truth about what this
+   * item is called; clearing one clears it in the document too.
+   */
+  names: ItemNameTranslations
   description: string
   categoryId: string
   /** Whole sen. Never a float — see src/lib/money.ts. */

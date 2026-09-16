@@ -19,6 +19,7 @@ import {
 import { ConfirmDeleteDialog } from '@/features/menu/ConfirmDeleteDialog'
 import { deleteMenuItem, setMenuItemActive } from '@/features/menu/menu-api'
 import { bySortOrderThenName, type Category, type MenuItem } from '@/features/menu/types'
+import { getLocalizedMenuItemName } from '@/features/menu/item-names'
 import { useCategories } from '@/features/menu/useCategories'
 import { useItemCosts } from '@/features/menu/useItemCosts'
 import { useMenuItems } from '@/features/menu/useMenuItems'
@@ -32,7 +33,7 @@ interface Group {
 }
 
 export function MenuListPage() {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const { role } = useAuth()
   const isAdmin = role === 'admin'
 
@@ -161,10 +162,15 @@ export function MenuListPage() {
                       <TableRow
                         key={item.id}
                         data-testid="menu-item-row"
+                        /* The item's canonical English name, which identifies the row
+                           whatever the screen is set to. The cell below shows the name for
+                           the current language. */
                         data-item-name={item.name}
                       >
                         <TableCell>
-                          <span className="font-medium">{item.name}</span>
+                          <span className="font-medium">
+                            {getLocalizedMenuItemName(item, language)}
+                          </span>
                           {item.description && (
                             <span className="block text-xs text-muted-foreground">
                               {item.description}
@@ -229,7 +235,9 @@ export function MenuListPage() {
                               <Button asChild variant="ghost" size="sm">
                                 <Link
                                   to={`/menu/${item.id}/edit`}
-                                  aria-label={t('menu.editItemNamed', { name: item.name })}
+                                  aria-label={t('menu.editItemNamed', {
+                                    name: getLocalizedMenuItemName(item, language),
+                                  })}
                                 >
                                   <Pencil aria-hidden="true" />
                                   {t('common.edit')}
@@ -245,7 +253,9 @@ export function MenuListPage() {
                                 {t(item.active ? 'menu.archive' : 'menu.restore')}
                               </Button>
                               <ConfirmDeleteDialog
-                                title={t('menu.deleteTitle', { name: item.name })}
+                                title={t('menu.deleteTitle', {
+                                  name: getLocalizedMenuItemName(item, language),
+                                })}
                                 description={t('menu.deleteBlurb')}
                                 onConfirm={() => run(() => deleteMenuItem(item.id))}
                               >

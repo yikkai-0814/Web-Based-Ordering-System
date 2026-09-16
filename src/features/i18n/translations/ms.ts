@@ -331,6 +331,9 @@ export const ms: Dictionary = {
   'menu.writeRefusedShort': 'Perubahan itu ditolak. Akaun anda mungkin tiada kebenaran.',
   'menu.createCategoryFirst': 'Cipta kategori dahulu',
   'menu.newCategory': 'Kategori baharu',
+  'menu.nameHeading': 'Nama item menu',
+  'menu.namesHint':
+    'Terjemahan adalah pilihan. Bahasa yang dibiarkan kosong akan memaparkan nama Inggeris.',
   'menu.descriptionOptional': 'Penerangan (pilihan)',
   'menu.blurbAdmin':
     'Semua yang dijual oleh kafe ini. Perubahan muncul di setiap kaunter dengan serta-merta.',

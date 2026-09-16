@@ -232,6 +232,69 @@ describe('menu rules: price and shape validation', () => {
     await assertSucceeds(setDoc(doc(db, 'menuItems', 'ok'), withoutDescription))
   })
 
+  it('accepts an item with translated names, and one with none at all', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+
+    await assertSucceeds(
+      setDoc(doc(db, 'menuItems', 'translated'), {
+        ...ITEM,
+        names: { ms: 'Nasi Goreng', zh: '炒饭' },
+      }),
+    )
+    await assertSucceeds(
+      setDoc(doc(db, 'menuItems', 'one-translation'), { ...ITEM, names: { ms: 'Nasi Goreng' } }),
+    )
+    // An item whose admin has cleared both, and every item written before translations
+    // existed: `names` absent or empty is the ordinary case, not a malformed document.
+    await assertSucceeds(setDoc(doc(db, 'menuItems', 'none'), { ...ITEM, names: {} }))
+    await assertSucceeds(setDoc(doc(db, 'menuItems', 'legacy'), ITEM))
+  })
+
+  it('lets an admin add translations to an item that had none', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertSucceeds(
+      updateDoc(doc(db, 'menuItems', 'item-1'), {
+        names: { ms: 'Kopi Susu' },
+        updatedAt: new Date(),
+      }),
+    )
+  })
+
+  it('refuses a translation that is not a string, or is empty, or is too long', async () => {
+    // Empty is refused deliberately: stored, it would render as a gap on a till instead of
+    // falling back to English, which is the one thing this feature must not do.
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    for (const names of [{ ms: 7 }, { ms: '' }, { zh: 'x'.repeat(81) }, { ms: null }]) {
+      await assertFails(setDoc(doc(db, 'menuItems', 'bad'), { ...ITEM, names }))
+    }
+  })
+
+  it('refuses a names map holding anything but the translatable languages', async () => {
+    // English lives in `name`. A document that also carried `names.en` would say what the
+    // item is called twice, and the two could disagree.
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(setDoc(doc(db, 'menuItems', 'bad'), { ...ITEM, names: { en: 'Flat White' } }))
+    await assertFails(setDoc(doc(db, 'menuItems', 'bad'), { ...ITEM, names: { fr: 'Café' } }))
+  })
+
+  it('refuses a names field that is not a map at all', async () => {
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(setDoc(doc(db, 'menuItems', 'bad'), { ...ITEM, names: 'Nasi Goreng' }))
+    await assertFails(setDoc(doc(db, 'menuItems', 'bad'), { ...ITEM, names: ['Nasi Goreng'] }))
+  })
+
+  it('still refuses any field it does not know about', async () => {
+    // `names` was added to the permitted key set; the set is still closed.
+    await seed()
+    const db = testEnv.authenticatedContext(ADMIN_UID).firestore()
+    await assertFails(setDoc(doc(db, 'menuItems', 'bad'), { ...ITEM, nickname: 'FW' }))
+  })
+
   it('rejects an empty or over-long category name', async () => {
     await seed()
     const db = testEnv.authenticatedContext(ADMIN_UID).firestore()

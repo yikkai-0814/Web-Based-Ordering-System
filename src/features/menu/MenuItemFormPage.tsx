@@ -11,6 +11,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { LANGUAGE_LABELS, LANGUAGES, type Language } from '@/features/i18n/languages'
+import {
+  emptyItemNames,
+  storedTranslations,
+  validateItemNames,
+  type LocalizedName,
+} from '@/features/menu/item-names'
 import { createMenuItem, updateMenuItem } from '@/features/menu/menu-api'
 import { ModifierGroupsEditor } from '@/features/menu/ModifierGroupsEditor'
 import { EMPTY_CUSTOMISATION, type DraftCustomisation } from '@/features/menu/item-customisation'
@@ -92,6 +99,15 @@ export function MenuItemFormPage() {
   )
 }
 
+/**
+ * The id of one language's name field. English keeps `name`, the id it has always had, so
+ * anything pointing at it — a label, a test, a browser's own autofill memory — still finds
+ * the field that holds the item's canonical name.
+ */
+function nameFieldId(language: Language): string {
+  return language === 'en' ? 'name' : `name-${language}`
+}
+
 function MenuItemForm({
   existing,
   existingCost,
@@ -109,8 +125,14 @@ function MenuItemForm({
   const navigate = useNavigate()
   const isEditing = Boolean(itemId)
 
-  // Seeded once at mount — see the note on MenuItemFormPage.
-  const [name, setName] = useState(existing?.name ?? '')
+  /**
+   * Seeded once at mount — see the note on MenuItemFormPage.
+   *
+   * All three languages are held together and submitted together, which is what keeps an
+   * admin editing the Malay name from clearing the Chinese one: the field they did not touch
+   * is still in this state and still goes back to Firestore.
+   */
+  const [names, setNames] = useState<LocalizedName>(existing?.names ?? emptyItemNames())
   const [description, setDescription] = useState(existing?.description ?? '')
   const [categoryId, setCategoryId] = useState(existing?.categoryId ?? categories[0]?.id ?? '')
   const [priceText, setPriceText] = useState(existing ? toPriceInputValue(existing.price) : '')
@@ -148,12 +170,11 @@ function MenuItemForm({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    if (name.trim() === '') {
-      setError(message('validation.itemNameRequired'))
-      return
-    }
-    if (name.trim().length > ITEM_NAME_MAX) {
-      setError(message('validation.itemNameTooLong', { max: ITEM_NAME_MAX }))
+    // English required, translations optional, every one of them trimmed and length-checked.
+    // The rule lives in item-names.ts so the form and the till agree about what a name is.
+    const validatedNames = validateItemNames(names)
+    if (!validatedNames.ok) {
+      setError(validatedNames.error)
       return
     }
     if (description.length > ITEM_DESCRIPTION_MAX) {
@@ -203,7 +224,10 @@ function MenuItemForm({
     setPending(true)
     try {
       const input = {
-        name: name.trim(),
+        name: validatedNames.names.en,
+        // Only the translations: English is `name`, and storing it twice would be two
+        // records of one fact, free to disagree. See item-names.ts.
+        names: storedTranslations(validatedNames.names),
         description: description.trim(),
         categoryId,
         price: parsedPrice.sen,
@@ -262,18 +286,48 @@ function MenuItemForm({
               </Alert>
             )}
 
-            <div className="grid gap-2">
-              <Label htmlFor="name">{t('common.name')}</Label>
-              <Input
-                id="name"
-                className="h-touch text-base"
-                value={name}
-                maxLength={ITEM_NAME_MAX}
-                onChange={(event) => setName(event.target.value)}
-                disabled={pending}
-                autoFocus
-              />
-            </div>
+            {/* One field per language, in the same stack and the same input styling as
+                every other field on this form — the form is not redesigned, it has grown a
+                row. The labels are the endonyms the language menu already uses, so the field
+                a Malay speaker wants is labelled in Malay whatever the interface is set to.
+
+                Rendered from LANGUAGES rather than written out three times, so a fourth
+                language becomes a field here the day it is added to the list. */}
+            <fieldset className="grid gap-2">
+              <legend className="mb-2 text-sm font-medium">{t('menu.nameHeading')}</legend>
+              {LANGUAGES.map((language) => (
+                <div key={language} className="grid gap-2">
+                  <Label htmlFor={nameFieldId(language)}>
+                    {LANGUAGE_LABELS[language]}
+                    {language === 'en' && (
+                      /* Decoration for the eye only: `required` on the input is what a
+                         screen reader is actually told. */
+                      <span aria-hidden="true" className="text-destructive">
+                        {' '}
+                        *
+                      </span>
+                    )}
+                  </Label>
+                  <Input
+                    id={nameFieldId(language)}
+                    data-testid={nameFieldId(language)}
+                    className="h-touch text-base"
+                    value={names[language]}
+                    maxLength={ITEM_NAME_MAX}
+                    required={language === 'en'}
+                    aria-describedby="names-hint"
+                    onChange={(event) =>
+                      setNames((current) => ({ ...current, [language]: event.target.value }))
+                    }
+                    disabled={pending}
+                    autoFocus={language === 'en'}
+                  />
+                </div>
+              ))}
+              <p id="names-hint" className="text-xs text-muted-foreground">
+                {t('menu.namesHint')}
+              </p>
+            </fieldset>
 
             <div className="grid gap-2">
               <Label htmlFor="description">{t('menu.descriptionOptional')}</Label>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { useTranslation } from '@/features/i18n/useTranslation'
+import { getLocalizedMenuItemName } from '@/features/menu/item-names'
 
 import {
   AlertDialog,
@@ -47,7 +48,7 @@ export function ItemCustomisationDialog({
   onAdd: (selections: SelectedModifier[]) => void
   onCancel: () => void
 }) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const [chosen, setChosen] = useState<SelectedModifier[]>(() => defaultSelections(groups))
 
   const validation = useMemo(() => validateSelections(groups, chosen), [groups, chosen])
@@ -73,7 +74,9 @@ export function ItemCustomisationDialog({
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-lg">
         <AlertDialogHeader>
-          <AlertDialogTitle data-testid="customise-title">{item.name}</AlertDialogTitle>
+          <AlertDialogTitle data-testid="customise-title">
+            {getLocalizedMenuItemName(item, language)}
+          </AlertDialogTitle>
           <AlertDialogDescription>
             {t('modifier.chooseHow', { price: formatMoney(item.price) })}
           </AlertDialogDescription>

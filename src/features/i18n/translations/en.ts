@@ -334,6 +334,8 @@ export const en = {
   'menu.writeRefusedShort': 'That change was refused. Your account may not have permission.',
   'menu.createCategoryFirst': 'Create a category first',
   'menu.newCategory': 'New category',
+  'menu.nameHeading': 'Menu item name',
+  'menu.namesHint': 'Translations are optional. A language left blank shows the English name.',
   'menu.descriptionOptional': 'Description (optional)',
   'menu.blurbAdmin': 'Everything the café sells. Changes appear on every till immediately.',
   'menu.blurbStaff': 'Everything the café sells. Ask an administrator to make changes.',

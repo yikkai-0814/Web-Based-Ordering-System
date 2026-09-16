@@ -19,6 +19,7 @@ import { renderComponent } from './render'
 const ITEM: MenuItem = {
   id: 'ccr',
   name: 'Chicken Chop Rice',
+  names: { en: 'Chicken Chop Rice', ms: '', zh: '' },
   description: '',
   categoryId: 'mains',
   price: 800,

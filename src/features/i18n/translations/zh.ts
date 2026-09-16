@@ -318,6 +318,8 @@ export const zh: Dictionary = {
   'menu.writeRefusedShort': '该更改被拒绝。你的账号可能没有权限。',
   'menu.createCategoryFirst': '请先创建分类',
   'menu.newCategory': '新分类',
+  'menu.nameHeading': '菜单项目名称',
+  'menu.namesHint': '翻译为选填。留空的语言将显示英文名称。',
   'menu.descriptionOptional': '描述（选填）',
   'menu.blurbAdmin': '这家咖啡馆出售的全部商品。更改会立即出现在每一台收银机上。',
   'menu.blurbStaff': '这家咖啡馆出售的全部商品。如需更改，请联系管理员。',

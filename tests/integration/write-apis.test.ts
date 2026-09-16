@@ -12,6 +12,8 @@ import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from 'firebase/fi
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { createMenuItem, deleteMenuItem, updateMenuItem } from '@/features/menu/menu-api'
+import { getLocalizedMenuItemName } from '@/features/menu/item-names'
+import { parseMenuItem } from '@/features/menu/types'
 import type { Cart } from '@/features/pos/cart'
 import { lineKeyOf } from '@/features/menu/modifiers'
 import {
@@ -1019,6 +1021,9 @@ describe('a staff-initiated void needs a manager to authorise it', () => {
 describe('the menu write API keeps cost and its journal in step', () => {
   const ITEM = {
     name: 'Cortado',
+    // No translations: the everyday case, and what every item written before this feature
+    // existed looks like.
+    names: {},
     description: 'Equal parts espresso and milk',
     categoryId: 'cat-coffee',
     price: 990,
@@ -1038,6 +1043,85 @@ describe('the menu write API keeps cost and its journal in step', () => {
     // Cost is never a field on the item: that split is what makes "staff cannot see cost"
     // true, and the rules now refuse an item that carries one.
     expect(Object.keys(item.data() ?? {})).not.toContain('cost')
+  })
+
+  it('writes the translations an admin gave, and nothing more', async () => {
+    await signInAs(admin)
+    const itemId = await createMenuItem(
+      { ...ITEM, names: { ms: 'Kopi Susu', zh: '牛奶咖啡' } },
+      380,
+    )
+
+    const item = await getDoc(doc(db, 'menuItems', itemId))
+    expect(item.get('name')).toBe('Cortado')
+    expect(item.get('names')).toEqual({ ms: 'Kopi Susu', zh: '牛奶咖啡' })
+    // English is the item's `name` and is never repeated inside the map: one fact, one place.
+    expect(Object.keys(item.get('names') as object)).not.toContain('en')
+  })
+
+  it('leaves an item with no translations looking exactly as it always did', async () => {
+    await signInAs(admin)
+    const itemId = await createMenuItem(ITEM, 380)
+
+    const item = await getDoc(doc(db, 'menuItems', itemId))
+    expect(item.get('name')).toBe('Cortado')
+    expect(item.get('names')).toEqual({})
+  })
+
+  it('adds a translation to an item that had none, keeping its English name', async () => {
+    await signInAs(admin)
+    const itemId = await createMenuItem(ITEM, 380)
+
+    await updateMenuItem(
+      itemId,
+      { ...ITEM, names: { ms: 'Kopi Susu' } },
+      { next: 380, previous: 380 },
+    )
+
+    const item = await getDoc(doc(db, 'menuItems', itemId))
+    expect(item.get('name')).toBe('Cortado')
+    expect(item.get('names')).toEqual({ ms: 'Kopi Susu' })
+  })
+
+  it('keeps one translation when the other is edited, and clears one that is emptied', async () => {
+    await signInAs(admin)
+    const itemId = await createMenuItem(
+      { ...ITEM, names: { ms: 'Kopi Susu', zh: '牛奶咖啡' } },
+      380,
+    )
+
+    // Editing Malay only — the form sends both fields back, so Chinese survives.
+    await updateMenuItem(
+      itemId,
+      { ...ITEM, names: { ms: 'Kopi Susu Panas', zh: '牛奶咖啡' } },
+      { next: 380, previous: 380 },
+    )
+    expect((await getDoc(doc(db, 'menuItems', itemId))).get('names')).toEqual({
+      ms: 'Kopi Susu Panas',
+      zh: '牛奶咖啡',
+    })
+
+    // Clearing Malay deliberately removes it from the document rather than leaving a blank.
+    await updateMenuItem(
+      itemId,
+      { ...ITEM, names: { zh: '牛奶咖啡' } },
+      { next: 380, previous: 380 },
+    )
+    expect((await getDoc(doc(db, 'menuItems', itemId))).get('names')).toEqual({ zh: '牛奶咖啡' })
+  })
+
+  it('reads an item written before translations existed', async () => {
+    // Written the way the collection was written for months: a name and no map at all. It
+    // must still parse, and must answer every language with its English name.
+    await signInAs(admin)
+    const itemId = await createMenuItem(ITEM, 380)
+    const stored = await getDoc(doc(db, 'menuItems', itemId))
+    const { names: _dropped, ...legacyShape } = stored.data() ?? {}
+
+    const parsed = parseMenuItem(itemId, legacyShape)
+    expect(parsed?.name).toBe('Cortado')
+    expect(getLocalizedMenuItemName(parsed!, 'ms')).toBe('Cortado')
+    expect(getLocalizedMenuItemName(parsed!, 'zh')).toBe('Cortado')
   })
 
   it('journals a cost change alongside the value it replaced', async () => {
@@ -1360,6 +1444,7 @@ describe('menu item customisation, through the app’s own writes', () => {
     const itemId = await createMenuItem(
       {
         name: 'Nasi Lemak',
+        names: {},
         description: '',
         categoryId: 'cat-mains',
         price: 700,

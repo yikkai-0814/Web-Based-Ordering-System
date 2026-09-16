@@ -1,5 +1,7 @@
 import type { Timestamp } from 'firebase/firestore'
 
+import { ITEM_NAME_MAX, parseItemNames, type LocalizedName } from '@/features/menu/item-names'
+
 /**
  * A grouping on the menu — Coffee, Pastries, Cold Drinks.
  *
@@ -23,7 +25,20 @@ export interface Category {
  */
 export interface MenuItem {
   id: string
+  /**
+   * The English name, and the item's canonical one: what it sorts by, what the security
+   * rules check, and what every other language falls back to. Unchanged since the first
+   * version of this collection, which is why items written then are still valid documents.
+   */
   name: string
+  /**
+   * The same name in each language the interface speaks, English included.
+   *
+   * Derived at parse time rather than stored whole: only the translations live in the
+   * document, and English is filled in from `name`. Read it through
+   * `getLocalizedMenuItemName`, never directly, so the fallback rule stays in one place.
+   */
+  names: LocalizedName
   description: string
   categoryId: string
   price: number
@@ -70,7 +85,8 @@ export function parseItemCost(itemId: string, data: Record<string, unknown>): It
 }
 
 export const CATEGORY_NAME_MAX = 60
-export const ITEM_NAME_MAX = 80
+/** Defined in item-names.ts, beside the rest of what a name is. Re-exported for its callers. */
+export { ITEM_NAME_MAX }
 export const ITEM_DESCRIPTION_MAX = 300
 
 /**
@@ -97,7 +113,7 @@ export function parseCategory(id: string, data: Record<string, unknown>): Catego
 
 export function parseMenuItem(id: string, data: Record<string, unknown>): MenuItem | null {
   const { name, description, categoryId, price, sortOrder, active, createdAt, updatedAt } = data
-  const { modifierGroupIds } = data
+  const { modifierGroupIds, names } = data
 
   if (typeof name !== 'string' || name.trim() === '') return null
   if (typeof categoryId !== 'string' || categoryId === '') return null
@@ -109,6 +125,10 @@ export function parseMenuItem(id: string, data: Record<string, unknown>): MenuIt
   return {
     id,
     name,
+    // Absent on every item written before this feature, and on every item an admin has not
+    // given a translation to. Both resolve to English, which is what the document already
+    // says — so nothing has to be migrated for an old item to keep working.
+    names: parseItemNames(name, names),
     description: typeof description === 'string' ? description : '',
     categoryId,
     price,
