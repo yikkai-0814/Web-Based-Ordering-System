@@ -15,6 +15,7 @@ import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { VoidOrderDialog } from '@/features/pos/VoidOrderDialog'
+import { VOID_REASON_OTHER, VOID_REASON_PRESETS } from '@/features/pos/voids'
 
 import { renderComponent } from './render'
 
@@ -41,13 +42,25 @@ function setup(
   return { ...rendered, onConfirm }
 }
 
-/** Opens the dialog and fills the reason in — the part both roles share. */
+/** Opens the dialog and picks one of the quick reasons. */
+async function openAndSelectReason(
+  user: ReturnType<typeof setup>['user'],
+  presetId = 'wrong-item',
+) {
+  await user.click(screen.getByTestId('void-order'))
+  await user.selectOptions(screen.getByTestId('void-reason'), presetId)
+}
+
+/**
+ * Opens the dialog and types a reason of its own under "Other" — the free-text path the
+ * dialog has always had, which every test written before the quick reasons existed drives.
+ */
 async function openAndGiveReason(
   user: ReturnType<typeof setup>['user'],
   reason = 'Wrong item rung up',
 ) {
-  await user.click(screen.getByTestId('void-order'))
-  await user.type(screen.getByLabelText('Reason'), reason)
+  await openAndSelectReason(user, VOID_REASON_OTHER)
+  await user.type(screen.getByTestId('void-reason-custom'), reason)
 }
 
 describe('VoidOrderDialog: an admin voids in one step', () => {
@@ -125,14 +138,14 @@ describe('VoidOrderDialog: staff must produce a manager', () => {
 })
 
 describe('VoidOrderDialog: the reason is required before anything else', () => {
-  it('refuses to advance an empty reason, for either role', async () => {
+  it('refuses to advance with no reason chosen, for either role', async () => {
     const { user, onConfirm } = setup(true)
     await user.click(screen.getByTestId('void-order'))
     await user.click(screen.getByTestId('continue-void'))
 
     expect(onConfirm).not.toHaveBeenCalled()
     expect(screen.queryByTestId('manager-email')).toBeNull()
-    expect(screen.getByText('Enter a reason for voiding this sale.')).not.toBeNull()
+    expect(screen.getByText('Select a reason for voiding this sale.')).not.toBeNull()
   })
 
   it('refuses a reason of nothing but spaces', async () => {
@@ -203,9 +216,114 @@ describe('VoidOrderDialog: nothing survives the dialog closing', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
     await user.click(screen.getByTestId('void-order'))
 
-    // Reopened at step one with empty fields: a half-finished void on a shared till must not
-    // be inherited by whoever picks the screen up next.
-    expect((screen.getByLabelText('Reason') as HTMLInputElement).value).toBe('')
+    // Reopened at step one with nothing chosen: a half-finished void on a shared till must
+    // not be inherited by whoever picks the screen up next.
+    expect((screen.getByTestId('void-reason') as HTMLSelectElement).value).toBe('')
+    // And the sentence typed under "Other" is gone with the choice that revealed the field.
+    expect(screen.queryByTestId('void-reason-custom')).toBeNull()
     expect(screen.queryByTestId('manager-password')).toBeNull()
+  })
+})
+
+describe('VoidOrderDialog: the quick reasons', () => {
+  it('offers every predefined reason, plus Other, with nothing chosen to begin with', async () => {
+    const { user } = setup(false)
+    await user.click(screen.getByTestId('void-order'))
+
+    const select = screen.getByTestId('void-reason') as HTMLSelectElement
+    expect(select.value).toBe('')
+    expect([...select.options].map((option) => option.value)).toEqual([
+      '',
+      ...VOID_REASON_PRESETS.map((preset) => preset.id),
+      VOID_REASON_OTHER,
+    ])
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      'Select a reason',
+      'Customer changed mind',
+      'Wrong order',
+      'Wrong item',
+      'Duplicate order',
+      'Payment issue',
+      'Item unavailable',
+      'Staff mistake',
+      'Other',
+    ])
+  })
+
+  it.each(VOID_REASON_PRESETS.map((preset) => preset.id))(
+    'lets %s be chosen and voids on that reason alone',
+    async (presetId) => {
+      const { user, onConfirm } = setup(false)
+      await openAndSelectReason(user, presetId)
+
+      // No typing anywhere: the whole point is that the common case is one tap.
+      expect(screen.queryByTestId('void-reason-custom')).toBeNull()
+      await user.click(screen.getByTestId('confirm-void'))
+
+      const [reason, credentials] = onConfirm.mock.calls[0] as [string, unknown]
+      expect(reason.length).toBeGreaterThan(0)
+      expect(credentials).toBeNull()
+    },
+  )
+
+  it('hands over the label the operator read', async () => {
+    const { user, onConfirm } = setup(false)
+    await openAndSelectReason(user, 'customer-changed-mind')
+    await user.click(screen.getByTestId('confirm-void'))
+
+    expect(onConfirm).toHaveBeenCalledWith('Customer changed mind', null)
+  })
+
+  it('carries a chosen reason through the manager step unchanged', async () => {
+    const { user, onConfirm } = setup(true)
+    await openAndSelectReason(user, 'duplicate-order')
+    await user.click(screen.getByTestId('continue-void'))
+    await user.type(screen.getByTestId('manager-email'), 'ada@example.com')
+    await user.type(screen.getByTestId('manager-password'), 'hunter2')
+    await user.click(screen.getByTestId('confirm-void'))
+
+    expect(onConfirm).toHaveBeenCalledWith('Duplicate order', {
+      email: 'ada@example.com',
+      password: 'hunter2',
+    })
+  })
+})
+
+describe('VoidOrderDialog: Other still wants words', () => {
+  it('asks for a reason only once Other is chosen', async () => {
+    const { user } = setup(false)
+    await user.click(screen.getByTestId('void-order'))
+    expect(screen.queryByTestId('void-reason-custom')).toBeNull()
+
+    await user.selectOptions(screen.getByTestId('void-reason'), VOID_REASON_OTHER)
+    expect(screen.getByTestId('void-reason-custom')).not.toBeNull()
+    expect(screen.getByLabelText('Your reason')).not.toBeNull()
+  })
+
+  it('refuses to void on Other with nothing typed', async () => {
+    const { user, onConfirm } = setup(false)
+    await openAndSelectReason(user, VOID_REASON_OTHER)
+    await user.click(screen.getByTestId('confirm-void'))
+
+    expect(onConfirm).not.toHaveBeenCalled()
+    expect(screen.getByText('Enter a reason for voiding this sale.')).not.toBeNull()
+  })
+
+  it('stores what was typed, trimmed, once there is something to store', async () => {
+    const { user, onConfirm } = setup(false)
+    await openAndGiveReason(user, '  Tray dropped on the way out  ')
+    await user.click(screen.getByTestId('confirm-void'))
+
+    expect(onConfirm).toHaveBeenCalledWith('Tray dropped on the way out', null)
+  })
+
+  it('writes the preset, not the abandoned sentence, if the choice changes back', async () => {
+    const { user, onConfirm } = setup(false)
+    await openAndGiveReason(user, 'Half a thought')
+    await user.selectOptions(screen.getByTestId('void-reason'), 'staff-mistake')
+
+    expect(screen.queryByTestId('void-reason-custom')).toBeNull()
+    await user.click(screen.getByTestId('confirm-void'))
+    expect(onConfirm).toHaveBeenCalledWith('Staff mistake', null)
   })
 })

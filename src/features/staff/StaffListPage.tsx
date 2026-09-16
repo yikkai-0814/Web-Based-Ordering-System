@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { StatusBadge } from '@/features/pos/StatusBadge'
 import { createStaffMember, renameStaffMember, setStaffActive } from '@/features/staff/staff-api'
 import { STAFF_NAME_MAX, validateStaffName, type StaffMember } from '@/features/staff/types'
 import { useStaffMembers } from '@/features/staff/useStaffMembers'
@@ -163,11 +164,16 @@ export function StaffListPage() {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell
-                      className={member.active ? 'text-sm' : 'text-sm text-muted-foreground'}
-                      data-testid="staff-status"
-                    >
-                      {t(member.active ? 'common.active' : 'common.inactive')}
+                    <TableCell>
+                      {/* The same badge the menu and the orders list use: grey-versus-darker-
+                          grey text said nothing at a glance, and whether somebody is still on
+                          the roster is the one thing this column exists to answer. */}
+                      <StatusBadge
+                        label={t(member.active ? 'common.active' : 'common.inactive')}
+                        tone={member.active ? 'good' : 'warn'}
+                        testId="staff-status"
+                        value={member.active ? 'active' : 'inactive'}
+                      />
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">
                       {editing ? (

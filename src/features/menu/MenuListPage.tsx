@@ -208,34 +208,52 @@ export function MenuListPage() {
                           />
                         </TableCell>
                         {isAdmin && (
-                          <TableCell className="text-right whitespace-nowrap">
-                            <Button asChild variant="ghost" size="sm">
-                              <Link
-                                to={`/menu/${item.id}/edit`}
-                                aria-label={t('menu.editItemNamed', { name: item.name })}
-                              >
-                                <Pencil aria-hidden="true" />
-                                {t('common.edit')}
-                              </Link>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() =>
-                                void run(() => setMenuItemActive(item.id, !item.active))
-                              }
-                            >
-                              {t(item.active ? 'menu.archive' : 'menu.restore')}
-                            </Button>
-                            <ConfirmDeleteDialog
-                              title={t('menu.deleteTitle', { name: item.name })}
-                              description={t('menu.deleteBlurb')}
-                              onConfirm={() => run(() => deleteMenuItem(item.id))}
-                            >
-                              <Button variant="destructive" size="sm">
-                                {t('common.delete')}
+                          <TableCell className="text-right">
+                            {/* A flex row, not three inline-level buttons in a text-aligned
+                                cell. Laid out inline they share a baseline, and an
+                                `inline-flex` box's baseline is synthesized from its first
+                                child: for Archive and Delete that is their text, but for Edit
+                                it is the Pencil, and an SVG has no text baseline, so the
+                                browser falls back to the bottom edge of the icon. Edit was
+                                therefore sitting a few pixels higher than the buttons beside
+                                it — the same class of fault as the icon-and-text rows in
+                                ModifierGroupsEditor, which is why this is the same
+                                `flex items-center justify-end gap-1` those use. Aligning the
+                                boxes to each other rather than to a baseline is what fixes
+                                it; no offset is applied to Edit itself.
+
+                                The gap is part of the fix rather than decoration: with the
+                                buttons flush, the 3px focus ring of one sat on top of its
+                                neighbour. */}
+                            <div className="flex items-center justify-end gap-1">
+                              <Button asChild variant="ghost" size="sm">
+                                <Link
+                                  to={`/menu/${item.id}/edit`}
+                                  aria-label={t('menu.editItemNamed', { name: item.name })}
+                                >
+                                  <Pencil aria-hidden="true" />
+                                  {t('common.edit')}
+                                </Link>
                               </Button>
-                            </ConfirmDeleteDialog>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  void run(() => setMenuItemActive(item.id, !item.active))
+                                }
+                              >
+                                {t(item.active ? 'menu.archive' : 'menu.restore')}
+                              </Button>
+                              <ConfirmDeleteDialog
+                                title={t('menu.deleteTitle', { name: item.name })}
+                                description={t('menu.deleteBlurb')}
+                                onConfirm={() => run(() => deleteMenuItem(item.id))}
+                              >
+                                <Button variant="destructive" size="sm">
+                                  {t('common.delete')}
+                                </Button>
+                              </ConfirmDeleteDialog>
+                            </div>
                           </TableCell>
                         )}
                       </TableRow>

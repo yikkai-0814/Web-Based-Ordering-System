@@ -17,10 +17,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
 import {
+  findVoidReasonPreset,
+  resolveVoidReason,
   validateManagerCredentials,
-  validateVoidReason,
   VOID_REASON_MAX,
+  VOID_REASON_OTHER,
+  VOID_REASON_PRESETS,
 } from '@/features/pos/voids'
 import { formatMoney } from '@/lib/money'
 
@@ -32,6 +36,11 @@ export interface ManagerCredentials {
 /**
  * Voiding is irreversible and reverses money, so it asks for a reason and says plainly that
  * it cannot be undone.
+ *
+ * The reason is picked from the handful that actually come up at a counter, with "Other" for
+ * everything else — the same free-text field as before, now shown only when it is needed.
+ * Whichever route is taken, a reason is still required and still trimmed and length-checked
+ * before it is written, and what reaches `onConfirm` is the same single string it always was.
  *
  * Two shapes, one dialog. An admin voids their own sale in a single step, exactly as before.
  * Anyone else gets a second step asking a manager to sign in — `requiresAuthorization` is
@@ -60,7 +69,8 @@ export function VoidOrderDialog({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<'reason' | 'authorize'>('reason')
-  const [reason, setReason] = useState('')
+  const [presetId, setPresetId] = useState('')
+  const [customReason, setCustomReason] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<Message | null>(null)
@@ -70,16 +80,21 @@ export function VoidOrderDialog({
     setOpen(nextOpen)
     if (!nextOpen) {
       setStep('reason')
-      setReason('')
+      setPresetId('')
+      setCustomReason('')
       setEmail('')
       setPassword('')
       setError(null)
     }
   }
 
+  const preset = findVoidReasonPreset(presetId)
+  /** Empty for "Other" and for no choice at all, which `resolveVoidReason` reads as such. */
+  const presetLabel = preset ? t(preset.labelKey) : ''
+
   /** Step one. For an admin this is the whole thing; for staff it opens the second step. */
   async function handleReasonStep() {
-    const validated = validateVoidReason(reason)
+    const validated = resolveVoidReason(presetId, presetLabel, customReason)
     if (!validated.ok) {
       setError(validated.error)
       return
@@ -96,7 +111,7 @@ export function VoidOrderDialog({
   }
 
   async function handleAuthorizeStep() {
-    const validatedReason = validateVoidReason(reason)
+    const validatedReason = resolveVoidReason(presetId, presetLabel, customReason)
     if (!validatedReason.ok) {
       // Cannot normally happen — step one checked it — but the reason is what gets written,
       // so it is re-validated rather than trusted because it passed a moment ago.
@@ -160,18 +175,45 @@ export function VoidOrderDialog({
         </AlertDialogHeader>
 
         {step === 'reason' ? (
-          <div className="grid gap-2">
-            <Label htmlFor="void-reason">{t('void.reason')}</Label>
-            <Input
-              id="void-reason"
-              className="h-touch text-base"
-              placeholder={t('void.reasonPlaceholder')}
-              maxLength={VOID_REASON_MAX}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              disabled={pending}
-              autoFocus
-            />
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="void-reason">{t('void.reason')}</Label>
+              <NativeSelect
+                id="void-reason"
+                data-testid="void-reason"
+                value={presetId}
+                onChange={(event) => setPresetId(event.target.value)}
+                disabled={pending}
+                autoFocus
+              >
+                {/* No reason is preselected: a void must be a decision somebody made, not
+                    whatever happened to be at the top of the list. */}
+                <option value="">{t('void.reasonSelect')}</option>
+                {VOID_REASON_PRESETS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {t(option.labelKey)}
+                  </option>
+                ))}
+                <option value={VOID_REASON_OTHER}>{t('void.reasonOther')}</option>
+              </NativeSelect>
+            </div>
+
+            {presetId === VOID_REASON_OTHER && (
+              <div className="grid gap-2">
+                <Label htmlFor="void-reason-custom">{t('void.reasonCustom')}</Label>
+                <Input
+                  id="void-reason-custom"
+                  data-testid="void-reason-custom"
+                  className="h-touch text-base"
+                  placeholder={t('void.reasonPlaceholder')}
+                  maxLength={VOID_REASON_MAX}
+                  value={customReason}
+                  onChange={(event) => setCustomReason(event.target.value)}
+                  disabled={pending}
+                  autoFocus
+                />
+              </div>
+            )}
           </div>
         ) : (
           <div className="grid gap-4">

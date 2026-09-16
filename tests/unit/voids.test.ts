@@ -3,11 +3,15 @@ import { describe, expect, it } from 'vitest'
 
 import { voidInitiatorNameOf } from '@/features/pos/types'
 import {
+  findVoidReasonPreset,
   indexVoidsByOrderId,
   isVoided,
+  resolveVoidReason,
   validateManagerCredentials,
   validateVoidReason,
   VOID_REASON_MAX,
+  VOID_REASON_OTHER,
+  VOID_REASON_PRESETS,
 } from '@/features/pos/voids'
 
 describe('validateVoidReason', () => {
@@ -39,6 +43,91 @@ describe('validateVoidReason', () => {
   it('measures length after trimming, not before', () => {
     const padded = `   ${'x'.repeat(VOID_REASON_MAX)}   `
     expect(validateVoidReason(padded).ok).toBe(true)
+  })
+})
+
+/**
+ * The quick reasons. They save typing; they do not relax anything — every route through
+ * `resolveVoidReason` ends at `validateVoidReason`, so a void still cannot be written
+ * without a stated reason.
+ */
+describe('the quick void reasons', () => {
+  it('offers the seven common ones, each with its own id', () => {
+    expect(VOID_REASON_PRESETS.map((preset) => preset.id)).toEqual([
+      'customer-changed-mind',
+      'wrong-order',
+      'wrong-item',
+      'duplicate-order',
+      'payment-issue',
+      'item-unavailable',
+      'staff-mistake',
+    ])
+  })
+
+  it('translates every one of them, rather than hard-coding English', () => {
+    // The label key is what the dialog reads; a preset with none would show a blank option.
+    for (const preset of VOID_REASON_PRESETS) {
+      expect(preset.labelKey.startsWith('void.reason')).toBe(true)
+    }
+  })
+
+  it('does not include "Other" among them — it is the absence of a preset', () => {
+    expect(VOID_REASON_PRESETS.some((preset) => preset.id === VOID_REASON_OTHER)).toBe(false)
+    expect(findVoidReasonPreset(VOID_REASON_OTHER)).toBeNull()
+  })
+
+  it('finds a preset by id, and answers null for anything it does not know', () => {
+    expect(findVoidReasonPreset('wrong-item')?.labelKey).toBe('void.reasonWrongItem')
+    expect(findVoidReasonPreset('')).toBeNull()
+    expect(findVoidReasonPreset('from-an-older-build')).toBeNull()
+  })
+})
+
+describe('resolveVoidReason', () => {
+  it('stores the label of the preset that was chosen', () => {
+    // The label as the operator read it, in the language the till is set to — the same kind
+    // of human sentence a typed reason has always been.
+    expect(resolveVoidReason('wrong-item', 'Wrong item', '')).toEqual({
+      ok: true,
+      reason: 'Wrong item',
+    })
+  })
+
+  it('ignores anything left in the custom field once a preset is chosen', () => {
+    // Somebody types under "Other", changes their mind and picks a preset: what they picked
+    // is what gets written, not the half-finished sentence behind it.
+    expect(resolveVoidReason('payment-issue', 'Payment issue', 'Card machine we')).toEqual({
+      ok: true,
+      reason: 'Payment issue',
+    })
+  })
+
+  it('refuses to resolve anything until a reason has been chosen', () => {
+    const result = resolveVoidReason('', '', '')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.key).toBe('validation.voidReasonNotSelected')
+  })
+
+  it('requires words of their own when "Other" is chosen', () => {
+    for (const typed of ['', '   ']) {
+      const result = resolveVoidReason(VOID_REASON_OTHER, '', typed)
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.key).toBe('validation.voidReasonRequired')
+    }
+  })
+
+  it('accepts and trims a custom reason, exactly as the typed field always did', () => {
+    expect(resolveVoidReason(VOID_REASON_OTHER, '', '  Spilled the tray  ')).toEqual({
+      ok: true,
+      reason: 'Spilled the tray',
+    })
+  })
+
+  it('holds a custom reason to the same maximum length', () => {
+    const tooLong = 'x'.repeat(VOID_REASON_MAX + 1)
+    const result = resolveVoidReason(VOID_REASON_OTHER, '', tooLong)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.key).toBe('validation.voidReasonTooLong')
   })
 })
 
