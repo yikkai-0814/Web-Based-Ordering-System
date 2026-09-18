@@ -309,6 +309,7 @@ export const en = {
   'void.authoriseAndVoid': 'Authorise and void',
 
   // ---- Menu management -----------------------------------------------------------
+  'menu.untitledItem': 'this item',
   'menu.newItem': 'New item',
   'menu.editItem': 'Edit item',
   'menu.categories': 'Categories',
@@ -336,8 +337,6 @@ export const en = {
   'menu.writeRefusedShort': 'That change was refused. Your account may not have permission.',
   'menu.createCategoryFirst': 'Create a category first',
   'menu.newCategory': 'New category',
-  'menu.nameHeading': 'Menu item name',
-  'menu.namesHint': 'Translations are optional. A language left blank shows the English name.',
   'menu.descriptionOptional': 'Description (optional)',
   'menu.blurbAdmin': 'Everything the café sells. Changes appear on every till immediately.',
   'menu.blurbStaff': 'Everything the café sells. Ask an administrator to make changes.',
@@ -429,11 +428,6 @@ export const en = {
   'modifierAdmin.badgeShared': 'Shared',
   'modifierAdmin.badgeItemOnly': 'This item only',
   'modifierAdmin.createNew': 'Create a new group',
-  'modifierAdmin.translateOption': 'Translate {{name}}',
-  'modifierAdmin.translateOptionCountOne': 'Translate {{name}}, {{count}} translation',
-  'modifierAdmin.translateOptionCountOther': 'Translate {{name}}, {{count}} translations',
-  'modifierAdmin.namesHint':
-    'Translations are optional. A language left blank shows the English name.',
   'modifierAdmin.draftHint': 'Created when you save the item.',
   'modifierAdmin.sharedElsewhereOne':
     'Also used by 1 other item. Deleting it removes it from that item too.',
@@ -600,6 +594,17 @@ export const en = {
   'load.paymentsDate': 'Could not load payments for this date.',
   'load.orders': 'Could not load orders. You may not have permission, or you are offline.',
   'load.voidsDate': 'Could not load voided sales for this date.',
+
+  // ---- The shared translation control, read by src/features/menu/NameTranslations.tsx ----
+  // One set of words for one interaction: the menu item form and the modifier option editor
+  // open the same dialog, so they must not drift into two vocabularies for the same thing.
+  'translations.title': 'Translate {{name}}',
+  'translations.hint': 'Translations are optional. A language left blank shows the English name.',
+  'translations.add': 'Add translations',
+  'translations.edit': 'Edit translations',
+  'translations.open': 'Translate {{name}}',
+  'translations.openCountOne': 'Translate {{name}}, {{count}} translation',
+  'translations.openCountOther': 'Translate {{name}}, {{count}} translations',
 
   // ---- Validation, from the pure modules and the write APIs ----------------------
   'validation.managerEmailRequired': "Enter the manager's email address.",

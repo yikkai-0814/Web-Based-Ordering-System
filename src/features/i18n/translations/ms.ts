@@ -304,6 +304,7 @@ export const ms: Dictionary = {
   'void.authoriseAndVoid': 'Benarkan dan batalkan',
 
   // ---- Menu management -----------------------------------------------------------
+  'menu.untitledItem': 'item ini',
   'menu.newItem': 'Item baharu',
   'menu.editItem': 'Sunting item',
   'menu.categories': 'Kategori',
@@ -331,9 +332,6 @@ export const ms: Dictionary = {
   'menu.writeRefusedShort': 'Perubahan itu ditolak. Akaun anda mungkin tiada kebenaran.',
   'menu.createCategoryFirst': 'Cipta kategori dahulu',
   'menu.newCategory': 'Kategori baharu',
-  'menu.nameHeading': 'Nama item menu',
-  'menu.namesHint':
-    'Terjemahan adalah pilihan. Bahasa yang dibiarkan kosong akan memaparkan nama Inggeris.',
   'menu.descriptionOptional': 'Penerangan (pilihan)',
   'menu.blurbAdmin':
     'Semua yang dijual oleh kafe ini. Perubahan muncul di setiap kaunter dengan serta-merta.',
@@ -427,11 +425,6 @@ export const ms: Dictionary = {
   'modifierAdmin.badgeShared': 'Dikongsi',
   'modifierAdmin.badgeItemOnly': 'Item ini sahaja',
   'modifierAdmin.createNew': 'Cipta kumpulan baharu',
-  'modifierAdmin.translateOption': 'Terjemah {{name}}',
-  'modifierAdmin.translateOptionCountOne': 'Terjemah {{name}}, {{count}} terjemahan',
-  'modifierAdmin.translateOptionCountOther': 'Terjemah {{name}}, {{count}} terjemahan',
-  'modifierAdmin.namesHint':
-    'Terjemahan adalah pilihan. Bahasa yang dibiarkan kosong akan memaparkan nama Inggeris.',
   'modifierAdmin.draftHint': 'Dicipta apabila anda menyimpan item.',
   'modifierAdmin.sharedElsewhereOne':
     'Turut digunakan oleh 1 item lain. Memadamnya akan membuangnya daripada item itu juga.',
@@ -602,6 +595,16 @@ export const ms: Dictionary = {
   'load.orders':
     'Tidak dapat memuatkan pesanan. Anda mungkin tiada kebenaran, atau anda di luar talian.',
   'load.voidsDate': 'Tidak dapat memuatkan jualan dibatalkan untuk tarikh ini.',
+
+  // ---- The shared translation control, read by src/features/menu/NameTranslations.tsx ----
+  'translations.title': 'Terjemah {{name}}',
+  'translations.hint':
+    'Terjemahan adalah pilihan. Bahasa yang dibiarkan kosong akan memaparkan nama Inggeris.',
+  'translations.add': 'Tambah terjemahan',
+  'translations.edit': 'Sunting terjemahan',
+  'translations.open': 'Terjemah {{name}}',
+  'translations.openCountOne': 'Terjemah {{name}}, {{count}} terjemahan',
+  'translations.openCountOther': 'Terjemah {{name}}, {{count}} terjemahan',
 
   // ---- Validation, from the pure modules and the write APIs ----------------------
   'validation.managerEmailRequired': 'Masukkan alamat e-mel pengurus.',

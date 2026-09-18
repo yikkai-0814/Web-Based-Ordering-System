@@ -127,6 +127,31 @@ export function storedTranslations(names: Partial<Record<Language, string>>): Na
   return stored
 }
 
+/**
+ * How many languages this subject has actually been translated into.
+ *
+ * Whitespace does not count, for the same reason it is not stored: it would light up the
+ * editor's badge for a translation that falls back to English anyway.
+ */
+export function translationCount(names: Partial<Record<Language, string>>): number {
+  return Object.keys(storedTranslations(names)).length
+}
+
+/**
+ * Folds what a dialog handed back into a full set of names, clearing what it left out.
+ *
+ * The caller holds every language together — that is what stops an admin editing Malay from
+ * wiping Chinese — so a language the dialog returned nothing for has to be emptied rather
+ * than left at its old value, or clearing a translation would silently fail.
+ */
+export function withTranslations(current: LocalizedName, next: NameTranslations): LocalizedName {
+  const updated = { ...current }
+  for (const language of TRANSLATABLE_LANGUAGES) {
+    updated[language] = next[language] ?? ''
+  }
+  return updated
+}
+
 /** An untouched set of fields, for a create form. */
 export function emptyNames(): LocalizedName {
   return Object.fromEntries(LANGUAGES.map((language) => [language, ''])) as LocalizedName

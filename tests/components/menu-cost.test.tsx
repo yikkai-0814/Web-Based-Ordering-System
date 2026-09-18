@@ -117,8 +117,8 @@ describe('the cost field is compulsory', () => {
     renderNewItemForm()
     expect(costField().required).toBe(true)
     // The asterisk is decoration beside the label; `required` is what is announced. Asked of
-    // the cost field's own label rather than of the page, because the English name field is
-    // marked the same way and there are now two of them.
+    // the cost field's own label rather than of the page, because the name field is marked
+    // the same way.
     expect(document.querySelector('label[for="cost"]')?.textContent).toContain('*')
   })
 
@@ -135,7 +135,7 @@ describe('the cost field is compulsory', () => {
 
   it('blocks a submit with no cost, and says so under the field', async () => {
     const { user } = renderNewItemForm()
-    await user.type(screen.getByLabelText(/English/), 'Teh Tarik')
+    await user.type(screen.getByTestId('name'), 'Teh Tarik')
     await user.type(screen.getByLabelText(/Price/), '3.50')
     await user.click(submit())
 
@@ -145,7 +145,7 @@ describe('the cost field is compulsory', () => {
 
   it('puts the cursor back in the field it is complaining about', async () => {
     const { user } = renderNewItemForm()
-    await user.type(screen.getByLabelText(/English/), 'Teh Tarik')
+    await user.type(screen.getByTestId('name'), 'Teh Tarik')
     await user.type(screen.getByLabelText(/Price/), '3.50')
     await user.click(submit())
 
@@ -155,7 +155,7 @@ describe('the cost field is compulsory', () => {
 
   it('blocks a submit when the field holds only whitespace', async () => {
     const { user } = renderNewItemForm()
-    await user.type(screen.getByLabelText(/English/), 'Teh Tarik')
+    await user.type(screen.getByTestId('name'), 'Teh Tarik')
     await user.type(screen.getByLabelText(/Price/), '3.50')
     await user.type(costField(), '   ')
     await user.click(submit())
@@ -166,7 +166,7 @@ describe('the cost field is compulsory', () => {
 
   it('blocks a negative cost', async () => {
     const { user } = renderNewItemForm()
-    await user.type(screen.getByLabelText(/English/), 'Teh Tarik')
+    await user.type(screen.getByTestId('name'), 'Teh Tarik')
     await user.type(screen.getByLabelText(/Price/), '3.50')
     await user.type(costField(), '-1')
     await user.click(submit())
@@ -177,7 +177,7 @@ describe('the cost field is compulsory', () => {
 
   it('blocks a cost that is not a number', async () => {
     const { user } = renderNewItemForm()
-    await user.type(screen.getByLabelText(/English/), 'Teh Tarik')
+    await user.type(screen.getByTestId('name'), 'Teh Tarik')
     await user.type(screen.getByLabelText(/Price/), '3.50')
     await user.type(costField(), 'free')
     await user.click(submit())
@@ -188,7 +188,7 @@ describe('the cost field is compulsory', () => {
 
   it('clears the complaint as soon as somebody starts typing', async () => {
     const { user } = renderNewItemForm()
-    await user.type(screen.getByLabelText(/English/), 'Teh Tarik')
+    await user.type(screen.getByTestId('name'), 'Teh Tarik')
     await user.type(screen.getByLabelText(/Price/), '3.50')
     await user.click(submit())
     expect(screen.getByTestId('cost-error')).not.toBeNull()
@@ -199,7 +199,7 @@ describe('the cost field is compulsory', () => {
 
   it('saves once a cost is supplied, in whole sen', async () => {
     const { user } = renderNewItemForm()
-    await user.type(screen.getByLabelText(/English/), 'Teh Tarik')
+    await user.type(screen.getByTestId('name'), 'Teh Tarik')
     await user.type(screen.getByLabelText(/Price/), '3.50')
     await user.type(costField(), '1.20')
     await user.click(submit())
@@ -210,7 +210,7 @@ describe('the cost field is compulsory', () => {
 
   it('accepts zero — free to make is an answer, not a blank', async () => {
     const { user } = renderNewItemForm()
-    await user.type(screen.getByLabelText(/English/), 'Tap water')
+    await user.type(screen.getByTestId('name'), 'Tap water')
     await user.type(screen.getByLabelText(/Price/), '0')
     await user.type(costField(), '0')
     await user.click(submit())

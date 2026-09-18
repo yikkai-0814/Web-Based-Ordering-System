@@ -110,9 +110,18 @@ function renderMenuList() {
   )
 }
 
-const english = () => screen.getByLabelText(/English/) as HTMLInputElement
-const malay = () => screen.getByLabelText('Bahasa Melayu') as HTMLInputElement
-const chinese = () => screen.getByLabelText('中文') as HTMLInputElement
+/** The one name field the form shows: the canonical English name. */
+const english = () => screen.getByTestId('name') as HTMLInputElement
+/** The translation control under it, and the two fields it opens. */
+const translateButton = () => screen.getByTestId('item-translate')
+const malay = () => screen.getByTestId('translation-ms') as HTMLInputElement
+const chinese = () => screen.getByTestId('translation-zh') as HTMLInputElement
+
+/** Opens the translations dialog and returns once its fields are on screen. */
+async function openTranslations(user: { click: (element: Element) => Promise<void> }) {
+  await user.click(translateButton())
+  return malay()
+}
 
 /** What the last save was told this item is called. */
 const savedInput = (mock: typeof createMenuItem) =>
@@ -132,30 +141,105 @@ afterEach(() => {
   document.documentElement.removeAttribute('lang')
 })
 
-describe('the form takes a name in each language', () => {
-  it('offers one field per language, with English required', () => {
+describe('the form shows one name, and the rest behind a button', () => {
+  it('shows the English name as an ordinary required field', () => {
     renderForm('/menu/new')
 
-    expect(screen.getByText('Menu item name')).not.toBeNull()
     expect(english().required).toBe(true)
-    expect(malay().required).toBe(false)
-    expect(chinese().required).toBe(false)
-    // Said once, where the optional fields are, rather than repeated on each label.
+    expect(screen.getByLabelText(/Name/)).toBe(english())
+  })
+
+  it('does not put the Malay or Chinese fields on the form itself', () => {
+    renderForm('/menu/new')
+
+    // The refinement: two fields most vendors never fill are no longer between the name and
+    // everything below it. They are one click away, not gone.
+    expect(screen.queryByTestId('translation-ms')).toBeNull()
+    expect(screen.queryByTestId('translation-zh')).toBeNull()
+    expect(screen.queryByLabelText('Bahasa Melayu')).toBeNull()
+    expect(screen.queryByLabelText('中文')).toBeNull()
+  })
+
+  it('offers the translation control, asking to add when there are none', () => {
+    renderForm('/menu/new')
+
+    expect(translateButton().textContent).toContain('Add translations')
+    expect(translateButton().getAttribute('data-translations')).toBe('0')
+  })
+
+  it('opens the same dialog the option editor uses', async () => {
+    const { user } = renderForm('/menu/new')
+    await openTranslations(user)
+
+    expect(screen.getByTestId('translation-title').textContent).toBe('Translate this item')
     expect(screen.getByText(/Translations are optional/)).not.toBeNull()
+    expect(screen.getByLabelText('Bahasa Melayu')).toBe(malay())
+    expect(screen.getByLabelText('中文')).toBe(chinese())
+  })
+
+  it('does not repeat the English name inside the dialog', async () => {
+    const { user } = renderForm('/menu/new')
+    await user.type(english(), 'Fried Rice')
+    await openTranslations(user)
+
+    // The name field is directly behind the dialog; a second copy of it would be noise, and
+    // a second editable copy would be two controls over one fact.
+    expect(screen.queryByTestId('translation-source')).toBeNull()
+  })
+
+  it('names the item in the dialog title once it has a name', async () => {
+    const { user } = renderForm('/menu/new')
+    await user.type(english(), 'Fried Rice')
+    await openTranslations(user)
+
+    expect(screen.getByTestId('translation-title').textContent).toBe('Translate Fried Rice')
   })
 
   it('saves all three when an admin fills all three in', async () => {
     const { user } = renderForm('/menu/new')
 
     await user.type(english(), 'Fried Rice')
+    await openTranslations(user)
     await user.type(malay(), 'Nasi Goreng')
     await user.type(chinese(), '炒饭')
+    await user.click(screen.getByTestId('translation-save'))
+
     await user.type(screen.getByLabelText(/Price/), '8.00')
     await user.type(screen.getByTestId('cost'), '3.00')
     await user.click(screen.getByRole('button', { name: 'Create item' }))
 
     expect(savedInput(createMenuItem).name).toBe('Fried Rice')
     expect(savedInput(createMenuItem).names).toEqual({ ms: 'Nasi Goreng', zh: '炒饭' })
+  })
+
+  it('saves Malay alone', async () => {
+    const { user } = renderForm('/menu/new')
+
+    await user.type(english(), 'Fried Rice')
+    await openTranslations(user)
+    await user.type(malay(), 'Nasi Goreng')
+    await user.click(screen.getByTestId('translation-save'))
+
+    await user.type(screen.getByLabelText(/Price/), '8.00')
+    await user.type(screen.getByTestId('cost'), '3.00')
+    await user.click(screen.getByRole('button', { name: 'Create item' }))
+
+    expect(savedInput(createMenuItem).names).toEqual({ ms: 'Nasi Goreng' })
+  })
+
+  it('saves Chinese alone', async () => {
+    const { user } = renderForm('/menu/new')
+
+    await user.type(english(), 'Fried Rice')
+    await openTranslations(user)
+    await user.type(chinese(), '炒饭')
+    await user.click(screen.getByTestId('translation-save'))
+
+    await user.type(screen.getByLabelText(/Price/), '8.00')
+    await user.type(screen.getByTestId('cost'), '3.00')
+    await user.click(screen.getByRole('button', { name: 'Create item' }))
+
+    expect(savedInput(createMenuItem).names).toEqual({ zh: '炒饭' })
   })
 
   it('saves an item with no translations at all, exactly as before', async () => {
@@ -173,7 +257,10 @@ describe('the form takes a name in each language', () => {
   it('refuses to save without an English name, whatever else was typed', async () => {
     const { user } = renderForm('/menu/new')
 
+    await openTranslations(user)
     await user.type(malay(), 'Nasi Goreng')
+    await user.click(screen.getByTestId('translation-save'))
+
     await user.type(screen.getByLabelText(/Price/), '8.00')
     await user.type(screen.getByTestId('cost'), '3.00')
     await user.click(screen.getByRole('button', { name: 'Create item' }))
@@ -186,7 +273,25 @@ describe('the form takes a name in each language', () => {
     const { user } = renderForm('/menu/new')
 
     await user.type(english(), 'Teh Tarik')
+    await openTranslations(user)
     await user.type(malay(), '   ')
+    await user.click(screen.getByTestId('translation-save'))
+
+    await user.type(screen.getByLabelText(/Price/), '2.50')
+    await user.type(screen.getByTestId('cost'), '0.80')
+    await user.click(screen.getByRole('button', { name: 'Create item' }))
+
+    expect(savedInput(createMenuItem).names).toEqual({})
+  })
+
+  it('discards what was typed when the dialog is cancelled', async () => {
+    const { user } = renderForm('/menu/new')
+
+    await user.type(english(), 'Teh Tarik')
+    await openTranslations(user)
+    await user.type(malay(), 'Teh Tarik Panas')
+    await user.click(screen.getByTestId('translation-cancel'))
+
     await user.type(screen.getByLabelText(/Price/), '2.50')
     await user.type(screen.getByTestId('cost'), '0.80')
     await user.click(screen.getByRole('button', { name: 'Create item' }))
@@ -196,27 +301,37 @@ describe('the form takes a name in each language', () => {
 })
 
 describe('editing an item that already exists', () => {
-  it('loads the English name into the English field', () => {
+  it('loads the English name into the name field', () => {
     renderForm('/menu/item-teh/edit')
 
     expect(english().value).toBe('Teh Tarik')
-    expect(malay().value).toBe('')
-    expect(chinese().value).toBe('')
+    expect(translateButton().textContent).toContain('Add translations')
+    expect(translateButton().getAttribute('data-translations')).toBe('0')
   })
 
-  it('loads every translation it already has', () => {
+  it('says how many translations an item already has, without being opened', () => {
     renderForm('/menu/item-fried-rice/edit')
 
-    expect(english().value).toBe('Fried Rice')
+    expect(translateButton().textContent).toContain('Edit translations')
+    expect(translateButton().textContent).toContain('2')
+    expect(translateButton().getAttribute('data-translations')).toBe('2')
+  })
+
+  it('loads every translation it already has', async () => {
+    const { user } = renderForm('/menu/item-fried-rice/edit')
+    await openTranslations(user)
+
     expect(malay().value).toBe('Nasi Goreng')
     expect(chinese().value).toBe('炒饭')
   })
 
   it('does not erase Chinese when only Malay is edited', async () => {
     const { user } = renderForm('/menu/item-fried-rice/edit')
+    await openTranslations(user)
 
     await user.clear(malay())
     await user.type(malay(), 'Nasi Goreng Special')
+    await user.click(screen.getByTestId('translation-save'))
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
     expect(updateMenuItem.mock.calls.at(-1)?.[1].names).toEqual({
@@ -227,9 +342,11 @@ describe('editing an item that already exists', () => {
 
   it('does not erase Malay when only Chinese is edited', async () => {
     const { user } = renderForm('/menu/item-fried-rice/edit')
+    await openTranslations(user)
 
     await user.clear(chinese())
     await user.type(chinese(), '特制炒饭')
+    await user.click(screen.getByTestId('translation-save'))
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
     expect(updateMenuItem.mock.calls.at(-1)?.[1].names).toEqual({
@@ -238,14 +355,38 @@ describe('editing an item that already exists', () => {
     })
   })
 
-  it('clears a translation the admin deliberately emptied', async () => {
-    // The map is written whole, so removing a name removes it from the document too.
+  it('clears the Malay name the admin deliberately emptied', async () => {
+    // The map is written whole, so removing a name removes it from the document too — and
+    // the till falls back to English for it, which the unit tests pin.
     const { user } = renderForm('/menu/item-fried-rice/edit')
+    await openTranslations(user)
 
     await user.clear(malay())
+    await user.click(screen.getByTestId('translation-save'))
     await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
     expect(updateMenuItem.mock.calls.at(-1)?.[1].names).toEqual({ zh: '炒饭' })
+  })
+
+  it('clears the Chinese name the admin deliberately emptied', async () => {
+    const { user } = renderForm('/menu/item-fried-rice/edit')
+    await openTranslations(user)
+
+    await user.clear(chinese())
+    await user.click(screen.getByTestId('translation-save'))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(updateMenuItem.mock.calls.at(-1)?.[1].names).toEqual({ ms: 'Nasi Goreng' })
+  })
+
+  it('leaves the count on the button up to date after an edit', async () => {
+    const { user } = renderForm('/menu/item-fried-rice/edit')
+    await openTranslations(user)
+
+    await user.clear(malay())
+    await user.click(screen.getByTestId('translation-save'))
+
+    expect(translateButton().getAttribute('data-translations')).toBe('1')
   })
 
   it('never sends English inside the translations', async () => {
@@ -256,6 +397,16 @@ describe('editing an item that already exists', () => {
     const input = updateMenuItem.mock.calls.at(-1)?.[1] as Record<string, unknown>
     expect(input.name).toBe('Fried Rice')
     expect(Object.keys(input.names as object)).toEqual(['ms', 'zh'])
+  })
+
+  it('saves an item that was only ever named in English, untouched', async () => {
+    const { user } = renderForm('/menu/item-teh/edit')
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    const input = updateMenuItem.mock.calls.at(-1)?.[1] as Record<string, unknown>
+    expect(input.name).toBe('Teh Tarik')
+    expect(input.names).toEqual({})
   })
 })
 

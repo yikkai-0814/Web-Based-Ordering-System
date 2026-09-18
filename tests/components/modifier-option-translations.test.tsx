@@ -96,9 +96,9 @@ const renderForm = () =>
 /** The rows in the option table, in the order the group lists them. */
 const rows = () => screen.getAllByTestId('option-row')
 const translateButtonIn = (row: HTMLElement) => within(row).getByTestId('option-translate')
-const malayField = () => screen.getByTestId('option-name-ms') as HTMLInputElement
-const chineseField = () => screen.getByTestId('option-name-zh') as HTMLInputElement
-const saveDialog = () => screen.getByTestId('translate-option-save')
+const malayField = () => screen.getByTestId('translation-ms') as HTMLInputElement
+const chineseField = () => screen.getByTestId('translation-zh') as HTMLInputElement
+const saveDialog = () => screen.getByTestId('translation-save')
 
 /** The options as the last group save described them. */
 const savedOptions = () => {
@@ -162,7 +162,7 @@ describe('the translation dialog', () => {
     const { user } = renderForm()
     await user.click(translateButtonIn(rows()[0]!))
 
-    expect(screen.getByTestId('translate-option-title').textContent).toBe('Translate Fried Egg')
+    expect(screen.getByTestId('translation-title').textContent).toBe('Translate Fried Egg')
     expect(screen.getByText(/Translations are optional/)).not.toBeNull()
   })
 
@@ -170,7 +170,7 @@ describe('the translation dialog', () => {
     const { user } = renderForm()
     await user.click(translateButtonIn(rows()[0]!))
 
-    const english = screen.getByTestId('option-name-en') as HTMLInputElement
+    const english = screen.getByTestId('translation-source') as HTMLInputElement
     expect(english.value).toBe('Fried Egg')
     expect(english.readOnly).toBe(true)
   })
@@ -203,7 +203,7 @@ describe('the translation dialog', () => {
     const { user } = renderForm()
     await user.click(translateButtonIn(rows()[1]!))
     await user.type(malayField(), 'Ayam Tambahan')
-    await user.click(screen.getByTestId('translate-option-cancel'))
+    await user.click(screen.getByTestId('translation-cancel'))
     await user.click(screen.getByTestId('modifier-save-group'))
 
     expect(savedOptions()[1]?.names).toEqual({})

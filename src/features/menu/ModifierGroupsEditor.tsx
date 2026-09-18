@@ -2,7 +2,7 @@ import { message, type Message } from '@/features/i18n/messages'
 import type { TranslationKey } from '@/features/i18n/translations/en'
 import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState } from 'react'
-import { AlertCircle, Languages, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, Plus, Trash2 } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -32,12 +32,11 @@ import {
   type SelectionMode,
 } from '@/features/menu/modifiers'
 import { modifierCostKey } from '@/features/menu/modifier-cost'
-import { OptionTranslationDialog } from '@/features/menu/OptionTranslationDialog'
+import { NameTranslationsDialog, TranslationsButton } from '@/features/menu/NameTranslations'
 import {
+  MODIFIER_OPTION_NAME_MAX as OPTION_NAME_MAX,
   optionTranslationsOf,
-  translationCount,
   validateOptionNames,
-  type OptionNameTranslations,
 } from '@/features/menu/option-names'
 import { useModifierGroups } from '@/features/menu/useModifierGroups'
 import { useModifierOptionCosts } from '@/features/menu/useModifierOptionCosts'
@@ -687,8 +686,9 @@ export function GroupForm({
                   can see which of a long list still need doing without opening each one. It is
                   `aria-hidden` and the count is said in the button's own label instead, since
                   an aria-label replaces everything inside the button for a screen reader. */}
-              <TranslateOptionButton
-                name={option.name}
+              <TranslationsButton
+                testId="option-translate"
+                subject={option.name.trim() || t('common.option')}
                 names={option.names}
                 onOpen={() => setTranslating(index)}
               />
@@ -749,10 +749,15 @@ export function GroupForm({
             would otherwise mean thirty portals waiting to be used. Keyed by the option's id
             so switching between two options remounts it with the right draft. */}
         {translating !== null && options[translating] && (
-          <OptionTranslationDialog
+          <NameTranslationsDialog
             key={options[translating].id}
-            name={options[translating].name}
+            subject={options[translating].name.trim() || t('common.option')}
+            /* The option row's Name input is a truncated cell in a four-column grid, so the
+               dialog shows the English name back as a reference. The menu item form, whose
+               name field is full width, passes nothing here. */
+            sourceName={options[translating].name}
             names={options[translating].names}
+            max={OPTION_NAME_MAX}
             onCancel={() => setTranslating(null)}
             onSave={(names) => {
               update(translating, { names })
@@ -774,58 +779,6 @@ export function GroupForm({
         </Button>
       </div>
     </div>
-  )
-}
-
-/**
- * The Actions-area control that opens one option's translations, and says how many it has.
- *
- * Split out so the count and the label it produces are worked out in one place: the badge is
- * decoration, and the same number has to reach a screen reader through the button's label,
- * because an `aria-label` replaces a button's contents rather than adding to them.
- */
-function TranslateOptionButton({
-  name,
-  names,
-  onOpen,
-}: {
-  name: string
-  names: OptionNameTranslations
-  onOpen: () => void
-}) {
-  const { t } = useTranslation()
-  const count = translationCount(names)
-  const subject = name.trim() || t('common.option')
-
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="shrink-0 px-2"
-      data-testid="option-translate"
-      data-translations={count}
-      aria-label={
-        count === 0
-          ? t('modifierAdmin.translateOption', { name: subject })
-          : t(
-              count === 1
-                ? 'modifierAdmin.translateOptionCountOne'
-                : 'modifierAdmin.translateOptionCountOther',
-              { name: subject, count },
-            )
-      }
-      onClick={onOpen}
-    >
-      <Languages aria-hidden="true" />
-      {/* Inline beside the icon rather than a corner badge: it sizes itself, so it cannot
-          overlap the glyph or be clipped by the button's own box. Hidden from assistive
-          technology because the label above already says the same number in words. */}
-      {count > 0 && (
-        <span aria-hidden="true" className="text-xs tabular-nums">
-          {count}
-        </span>
-      )}
-    </Button>
   )
 }
 

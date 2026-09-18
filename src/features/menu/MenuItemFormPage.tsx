@@ -11,13 +11,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { LANGUAGE_LABELS, LANGUAGES, type Language } from '@/features/i18n/languages'
 import {
   emptyItemNames,
   storedTranslations,
   validateItemNames,
   type LocalizedName,
 } from '@/features/menu/item-names'
+import { withTranslations } from '@/features/menu/localized-names'
+import { NameTranslationsDialog, TranslationsButton } from '@/features/menu/NameTranslations'
 import { createMenuItem, updateMenuItem } from '@/features/menu/menu-api'
 import { ModifierGroupsEditor } from '@/features/menu/ModifierGroupsEditor'
 import { EMPTY_CUSTOMISATION, type DraftCustomisation } from '@/features/menu/item-customisation'
@@ -104,10 +105,6 @@ export function MenuItemFormPage() {
  * anything pointing at it — a label, a test, a browser's own autofill memory — still finds
  * the field that holds the item's canonical name.
  */
-function nameFieldId(language: Language): string {
-  return language === 'en' ? 'name' : `name-${language}`
-}
-
 function MenuItemForm({
   existing,
   existingCost,
@@ -154,6 +151,9 @@ function MenuItemForm({
    * had, so this state is simply never read there.
    */
   const [customisation, setCustomisation] = useState<DraftCustomisation>(EMPTY_CUSTOMISATION)
+
+  /** Whether the translations dialog is open. One item, so a boolean rather than an index. */
+  const [translating, setTranslating] = useState(false)
 
   const [error, setError] = useState<Message | null>(null)
   /**
@@ -286,48 +286,68 @@ function MenuItemForm({
               </Alert>
             )}
 
-            {/* One field per language, in the same stack and the same input styling as
-                every other field on this form — the form is not redesigned, it has grown a
-                row. The labels are the endonyms the language menu already uses, so the field
-                a Malay speaker wants is labelled in Malay whatever the interface is set to.
+            {/* The name, as one ordinary field again.
 
-                Rendered from LANGUAGES rather than written out three times, so a fourth
-                language becomes a field here the day it is added to the list. */}
-            <fieldset className="grid gap-2">
-              <legend className="mb-2 text-sm font-medium">{t('menu.nameHeading')}</legend>
-              {LANGUAGES.map((language) => (
-                <div key={language} className="grid gap-2">
-                  <Label htmlFor={nameFieldId(language)}>
-                    {LANGUAGE_LABELS[language]}
-                    {language === 'en' && (
-                      /* Decoration for the eye only: `required` on the input is what a
-                         screen reader is actually told. */
-                      <span aria-hidden="true" className="text-destructive">
-                        {' '}
-                        *
-                      </span>
-                    )}
-                  </Label>
-                  <Input
-                    id={nameFieldId(language)}
-                    data-testid={nameFieldId(language)}
-                    className="h-touch text-base"
-                    value={names[language]}
-                    maxLength={ITEM_NAME_MAX}
-                    required={language === 'en'}
-                    aria-describedby="names-hint"
-                    onChange={(event) =>
-                      setNames((current) => ({ ...current, [language]: event.target.value }))
-                    }
-                    disabled={pending}
-                    autoFocus={language === 'en'}
-                  />
-                </div>
-              ))}
-              <p id="names-hint" className="text-xs text-muted-foreground">
-                {t('menu.namesHint')}
-              </p>
-            </fieldset>
+                This was three stacked inputs, one per language, permanently on display. Most
+                items are never translated, so for most vendors that was two empty fields
+                between the name and everything else on an already long form — and it was a
+                second interaction to learn, because the option editor beside it asks for the
+                same thing through a dialog. Now both ask the same way: English here, the rest
+                behind the language button, which says how many translations exist without
+                being opened. */}
+            <div className="grid gap-2">
+              <Label htmlFor="name">
+                {t('common.name')}
+                {/* Decoration for the eye only: `required` on the input is what a screen
+                    reader is actually told. */}
+                <span aria-hidden="true" className="text-destructive">
+                  {' '}
+                  *
+                </span>
+              </Label>
+              <Input
+                id="name"
+                data-testid="name"
+                className="h-touch text-base"
+                value={names.en}
+                maxLength={ITEM_NAME_MAX}
+                required
+                onChange={(event) =>
+                  setNames((current) => ({ ...current, en: event.target.value }))
+                }
+                disabled={pending}
+                autoFocus
+              />
+              {/* Labelled rather than icon-only, unlike the option row: this button stands
+                  alone under a field rather than in a row of controls, and a bare glyph there
+                  would be a guess. Same component, same icon, same count. */}
+              <div className="flex">
+                <TranslationsButton
+                  testId="item-translate"
+                  showLabel
+                  subject={names.en.trim() || t('menu.untitledItem')}
+                  names={storedTranslations(names)}
+                  onOpen={() => setTranslating(true)}
+                />
+              </div>
+            </div>
+
+            {translating && (
+              <NameTranslationsDialog
+                subject={names.en.trim() || t('menu.untitledItem')}
+                names={storedTranslations(names)}
+                max={ITEM_NAME_MAX}
+                onCancel={() => setTranslating(false)}
+                onSave={(next) => {
+                  // Folded back into the full set, so a language the dialog returned nothing
+                  // for is cleared rather than left at its old value — otherwise emptying a
+                  // translation would silently fail. Every language is still submitted
+                  // together, which is what stops editing Malay from wiping Chinese.
+                  setNames((current) => withTranslations(current, next))
+                  setTranslating(false)
+                }}
+              />
+            )}
 
             <div className="grid gap-2">
               <Label htmlFor="description">{t('menu.descriptionOptional')}</Label>

@@ -293,6 +293,7 @@ export const zh: Dictionary = {
   'void.authoriseAndVoid': '授权并作废',
 
   // ---- Menu management -----------------------------------------------------------
+  'menu.untitledItem': '这个项目',
   'menu.newItem': '新增项目',
   'menu.editItem': '编辑项目',
   'menu.categories': '分类',
@@ -318,8 +319,6 @@ export const zh: Dictionary = {
   'menu.writeRefusedShort': '该更改被拒绝。你的账号可能没有权限。',
   'menu.createCategoryFirst': '请先创建分类',
   'menu.newCategory': '新分类',
-  'menu.nameHeading': '菜单项目名称',
-  'menu.namesHint': '翻译为选填。留空的语言将显示英文名称。',
   'menu.descriptionOptional': '描述（选填）',
   'menu.blurbAdmin': '这家咖啡馆出售的全部商品。更改会立即出现在每一台收银机上。',
   'menu.blurbStaff': '这家咖啡馆出售的全部商品。如需更改，请联系管理员。',
@@ -407,10 +406,6 @@ export const zh: Dictionary = {
   'modifierAdmin.badgeShared': '共用',
   'modifierAdmin.badgeItemOnly': '仅此商品',
   'modifierAdmin.createNew': '新建选项组',
-  'modifierAdmin.translateOption': '翻译{{name}}',
-  'modifierAdmin.translateOptionCountOne': '翻译{{name}}，已有 {{count}} 个翻译',
-  'modifierAdmin.translateOptionCountOther': '翻译{{name}}，已有 {{count}} 个翻译',
-  'modifierAdmin.namesHint': '翻译为选填。留空的语言将显示英文名称。',
   'modifierAdmin.draftHint': '保存商品时一并创建。',
   'modifierAdmin.sharedElsewhereOne': '另有 1 个商品在使用。删除后该商品也将失去此选项组。',
   'modifierAdmin.sharedElsewhereOther':
@@ -569,6 +564,15 @@ export const zh: Dictionary = {
   'load.paymentsDate': '无法加载此日期的付款记录。',
   'load.orders': '无法加载订单。你可能没有权限，或处于离线状态。',
   'load.voidsDate': '无法加载此日期的作废销售。',
+
+  // ---- The shared translation control, read by src/features/menu/NameTranslations.tsx ----
+  'translations.title': '翻译{{name}}',
+  'translations.hint': '翻译为选填。留空的语言将显示英文名称。',
+  'translations.add': '添加翻译',
+  'translations.edit': '编辑翻译',
+  'translations.open': '翻译{{name}}',
+  'translations.openCountOne': '翻译{{name}}，已有 {{count}} 个翻译',
+  'translations.openCountOther': '翻译{{name}}，已有 {{count}} 个翻译',
 
   // ---- Validation, from the pure modules and the write APIs ----------------------
   'validation.managerEmailRequired': '请输入经理的电子邮件地址。',

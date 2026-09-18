@@ -28,6 +28,7 @@ import {
   localizedNameOf,
   parseNames,
   storedTranslations,
+  translationCount,
   validateNames,
   type LocalizedName,
   type NamedSubject,
@@ -103,7 +104,5 @@ export function optionTranslationsOf(option: NamedModifierOption): OptionNameTra
   return option.names ? storedTranslations(option.names) : {}
 }
 
-/** How many languages this option has actually been translated into. Drives the row's badge. */
-export function translationCount(names: OptionNameTranslations): number {
-  return Object.keys(storedTranslations(names)).length
-}
+/** Defined in localized-names.ts, which both translatable things share. Re-exported here. */
+export { translationCount }

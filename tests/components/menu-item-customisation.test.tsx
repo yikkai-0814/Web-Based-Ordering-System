@@ -93,7 +93,7 @@ type User = ReturnType<typeof renderNewItemForm>['user']
 
 /** Fills the fields that are compulsory, so a submit reaches the API. */
 async function fillDetails(user: User) {
-  await user.type(screen.getByLabelText(/English/), 'Milk Tea')
+  await user.type(screen.getByTestId('name'), 'Milk Tea')
   await user.type(screen.getByTestId('cost'), '1.20')
   await user.type(screen.getByLabelText(/Price/), '4.50')
 }
