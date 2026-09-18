@@ -130,7 +130,11 @@ export function StaffListPage() {
         <p className="text-muted-foreground">{t('staff.empty')}</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <Table>
+          {/* The status and action columns ask for 7rem and 16rem; below about 36rem the
+              browser takes that back from them and the buttons start wrapping into each
+              other. Declaring the width the columns need lets this container scroll instead,
+              which is the same answer Orders and Reports already give. */}
+          <Table className="min-w-xl">
             <TableHeader>
               <TableRow>
                 <TableHead>{t('common.name')}</TableHead>

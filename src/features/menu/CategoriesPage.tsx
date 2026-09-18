@@ -175,7 +175,10 @@ export function CategoriesPage() {
         <p className="text-muted-foreground">{t('menu.noCategories')}</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <Table>
+          {/* Five columns, of which four are fixed and total 38rem before the name has any
+              room at all. Scrolling this container is honest; squeezing four editable
+              controls into a phone's width is not. */}
+          <Table className="min-w-3xl">
             <TableHeader>
               <TableRow>
                 <TableHead>{t('common.name')}</TableHead>

@@ -58,7 +58,17 @@ function AlertDialogContent({
         data-slot="alert-dialog-content"
         data-size={size}
         className={cn(
-          "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // `w-[calc(100%-2rem)]` rather than `w-full`: the content is centred with a
+          // translate, so at `w-full` it met both edges of a narrow phone with no gutter at
+          // all. `max-h` + `overflow-y-auto` are the more important pair — this is `fixed`,
+          // so a dialog taller than the window had no way to scroll and its footer buttons
+          // simply could not be reached. That is a VIEWPORT HEIGHT problem, which a landscape
+          // phone and a short laptop window hit long before a narrow one does. Both live here
+          // rather than on each dialog so every one of them is reachable by construction; a
+          // dialog that wants a different ceiling still overrides it (see
+          // ItemCustomisationDialog), because `cn` resolves the conflict in the caller's
+          // favour.
+          "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-xl bg-popover p-4 text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}

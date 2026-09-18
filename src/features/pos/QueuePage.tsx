@@ -222,7 +222,12 @@ export function QueuePage() {
           />
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-3">
+        /* Three abreast only from `lg`. At `md` the sidebar is already showing, so a
+           768px tablet left each of these columns about 160px — enough to make the
+           timer, the status and the two actions wrap onto four lines apiece. Stacked,
+           the same cards get the full width and a kitchen can read them at a glance,
+           which matters more on this screen than keeping a board shape. */
+        <div className="grid gap-4 lg:grid-cols-3">
           {columns.map((column) => (
             <QueueColumnPanel
               key={column.status}

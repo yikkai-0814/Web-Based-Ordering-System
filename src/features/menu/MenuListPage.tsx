@@ -26,6 +26,7 @@ import { useMenuItems } from '@/features/menu/useMenuItems'
 import { useAuth } from '@/features/auth/useAuth'
 import { StatusBadge } from '@/features/pos/StatusBadge'
 import { formatMoney } from '@/lib/money'
+import { cn } from '@/lib/utils'
 
 interface Group {
   category: Category | null
@@ -141,7 +142,11 @@ export function MenuListPage() {
               <p className="text-sm text-muted-foreground">{t('menu.noItemsInCategory')}</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border">
-                <Table>
+                {/* Only an admin sees the cost and action columns, and only then do the fixed
+                    columns total 39rem and need more room than a phone has. A staff account
+                    sees item, price and status, which fit — so the width is asked for when it
+                    is actually needed rather than forcing a scrollbar on the read-only view. */}
+                <Table className={cn(isAdmin && 'min-w-3xl')}>
                   <TableHeader>
                     <TableRow>
                       <TableHead>{t('menu.columnItem')}</TableHead>
