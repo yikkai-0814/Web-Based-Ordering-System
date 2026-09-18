@@ -362,6 +362,8 @@ export const ms: Dictionary = {
   'menu.createCategoryFirstBlurb':
     'Setiap item tergolong dalam sesuatu kategori, jadi sekurang-kurangnya satu perlu ada sebelum anda boleh menambah item.',
   'menu.goToCategories': 'Pergi ke kategori',
+  'menu.sortOrderIncrease': 'Tambah susunan',
+  'menu.sortOrderDecrease': 'Kurangkan susunan',
   'menu.sortOrderHint':
     'Nombor yang lebih rendah muncul dahulu. Item dengan nombor yang sama disusun mengikut nama.',
   'menu.hiddenSuffix': ' (tersembunyi)',

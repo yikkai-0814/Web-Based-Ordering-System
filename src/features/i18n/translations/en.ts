@@ -366,6 +366,8 @@ export const en = {
   'menu.createCategoryFirstBlurb':
     'Every item belongs to a category, so there needs to be at least one before you can add items.',
   'menu.goToCategories': 'Go to categories',
+  'menu.sortOrderIncrease': 'Increase sort order',
+  'menu.sortOrderDecrease': 'Decrease sort order',
   'menu.sortOrderHint':
     'Lower numbers appear first. Items with the same number are sorted by name.',
   'menu.hiddenSuffix': ' (hidden)',

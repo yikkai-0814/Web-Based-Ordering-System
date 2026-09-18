@@ -347,6 +347,8 @@ export const zh: Dictionary = {
   'menu.deleteCategoryEmpty': '此分类没有项目。删除后无法撤销。',
   'menu.createCategoryFirstBlurb': '每个项目都属于某个分类，因此必须先有至少一个分类才能添加项目。',
   'menu.goToCategories': '前往分类',
+  'menu.sortOrderIncrease': '增加排序值',
+  'menu.sortOrderDecrease': '减少排序值',
   'menu.sortOrderHint': '数字越小越靠前。数字相同的项目按名称排序。',
   'menu.hiddenSuffix': '（已隐藏）',
   'menu.priceCurrency': '价格（{{currency}}）',
