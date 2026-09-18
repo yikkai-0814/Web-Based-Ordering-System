@@ -68,9 +68,12 @@ export const ms: Dictionary = {
 
   // ---- Signing in ----------------------------------------------------------------
   'login.title': 'Log masuk',
-  'login.blurb': 'Akaun dicipta oleh pentadbir. Tiada pendaftaran sendiri.',
+  'login.blurb': 'Perlukan akaun? Hubungi pentadbir anda.',
+  'login.subtitle': 'Selamat kembali! Sila masukkan maklumat anda.',
   'login.email': 'E-mel',
   'login.password': 'Kata laluan',
+  'login.showPassword': 'Tunjukkan kata laluan',
+  'login.hidePassword': 'Sembunyikan kata laluan',
   'login.submit': 'Log masuk',
   'login.submitting': 'Sedang log masuk…',
 

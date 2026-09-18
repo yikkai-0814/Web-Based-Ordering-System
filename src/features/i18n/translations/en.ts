@@ -74,9 +74,12 @@ export const en = {
 
   // ---- Signing in ----------------------------------------------------------------
   'login.title': 'Sign in',
-  'login.blurb': 'Accounts are created by an administrator. There is no self-service sign-up.',
+  'login.blurb': 'Need an account? Contact your administrator.',
+  'login.subtitle': 'Welcome back! Please enter your details.',
   'login.email': 'Email',
   'login.password': 'Password',
+  'login.showPassword': 'Show password',
+  'login.hidePassword': 'Hide password',
   'login.submit': 'Sign in',
   'login.submitting': 'Signing in…',
 

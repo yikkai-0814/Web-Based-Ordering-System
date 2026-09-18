@@ -68,9 +68,12 @@ export const zh: Dictionary = {
 
   // ---- Signing in ----------------------------------------------------------------
   'login.title': '登录',
-  'login.blurb': '账号由管理员创建，不提供自助注册。',
+  'login.blurb': '需要账号？请联系你的管理员。',
+  'login.subtitle': '欢迎回来！请输入你的信息。',
   'login.email': '电子邮件',
   'login.password': '密码',
+  'login.showPassword': '显示密码',
+  'login.hidePassword': '隐藏密码',
   'login.submit': '登录',
   'login.submitting': '正在登录…',
 
