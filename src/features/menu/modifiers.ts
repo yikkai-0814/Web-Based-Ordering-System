@@ -1,4 +1,11 @@
+import type { Language } from '@/features/i18n/languages'
 import { message, type Message } from '@/features/i18n/messages'
+import type { LocalizedName } from '@/features/menu/localized-names'
+import {
+  getLocalizedModifierOptionName,
+  MODIFIER_OPTION_NAME_MAX,
+  parseOptionNames,
+} from '@/features/menu/option-names'
 import type { Timestamp } from 'firebase/firestore'
 
 /**
@@ -32,7 +39,8 @@ export function isSelectionMode(value: unknown): value is SelectionMode {
 }
 
 export const MODIFIER_GROUP_NAME_MAX = 60
-export const MODIFIER_OPTION_NAME_MAX = 60
+/** Defined in option-names.ts, beside the rest of what an option's name is. Re-exported here. */
+export { MODIFIER_OPTION_NAME_MAX }
 /** Mirrored in firestore.rules. A group is a list on a screen, not a catalogue. */
 export const MAX_OPTIONS_PER_GROUP = 30
 /** Mirrored in firestore.rules, on the order line's snapshot. */
@@ -41,7 +49,20 @@ export const MAX_MODIFIERS_PER_LINE = 30
 /** One choice within a group. `priceAdjustment` is whole sen and may be 0. */
 export interface ModifierOption {
   id: string
+  /**
+   * The English name, and the option's canonical one: what an admin edits, what the editor
+   * sorts and searches by, and what every other language falls back to. Unchanged since the
+   * first version of this collection, which is why options written then are still valid.
+   */
   name: string
+  /**
+   * The same name in each language the interface speaks, English included.
+   *
+   * Derived at parse time rather than stored whole: only the translations live in the
+   * document, and English is filled in from `name`. Read it through
+   * `getLocalizedModifierOptionName`, never directly, so the fallback rule stays in one place.
+   */
+  names: LocalizedName
   priceAdjustment: number
   active: boolean
 }
@@ -96,7 +117,7 @@ export interface SelectedModifier {
 
 function parseOption(value: unknown): ModifierOption | null {
   if (typeof value !== 'object' || value === null) return null
-  const { id, name, priceAdjustment, active } = value as Record<string, unknown>
+  const { id, name, names, priceAdjustment, active } = value as Record<string, unknown>
 
   if (typeof id !== 'string' || id === '') return null
   if (typeof name !== 'string' || name.trim() === '') return null
@@ -107,6 +128,13 @@ function parseOption(value: unknown): ModifierOption | null {
   return {
     id,
     name,
+    // Absent on every option written before translations existed, and on every option whose
+    // admin has not typed one. Both resolve to English, which the document already says, so
+    // nothing has to be migrated for an old option to keep working. This is also where a
+    // `names` map that should never have been written — holding `en`, an unknown language, or
+    // a value that is not a string — is discarded: the options array is inside the group
+    // document, and Firestore rules cannot iterate a list to refuse it at the door.
+    names: parseOptionNames(name, names),
     priceAdjustment,
     // Absent is treated as available: the field was introduced with the group, so this only
     // matters for a document written by hand.
@@ -303,13 +331,28 @@ export function unitPriceWith(basePrice: number, selections: readonly SelectedMo
   return Math.max(0, basePrice + modifiersTotal(selections))
 }
 
-/** The snapshot to record for one chosen option. */
-export function selectionOf(group: ModifierGroup, option: ModifierOption): SelectedModifier {
+/**
+ * The snapshot to record for one chosen option.
+ *
+ * `language` is required rather than defaulted because this is the moment the option's name
+ * stops being configuration and becomes history: what is captured here is what the counter
+ * had on screen when the customer agreed to it, and a default would silently record a name
+ * nobody was shown. From here nothing resolves it against the group again — an admin
+ * retranslating "Fried Egg" tomorrow does not touch an order placed today.
+ *
+ * `groupName` is deliberately still the group's own word: group names are not translated, and
+ * this records what was on screen.
+ */
+export function selectionOf(
+  group: ModifierGroup,
+  option: ModifierOption,
+  language: Language,
+): SelectedModifier {
   return {
     groupId: group.id,
     groupName: group.name,
     optionId: option.id,
-    optionName: option.name,
+    optionName: getLocalizedModifierOptionName(option, language),
     priceAdjustment: option.priceAdjustment,
   }
 }

@@ -427,6 +427,11 @@ export const ms: Dictionary = {
   'modifierAdmin.badgeShared': 'Dikongsi',
   'modifierAdmin.badgeItemOnly': 'Item ini sahaja',
   'modifierAdmin.createNew': 'Cipta kumpulan baharu',
+  'modifierAdmin.translateOption': 'Terjemah {{name}}',
+  'modifierAdmin.translateOptionCountOne': 'Terjemah {{name}}, {{count}} terjemahan',
+  'modifierAdmin.translateOptionCountOther': 'Terjemah {{name}}, {{count}} terjemahan',
+  'modifierAdmin.namesHint':
+    'Terjemahan adalah pilihan. Bahasa yang dibiarkan kosong akan memaparkan nama Inggeris.',
   'modifierAdmin.draftHint': 'Dicipta apabila anda menyimpan item.',
   'modifierAdmin.sharedElsewhereOne':
     'Turut digunakan oleh 1 item lain. Memadamnya akan membuangnya daripada item itu juga.',
@@ -607,6 +612,7 @@ export const ms: Dictionary = {
   'validation.categoryNameRequired': 'Masukkan nama kategori.',
   'validation.loginRequired': 'Masukkan e-mel dan kata laluan anda.',
   'validation.itemNameTooLong': 'Nama paling panjang {{max}} aksara.',
+  'validation.optionNameTooLong': 'Nama pilihan paling panjang {{max}} aksara.',
   'validation.descriptionTooLong': 'Penerangan paling panjang {{max}} aksara.',
   'validation.costRequired': 'Kos diperlukan.',
   'validation.optionPrefix': '{{option}}: {{reason}}',

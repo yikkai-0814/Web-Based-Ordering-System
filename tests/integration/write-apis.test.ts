@@ -15,7 +15,8 @@ import { createMenuItem, deleteMenuItem, updateMenuItem } from '@/features/menu/
 import { getLocalizedMenuItemName } from '@/features/menu/item-names'
 import { parseMenuItem } from '@/features/menu/types'
 import type { Cart } from '@/features/pos/cart'
-import { lineKeyOf } from '@/features/menu/modifiers'
+import { lineKeyOf, parseModifierGroup, selectionOf } from '@/features/menu/modifiers'
+import { getLocalizedModifierOptionName } from '@/features/menu/option-names'
 import {
   createModifierGroupForItem,
   deleteModifierGroup,
@@ -1249,8 +1250,15 @@ describe('menu item customisation, through the app’s own writes', () => {
     sortOrder: 0,
     active: true,
     options: [
-      { id: 'veg-normal', name: 'Normal', priceAdjustment: 0, cost: 0, active: true },
-      { id: 'veg-none', name: 'No vegetables', priceAdjustment: 0, cost: 0, active: true },
+      { id: 'veg-normal', name: 'Normal', names: {}, priceAdjustment: 0, cost: 0, active: true },
+      {
+        id: 'veg-none',
+        name: 'No vegetables',
+        names: {},
+        priceAdjustment: 0,
+        cost: 0,
+        active: true,
+      },
     ],
   }
 
@@ -1262,7 +1270,14 @@ describe('menu item customisation, through the app’s own writes', () => {
     sortOrder: 1,
     active: true,
     options: [
-      { id: 'add-chicken', name: 'Extra chicken', priceAdjustment: 300, cost: 0, active: true },
+      {
+        id: 'add-chicken',
+        name: 'Extra chicken',
+        names: {},
+        priceAdjustment: 300,
+        cost: 0,
+        active: true,
+      },
     ],
   }
 
@@ -1390,7 +1405,14 @@ describe('menu item customisation, through the app’s own writes', () => {
     await updateModifierGroup(groupId, {
       ...ADDONS,
       options: [
-        { id: 'add-chicken', name: 'Extra beef', priceAdjustment: 900, cost: 0, active: false },
+        {
+          id: 'add-chicken',
+          name: 'Extra beef',
+          names: {},
+          priceAdjustment: 900,
+          cost: 0,
+          active: false,
+        },
       ],
     })
     await deleteModifierGroup(groupId)
@@ -1406,6 +1428,118 @@ describe('menu item customisation, through the app’s own writes', () => {
     expect(modifiers[0]?.optionName).toBe('Extra chicken')
     expect(modifiers[0]?.priceAdjustment).toBe(300)
     expect(after[0]?.unitPrice).toBe(1100)
+  })
+
+  /**
+   * Translating a modifier option, all the way through: what is written, what is read back,
+   * and what an order that was rung up in between keeps saying afterwards.
+   *
+   * The unit tests pin the rule and the component tests pin the two screens. This is the only
+   * place that proves the document the write API actually produces is the document the parse
+   * actually reads — the seam where a field name could drift and every other suite stay green.
+   */
+  it('stores an option’s translations, reads them back, and never touches a past order', async () => {
+    await signInAs(admin)
+    const groupId = await createModifierGroupForItem(CHICKEN, {
+      ...ADDONS,
+      options: [
+        {
+          id: 'add-egg',
+          name: 'Fried Egg',
+          names: { ms: 'Telur Goreng', zh: '煎蛋' },
+          priceAdjustment: 100,
+          cost: 40,
+          active: true,
+        },
+      ],
+    })
+
+    // What landed: English in `name`, the translations in `names`, and English NOT in there.
+    const stored = await getDoc(doc(db, 'modifierGroups', groupId))
+    const option = (stored.get('options') as Record<string, unknown>[])[0]!
+    expect(option.name).toBe('Fried Egg')
+    expect(option.names).toEqual({ ms: 'Telur Goreng', zh: '煎蛋' })
+    expect(Object.keys(option.names as object)).not.toContain('en')
+
+    // What the app reads back out of it.
+    const group = parseModifierGroup(groupId, stored.data()!)!
+    expect(getLocalizedModifierOptionName(group.options[0]!, 'ms')).toBe('Telur Goreng')
+    expect(getLocalizedModifierOptionName(group.options[0]!, 'zh')).toBe('煎蛋')
+    expect(getLocalizedModifierOptionName(group.options[0]!, 'en')).toBe('Fried Egg')
+
+    // A till speaking Malay rings one up. The name is snapshotted, exactly as the item's is.
+    await signInAs(staff)
+    const chosen = selectionOf(group, group.options[0]!, 'ms')
+    expect(chosen.optionName).toBe('Telur Goreng')
+    const created = await createOrder({
+      cart: configured([chosen]),
+      placement: TAKEAWAY,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+
+    // The admin retranslates the option afterwards, and reprices nothing.
+    await signInAs(admin)
+    await updateModifierGroup(groupId, {
+      ...ADDONS,
+      options: [
+        {
+          id: 'add-egg',
+          name: 'Fried Egg',
+          names: { ms: 'Telur Mata', zh: '煎蛋' },
+          priceAdjustment: 100,
+          cost: 40,
+          active: true,
+        },
+      ],
+    })
+
+    const retranslated = parseModifierGroup(
+      groupId,
+      (await getDoc(doc(db, 'modifierGroups', groupId))).data()!,
+    )!
+    expect(getLocalizedModifierOptionName(retranslated.options[0]!, 'ms')).toBe('Telur Mata')
+
+    // And the order still says what the customer was told, because it never dereferences it.
+    const lines = (await getDoc(doc(db, 'orders', created.id))).get('lines') as Record<
+      string,
+      unknown
+    >[]
+    const modifiers = lines[0]?.modifiers as Record<string, unknown>[]
+    expect(modifiers[0]?.optionName).toBe('Telur Goreng')
+    expect(modifiers[0]?.optionId).toBe('add-egg')
+    expect(modifiers[0]?.priceAdjustment).toBe(100)
+
+    // Costing is identified by the ids, so translating moved none of it.
+    const cost = await getDoc(doc(db, 'modifierOptionCosts', modifierCostKey(groupId, 'add-egg')))
+    expect(cost.get('cost')).toBe(40)
+  })
+
+  it('leaves an option written before translations existed exactly as it was', async () => {
+    // The document shape this collection has always had, written straight past the API.
+    await seed(async (context) => {
+      await setDoc(doc(context.firestore(), 'modifierGroups', 'legacy-group'), {
+        name: 'Add-ons',
+        selection: 'multiple',
+        required: false,
+        sortOrder: 1,
+        active: true,
+        options: [{ id: 'add-egg', name: 'Fried Egg', priceAdjustment: 100, active: true }],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    })
+
+    await signInAs(staff)
+    const stored = await getDoc(doc(db, 'modifierGroups', 'legacy-group'))
+    // Nothing migrated it: there is still no `names` field in the document at all.
+    expect((stored.get('options') as Record<string, unknown>[])[0]).not.toHaveProperty('names')
+
+    // And it is still nameable on every till, in every language.
+    const group = parseModifierGroup('legacy-group', stored.data()!)!
+    for (const language of ['en', 'ms', 'zh'] as const) {
+      expect(getLocalizedModifierOptionName(group.options[0]!, language)).toBe('Fried Egg')
+    }
   })
 
   /**
@@ -1494,7 +1628,16 @@ describe('menu item customisation, through the app’s own writes', () => {
         required: true,
         sortOrder: 0,
         active: true,
-        options: [{ id: 'veg-normal', name: 'Normal', priceAdjustment: 0, cost: 0, active: true }],
+        options: [
+          {
+            id: 'veg-normal',
+            name: 'Normal',
+            names: {},
+            priceAdjustment: 0,
+            cost: 0,
+            active: true,
+          },
+        ],
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -1567,8 +1710,15 @@ describe('modifier option costs, through the app’s own writes', () => {
     sortOrder: 0,
     active: true,
     options: [
-      { id: 'opt-egg', name: 'Egg', priceAdjustment: 150, cost: 40, active: true },
-      { id: 'opt-duck', name: 'Smoked Duck', priceAdjustment: 400, cost: 200, active: true },
+      { id: 'opt-egg', name: 'Egg', names: {}, priceAdjustment: 150, cost: 40, active: true },
+      {
+        id: 'opt-duck',
+        name: 'Smoked Duck',
+        names: {},
+        priceAdjustment: 400,
+        cost: 200,
+        active: true,
+      },
     ],
     ...over,
   })
@@ -1669,7 +1819,9 @@ describe('modifier option costs, through the app’s own writes', () => {
     // because the API cannot produce it any more — every write it makes now journals.
     const groupId = await createModifierGroupForItem(RICE, {
       ...ADDON(),
-      options: [{ id: 'opt-egg', name: 'Egg', priceAdjustment: 150, cost: 40, active: true }],
+      options: [
+        { id: 'opt-egg', name: 'Egg', names: {}, priceAdjustment: 150, cost: 40, active: true },
+      ],
     })
     const recordedAt = (await costOf(groupId, 'opt-egg')).get('updatedAt')
     await seed(async (context) => {
@@ -1681,7 +1833,9 @@ describe('modifier option costs, through the app’s own writes', () => {
 
     await updateModifierGroup(groupId, {
       ...ADDON(),
-      options: [{ id: 'opt-egg', name: 'Egg', priceAdjustment: 150, cost: 90, active: true }],
+      options: [
+        { id: 'opt-egg', name: 'Egg', names: {}, priceAdjustment: 150, cost: 90, active: true },
+      ],
     })
 
     const journal = await journalFor(groupId)
@@ -1712,7 +1866,9 @@ describe('modifier option costs, through the app’s own writes', () => {
     await expect(
       updateModifierGroup(groupId, {
         ...ADDON(),
-        options: [{ id: 'opt-egg', name: 'Egg', priceAdjustment: 150, cost: 0, active: true }],
+        options: [
+          { id: 'opt-egg', name: 'Egg', names: {}, priceAdjustment: 150, cost: 0, active: true },
+        ],
       }),
     ).rejects.toThrow()
 

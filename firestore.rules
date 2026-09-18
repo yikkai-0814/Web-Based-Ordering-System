@@ -217,11 +217,24 @@ service cloud.firestore {
     // is separate from menuItems because it is a list per item, not a field.
     //
     // **What these rules cannot check.** The options are a list, and rules cannot iterate
-    // one, so an option's name and price adjustment are validated by the form and by
-    // parseModifierGroup rather than here — the same limitation, and the same honest
-    // statement of it, as the `lines` array on an order. What is checked is every scalar and
-    // the list's own type and size, so a group cannot be created without a real item, a
-    // legal selection mode, or with an unbounded number of options.
+    // one, so an option's name, its translations and its price adjustment are validated by
+    // the form and by parseModifierGroup rather than here — the same limitation, and the same
+    // honest statement of it, as the `lines` array on an order. What is checked is every
+    // scalar and the list's own type and size, so a group cannot be created without a real
+    // item, a legal selection mode, or with an unbounded number of options.
+    //
+    // **That is why an option's `names` map is not validated the way a menu item's is.** A
+    // menu item's translations sit at the top level of their document, so validItemNames()
+    // can refuse an unknown language key, an `en` that would name the item twice, or a value
+    // that is not a string. An option's translations sit inside this list, out of reach. The
+    // defence is therefore the same one its `name` has always had, at both ends: the editor
+    // sends only `ms` and `zh` through validateOptionNames/storedTranslations, and
+    // parseOptionNames discards on read anything that should not have been written — an
+    // unknown key, a non-string, an `en` — so a map written by hand from devtools cannot put
+    // a wrong or blank name on a till. Widening this to unroll thirty options is deliberately
+    // not done: it would validate translations while their own `name` beside them stayed
+    // unchecked, for an expression count on every group write that these rules should not
+    // carry. Closing it properly needs a server-side write, exactly as the order total does.
     //
     // Note what does NOT depend on any of this: a past order. Every chosen option is copied
     // onto the order line at the time of sale, so an admin editing, deactivating or deleting

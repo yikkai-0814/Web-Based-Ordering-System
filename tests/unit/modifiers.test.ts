@@ -1,6 +1,7 @@
 import { say } from '../say'
 import { describe, expect, it } from 'vitest'
 
+import type { Language } from '@/features/i18n/languages'
 import {
   describeModifiers,
   lineKeyOf,
@@ -35,8 +36,20 @@ function group(over: Partial<ModifierGroup> = {}): ModifierGroup {
     sortOrder: 0,
     active: true,
     options: [
-      { id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: true },
-      { id: 'veg-none', name: 'No vegetables', priceAdjustment: 0, active: true },
+      {
+        id: 'veg-normal',
+        name: 'Normal',
+        names: { en: 'Normal', ms: '', zh: '' },
+        priceAdjustment: 0,
+        active: true,
+      },
+      {
+        id: 'veg-none',
+        name: 'No vegetables',
+        names: { en: 'No vegetables', ms: '', zh: '' },
+        priceAdjustment: 0,
+        active: true,
+      },
     ],
     createdAt: null,
     updatedAt: null,
@@ -51,8 +64,20 @@ const ADDONS = group({
   required: false,
   sortOrder: 2,
   options: [
-    { id: 'add-egg', name: 'Extra egg', priceAdjustment: 100, active: true },
-    { id: 'add-chicken', name: 'Extra chicken', priceAdjustment: 300, active: true },
+    {
+      id: 'add-egg',
+      name: 'Extra egg',
+      names: { en: 'Extra egg', ms: '', zh: '' },
+      priceAdjustment: 100,
+      active: true,
+    },
+    {
+      id: 'add-chicken',
+      name: 'Extra chicken',
+      names: { en: 'Extra chicken', ms: '', zh: '' },
+      priceAdjustment: 300,
+      active: true,
+    },
   ],
 })
 
@@ -62,10 +87,18 @@ const ADDONS = group({
  */
 const item = (id: string, modifierGroupIds: string[] = []) => ({ id, modifierGroupIds })
 
-const pick = (from: ModifierGroup, optionId: string): SelectedModifier => {
+/**
+ * One chosen option, snapshotted as the till would. The language is explicit because that is
+ * what `selectionOf` captures: the name the counter was showing, not the option's id.
+ */
+const pick = (
+  from: ModifierGroup,
+  optionId: string,
+  language: Language = 'en',
+): SelectedModifier => {
   const option = from.options.find((candidate) => candidate.id === optionId)
   if (!option) throw new Error(`no option ${optionId}`)
-  return selectionOf(from, option)
+  return selectionOf(from, option, language)
 }
 
 describe('what an item offers', () => {
@@ -174,14 +207,34 @@ describe('what an item offers', () => {
   it('hides a deactivated option, and the whole group once none are left', () => {
     const partly = group({
       options: [
-        { id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: true },
-        { id: 'veg-none', name: 'No vegetables', priceAdjustment: 0, active: false },
+        {
+          id: 'veg-normal',
+          name: 'Normal',
+          names: { en: 'Normal', ms: '', zh: '' },
+          priceAdjustment: 0,
+          active: true,
+        },
+        {
+          id: 'veg-none',
+          name: 'No vegetables',
+          names: { en: 'No vegetables', ms: '', zh: '' },
+          priceAdjustment: 0,
+          active: false,
+        },
       ],
     })
     expect(offeredGroupsFor([partly], item('chicken-chop-rice'))[0]?.options).toHaveLength(1)
 
     const emptied = group({
-      options: [{ id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: false }],
+      options: [
+        {
+          id: 'veg-normal',
+          name: 'Normal',
+          names: { en: 'Normal', ms: '', zh: '' },
+          priceAdjustment: 0,
+          active: false,
+        },
+      ],
     })
     expect(offeredGroupsFor([emptied], item('chicken-chop-rice'))).toEqual([])
   })
@@ -263,7 +316,15 @@ describe('pricing stays in whole sen', () => {
 
   it('never goes below zero', () => {
     const discount = group({
-      options: [{ id: 'off', name: 'Off', priceAdjustment: -5000, active: true }],
+      options: [
+        {
+          id: 'off',
+          name: 'Off',
+          names: { en: 'Off', ms: '', zh: '' },
+          priceAdjustment: -5000,
+          active: true,
+        },
+      ],
     })
     expect(unitPriceWith(800, [pick(discount, 'off')])).toBe(0)
   })
@@ -360,7 +421,15 @@ describe('parseModifierGroup refuses what it cannot render', () => {
     required: true,
     sortOrder: 0,
     active: true,
-    options: [{ id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: true }],
+    options: [
+      {
+        id: 'veg-normal',
+        name: 'Normal',
+        names: { en: 'Normal', ms: '', zh: '' },
+        priceAdjustment: 0,
+        active: true,
+      },
+    ],
   }
 
   it('parses a well-formed group', () => {
@@ -374,13 +443,24 @@ describe('parseModifierGroup refuses what it cannot render', () => {
   })
 
   it('refuses a fractional price adjustment rather than rounding it', () => {
-    const options = [{ id: 'o', name: 'O', priceAdjustment: 1.5, active: true }]
+    const options = [
+      {
+        id: 'o',
+        name: 'O',
+        names: { en: 'O', ms: '', zh: '' },
+        priceAdjustment: 1.5,
+        active: true,
+      },
+    ]
     expect(parseModifierGroup('g1', { ...raw, options })).toBeNull()
   })
 
   it('refuses the whole group when one option is malformed', () => {
     // A partial prompt is a wrong prompt: the missing choice is one the customer may want.
-    const options = [raw.options[0], { id: '', name: '', priceAdjustment: 0, active: true }]
+    const options = [
+      raw.options[0],
+      { id: '', name: '', names: { en: '', ms: '', zh: '' }, priceAdjustment: 0, active: true },
+    ]
     expect(parseModifierGroup('g1', { ...raw, options })).toBeNull()
   })
 

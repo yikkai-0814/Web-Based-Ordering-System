@@ -5,10 +5,12 @@
  * unrecognised one falls back to, is decided here and tested without a browser. The provider
  * does nothing but wire this to `localStorage` and `document`.
  *
- * **Only predefined interface text is translated.** Menu items, modifier groups and options,
- * staff names and every other thing a vendor typed are stored and shown exactly as entered —
- * see the note on `TranslationKey` in messages.ts for how that is enforced rather than merely
- * intended.
+ * **The dictionaries hold no vendor text.** Modifier group names, staff names and every other
+ * thing a vendor typed are stored and shown exactly as entered — see the note on
+ * `TranslationKey` in messages.ts for how that is enforced rather than merely intended. A menu
+ * item's name and a modifier option's name are the exception, and not really one: the vendor
+ * supplies those translations themselves and they live in the item's and the option's own
+ * data, never here. See src/features/menu/localized-names.ts.
  */
 
 /** Per-device, because a language is about the screen in front of somebody, not their account. */

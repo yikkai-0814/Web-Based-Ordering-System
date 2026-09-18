@@ -96,12 +96,19 @@ to `<html lang>` so assistive technology agrees with the screen. English is the 
 the language every string is authored in, so an unrecognised or missing preference falls back
 to it rather than showing a gap.
 
-**Only predefined interface text is translated.** Everything a vendor typed — menu items,
-categories, modifier groups and options, staff names, table numbers, void reasons — is stored
-and shown exactly as entered, in every language. That is enforced by the types rather than by
-convention: `t` accepts a `TranslationKey` or a `Message`, never an arbitrary string, so
-`t(item.name)` does not compile. Where vendor text appears inside a sentence it is passed as a
-`{{param}}` and inserted verbatim.
+**The dictionaries never hold anything a vendor typed.** Categories, modifier group names,
+staff names, table numbers and void reasons are stored and shown exactly as entered, in every
+language. That is enforced by the types rather than by convention: `t` accepts a
+`TranslationKey` or a `Message`, never an arbitrary string, so `t(item.name)` does not compile.
+Where vendor text appears inside a sentence it is passed as a `{{param}}` and inserted verbatim.
+
+**Two things the vendor can translate themselves: a menu item's name and a modifier option's
+name.** Those are still the vendor's own words rather than interface text, so they live in the
+item's and the option's own data — English in `name`, the other languages in an optional
+`names` map holding only translations. A name with no translation for the current language
+falls back to English rather than showing a gap, and the name the till was showing is
+snapshotted onto the order, so retranslating either one never changes a sale already made.
+See `src/features/menu/localized-names.ts`, which is the single place that rule lives.
 
 CSV exports keep stable English column headers on purpose, so a spreadsheet or a script
 reading them does not change shape when somebody switches the interface language.

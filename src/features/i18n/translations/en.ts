@@ -9,6 +9,8 @@
  * **Nothing a vendor typed belongs in here.** Menu items, modifier groups and options, staff
  * names, table numbers and void reasons are shown exactly as entered. Where one appears
  * inside a sentence it is passed as a `{{param}}` and inserted verbatim — see messages.ts.
+ * Menu item and modifier option names that the vendor has translated themselves are no
+ * exception to that: they live in the item's and the option's own data, never in here.
  *
  * Keys are namespaced by where they are read, not by what they say, so the strings for one
  * screen stay together when a screen changes. The sections below are that grouping: a new
@@ -427,6 +429,11 @@ export const en = {
   'modifierAdmin.badgeShared': 'Shared',
   'modifierAdmin.badgeItemOnly': 'This item only',
   'modifierAdmin.createNew': 'Create a new group',
+  'modifierAdmin.translateOption': 'Translate {{name}}',
+  'modifierAdmin.translateOptionCountOne': 'Translate {{name}}, {{count}} translation',
+  'modifierAdmin.translateOptionCountOther': 'Translate {{name}}, {{count}} translations',
+  'modifierAdmin.namesHint':
+    'Translations are optional. A language left blank shows the English name.',
   'modifierAdmin.draftHint': 'Created when you save the item.',
   'modifierAdmin.sharedElsewhereOne':
     'Also used by 1 other item. Deleting it removes it from that item too.',
@@ -603,6 +610,7 @@ export const en = {
   'validation.categoryNameRequired': 'Enter a category name.',
   'validation.loginRequired': 'Enter your email and password.',
   'validation.itemNameTooLong': 'Names can be at most {{max}} characters.',
+  'validation.optionNameTooLong': 'Option names can be at most {{max}} characters.',
   'validation.descriptionTooLong': 'Descriptions can be at most {{max}} characters.',
   'validation.costRequired': 'Cost is required.',
   'validation.optionPrefix': '{{option}}: {{reason}}',

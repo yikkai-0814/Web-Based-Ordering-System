@@ -20,6 +20,7 @@ import {
 
 import { openingEntryFrom, type OpeningEntry } from '@/features/menu/cost-history'
 import type { ItemNameTranslations } from '@/features/menu/item-names'
+import type { OptionNameTranslations } from '@/features/menu/option-names'
 import { modifierCostKey, parseModifierOptionCost } from '@/features/menu/modifier-cost'
 import type { SelectionMode } from '@/features/menu/modifiers'
 import { auth, db } from '@/lib/firebase'
@@ -405,7 +406,18 @@ export async function setCategoryActive(id: string, active: boolean): Promise<vo
 export interface ModifierOptionInput {
   /** Stable within the group. Snapshotted onto order lines, so it must not be reused. */
   id: string
+  /** The English name. Required, and what every other language falls back to. */
   name: string
+  /**
+   * The translations of that name, trimmed, with blank ones left out — see
+   * `storedTranslations`. Required on the way in, though it may be empty: a caller that
+   * could omit it would silently wipe an option's translations on the next save.
+   *
+   * Written as a whole map, exactly as a menu item's is, so the admin's two fields are the
+   * whole truth about what this option is called; clearing one clears it in the document too.
+   * English is NOT in here — it is `name` — so the option is never named twice.
+   */
+  names: OptionNameTranslations
   /** Whole sen. May be 0 ("No egg") and is never a float. */
   priceAdjustment: number
   /**
@@ -464,6 +476,10 @@ function modifierGroupFields(input: ModifierGroupInput) {
     options: input.options.map((option) => ({
       id: option.id,
       name: option.name.trim(),
+      // Only the translations: English is `name`, and storing it twice would be two records
+      // of one fact, free to disagree. An option nobody has translated writes `{}` and reads
+      // back exactly like one written before this feature existed. See option-names.ts.
+      names: option.names,
       priceAdjustment: option.priceAdjustment,
       active: option.active,
     })),

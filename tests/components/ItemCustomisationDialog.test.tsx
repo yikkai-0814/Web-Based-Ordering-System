@@ -40,8 +40,20 @@ function group(over: Partial<ModifierGroup> = {}): ModifierGroup {
     sortOrder: 0,
     active: true,
     options: [
-      { id: 'veg-normal', name: 'Normal', priceAdjustment: 0, active: true },
-      { id: 'veg-none', name: 'No vegetables', priceAdjustment: 0, active: true },
+      {
+        id: 'veg-normal',
+        name: 'Normal',
+        names: { en: 'Normal', ms: '', zh: '' },
+        priceAdjustment: 0,
+        active: true,
+      },
+      {
+        id: 'veg-none',
+        name: 'No vegetables',
+        names: { en: 'No vegetables', ms: '', zh: '' },
+        priceAdjustment: 0,
+        active: true,
+      },
     ],
     createdAt: null,
     updatedAt: null,
@@ -55,8 +67,20 @@ const ADDONS = group({
   selection: 'multiple',
   required: false,
   options: [
-    { id: 'add-egg', name: 'Extra egg', priceAdjustment: 100, active: true },
-    { id: 'add-chicken', name: 'Extra chicken', priceAdjustment: 300, active: true },
+    {
+      id: 'add-egg',
+      name: 'Extra egg',
+      names: { en: 'Extra egg', ms: '', zh: '' },
+      priceAdjustment: 100,
+      active: true,
+    },
+    {
+      id: 'add-chicken',
+      name: 'Extra chicken',
+      names: { en: 'Extra chicken', ms: '', zh: '' },
+      priceAdjustment: 300,
+      active: true,
+    },
   ],
 })
 

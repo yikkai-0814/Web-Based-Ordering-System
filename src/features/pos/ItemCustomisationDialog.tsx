@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 
 import { useTranslation } from '@/features/i18n/useTranslation'
 import { getLocalizedMenuItemName } from '@/features/menu/item-names'
+import { getLocalizedModifierOptionName } from '@/features/menu/option-names'
 
 import {
   AlertDialog,
@@ -22,6 +23,7 @@ import {
   type SelectedModifier,
 } from '@/features/menu/modifiers'
 import type { MenuItem } from '@/features/menu/types'
+import type { Language } from '@/features/i18n/languages'
 import type { TranslationKey } from '@/features/i18n/translations/en'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -49,7 +51,9 @@ export function ItemCustomisationDialog({
   onCancel: () => void
 }) {
   const { t, language } = useTranslation()
-  const [chosen, setChosen] = useState<SelectedModifier[]>(() => defaultSelections(groups))
+  const [chosen, setChosen] = useState<SelectedModifier[]>(() =>
+    defaultSelections(groups, language),
+  )
 
   const validation = useMemo(() => validateSelections(groups, chosen), [groups, chosen])
   const unitPrice = unitPriceWith(item.price, chosen)
@@ -63,10 +67,10 @@ export function ItemCustomisationDialog({
         // One answer per group: choosing replaces whatever was chosen before. Tapping the
         // chosen one again clears it, which is the only way to skip an optional group.
         const withoutGroup = withoutOption.filter((entry) => entry.groupId !== group.id)
-        return already ? withoutGroup : [...withoutGroup, selectionOf(group, option)]
+        return already ? withoutGroup : [...withoutGroup, selectionOf(group, option, language)]
       }
 
-      return already ? withoutOption : [...current, selectionOf(group, option)]
+      return already ? withoutOption : [...current, selectionOf(group, option, language)]
     })
   }
 
@@ -113,7 +117,13 @@ export function ItemCustomisationDialog({
                           : 'bg-card text-foreground',
                       )}
                     >
-                      <span className="min-w-0 truncate">{option.name}</span>
+                      {/* The name this option has on a till set to this language, falling
+                          back to its English name when it has no translation — never a gap.
+                          This is also exactly the string `selectionOf` snapshots onto the
+                          order, so the receipt says what the counter said. */}
+                      <span className="min-w-0 truncate">
+                        {getLocalizedModifierOptionName(option, language)}
+                      </span>
                       {option.priceAdjustment !== 0 && (
                         <span className="shrink-0 tabular-nums text-muted-foreground">
                           {option.priceAdjustment > 0 ? '+' : '−'}
@@ -168,12 +178,17 @@ export function ItemCustomisationDialog({
  * Nothing else is pre-chosen: an optional group left alone means the customer did not ask
  * for anything, and a multi-select cannot have a sensible default.
  */
-function defaultSelections(groups: readonly ModifierGroup[]): SelectedModifier[] {
+function defaultSelections(
+  groups: readonly ModifierGroup[],
+  language: Language,
+): SelectedModifier[] {
   const defaults: SelectedModifier[] = []
   for (const group of groups) {
     const first = group.options[0]
     if (group.required && group.selection === 'single' && first) {
-      defaults.push(selectionOf(group, first))
+      // Snapshotted in the till's language like every other choice: a pre-selected default
+      // is still what the customer was shown and agreed to.
+      defaults.push(selectionOf(group, first, language))
     }
   }
   return defaults

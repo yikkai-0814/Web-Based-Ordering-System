@@ -48,8 +48,20 @@ const group = (): ModifierGroup => ({
   sortOrder: 0,
   active: true,
   options: [
-    { id: 'opt-egg', name: 'Egg', priceAdjustment: 150, active: true },
-    { id: 'opt-duck', name: 'Smoked Duck', priceAdjustment: 400, active: true },
+    {
+      id: 'opt-egg',
+      name: 'Egg',
+      names: { en: 'Egg', ms: '', zh: '' },
+      priceAdjustment: 150,
+      active: true,
+    },
+    {
+      id: 'opt-duck',
+      name: 'Smoked Duck',
+      names: { en: 'Smoked Duck', ms: '', zh: '' },
+      priceAdjustment: 400,
+      active: true,
+    },
   ],
   createdAt: null,
   updatedAt: null,
@@ -135,7 +147,10 @@ describe('the option table lays each field out in its own column', () => {
   it('declares the same column template on the header and on every row', () => {
     renderForm()
 
-    const template = 'sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_8.75rem]'
+    // The Actions track grew from 8.75rem when translating joined the two controls already
+    // in it. The table is no wider for it: the name column is `minmax(0,1fr)` and absorbs
+    // the difference, which is the whole reason these tracks are declared rather than auto.
+    const template = 'sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_10.75rem]'
     expect(screen.getByTestId('option-columns').className).toContain(template)
     for (const row of rows()) {
       expect(row.className).toContain('grid')

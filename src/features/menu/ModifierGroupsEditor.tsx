@@ -2,7 +2,7 @@ import { message, type Message } from '@/features/i18n/messages'
 import type { TranslationKey } from '@/features/i18n/translations/en'
 import { useTranslation } from '@/features/i18n/useTranslation'
 import { useState } from 'react'
-import { AlertCircle, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, Languages, Plus, Trash2 } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,13 @@ import {
   type SelectionMode,
 } from '@/features/menu/modifiers'
 import { modifierCostKey } from '@/features/menu/modifier-cost'
+import { OptionTranslationDialog } from '@/features/menu/OptionTranslationDialog'
+import {
+  optionTranslationsOf,
+  translationCount,
+  validateOptionNames,
+  type OptionNameTranslations,
+} from '@/features/menu/option-names'
 import { useModifierGroups } from '@/features/menu/useModifierGroups'
 import { useModifierOptionCosts } from '@/features/menu/useModifierOptionCosts'
 import { CURRENCY_PREFIX, parsePriceInput, toPriceInputValue } from '@/lib/money'
@@ -329,8 +336,13 @@ ${t('modifierAdmin.detachNotDelete')}`)
  * size is `auto`, and this is the standard way to override it.
  *
  * Below `sm` the row falls back to two columns and stacks; see the row itself.
+ *
+ * The Actions track grew from 8.75rem to 10.75rem when translating was added to it, so the
+ * three controls sit on one line rather than wrapping under the name. The TABLE is no wider
+ * for it — the card's width is unchanged and the name column, being `minmax(0,1fr)`, absorbs
+ * the difference while staying well clear of the collapse this grid was written to prevent.
  */
-const OPTION_COLUMNS = 'sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_8.75rem]'
+const OPTION_COLUMNS = 'sm:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_10.75rem]'
 
 interface DraftOption extends ModifierOptionInput {
   /** The price as typed, in ringgit, converted to sen only on save. */
@@ -338,6 +350,14 @@ interface DraftOption extends ModifierOptionInput {
   /** The cost as typed, in ringgit, converted to sen only on save. A separate figure. */
   costText: string
 }
+
+/**
+ * Which option's translations are open, by index.
+ *
+ * An index rather than the option itself, so the dialog always reads the draft as it stands —
+ * including an English name the admin is still typing in the row behind it.
+ */
+type TranslatingIndex = number | null
 
 /**
  * One group being created or edited.
@@ -387,6 +407,9 @@ export function GroupForm({
           return {
             id: option.id,
             name: option.name,
+            // Only the translations. English stays in `name`, which is what the row's own
+            // Name input edits — see OptionTranslationDialog for why it is not edited twice.
+            names: optionTranslationsOf(option),
             priceAdjustment: option.priceAdjustment,
             cost,
             active: option.active,
@@ -401,6 +424,7 @@ export function GroupForm({
       : [blankOption()],
   )
   const [error, setError] = useState<Message | null>(null)
+  const [translating, setTranslating] = useState<TranslatingIndex>(null)
 
   function update(index: number, patch: Partial<DraftOption>) {
     setOptions((current) =>
@@ -415,8 +439,14 @@ export function GroupForm({
     }
     const parsed: ModifierOptionInput[] = []
     for (const option of options) {
-      if (option.name.trim() === '') {
-        setError(message('modifierAdmin.needOptionName'))
+      /* English required, translations optional, every one of them trimmed and
+         length-checked. The rule lives in option-names.ts so this form and the till agree
+         about what an option's name is — and it matters more here than it does for a menu
+         item, because options travel inside their group's document and Firestore rules
+         cannot iterate a list to check them at the door. */
+      const names = validateOptionNames(option.name, option.names)
+      if (!names.ok) {
+        setError(names.error)
         return
       }
       // Blank means "no change to the price", which is the common case — "Normal", "No egg".
@@ -456,7 +486,10 @@ export function GroupForm({
 
       parsed.push({
         id: option.id,
-        name: option.name.trim(),
+        name: names.name,
+        // Whitespace is not a translation: it is dropped here rather than stored, so an
+        // option falls back to English exactly as if nothing had been typed.
+        names: names.names,
         priceAdjustment: adjustment,
         cost: optionCost,
         active: option.active,
@@ -640,6 +673,25 @@ export function GroupForm({
               />
             </div>
             <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
+              {/* Translating, as an icon in the Actions area rather than two more columns.
+
+                  The row is Name · Adds · Cost · Actions on a card only just wide enough for
+                  it, and the grid tracks above exist because that row had already collapsed
+                  once. Permanent Malay and Chinese inputs would take the name column back
+                  down to a few pixels — and would be on screen for every option of every
+                  vendor who never translates anything. An icon button is `size="icon"`, the
+                  same footprint as the delete button beside it, so the Actions cell keeps the
+                  width it already had.
+
+                  The badge is the count of translations this option actually has, so an admin
+                  can see which of a long list still need doing without opening each one. It is
+                  `aria-hidden` and the count is said in the button's own label instead, since
+                  an aria-label replaces everything inside the button for a screen reader. */}
+              <TranslateOptionButton
+                name={option.name}
+                names={option.names}
+                onOpen={() => setTranslating(index)}
+              />
               {/* Both the indicator and the control, which is why it stays a Button and is
                   not replaced by a badge: its label has always been the current state and
                   clicking it flips that state. It is now drawn in the same two tones as the
@@ -692,6 +744,22 @@ export function GroupForm({
             {t('modifierAdmin.addOption')}
           </Button>
         )}
+
+        {/* One dialog for whichever option is open, not one mounted per row: thirty options
+            would otherwise mean thirty portals waiting to be used. Keyed by the option's id
+            so switching between two options remounts it with the right draft. */}
+        {translating !== null && options[translating] && (
+          <OptionTranslationDialog
+            key={options[translating].id}
+            name={options[translating].name}
+            names={options[translating].names}
+            onCancel={() => setTranslating(null)}
+            onSave={(names) => {
+              update(translating, { names })
+              setTranslating(null)
+            }}
+          />
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -710,6 +778,58 @@ export function GroupForm({
 }
 
 /**
+ * The Actions-area control that opens one option's translations, and says how many it has.
+ *
+ * Split out so the count and the label it produces are worked out in one place: the badge is
+ * decoration, and the same number has to reach a screen reader through the button's label,
+ * because an `aria-label` replaces a button's contents rather than adding to them.
+ */
+function TranslateOptionButton({
+  name,
+  names,
+  onOpen,
+}: {
+  name: string
+  names: OptionNameTranslations
+  onOpen: () => void
+}) {
+  const { t } = useTranslation()
+  const count = translationCount(names)
+  const subject = name.trim() || t('common.option')
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="shrink-0 px-2"
+      data-testid="option-translate"
+      data-translations={count}
+      aria-label={
+        count === 0
+          ? t('modifierAdmin.translateOption', { name: subject })
+          : t(
+              count === 1
+                ? 'modifierAdmin.translateOptionCountOne'
+                : 'modifierAdmin.translateOptionCountOther',
+              { name: subject, count },
+            )
+      }
+      onClick={onOpen}
+    >
+      <Languages aria-hidden="true" />
+      {/* Inline beside the icon rather than a corner badge: it sizes itself, so it cannot
+          overlap the glyph or be clipped by the button's own box. Hidden from assistive
+          technology because the label above already says the same number in words. */}
+      {count > 0 && (
+        <span aria-hidden="true" className="text-xs tabular-nums">
+          {count}
+        </span>
+      )}
+    </Button>
+  )
+}
+
+/**
  * A fresh option, with an id generated once.
  *
  * The id is stable for the life of the option and is snapshotted onto every order line that
@@ -720,6 +840,8 @@ function blankOption(): DraftOption {
   return {
     id: `opt-${Math.random().toString(36).slice(2, 10)}`,
     name: '',
+    // Untranslated until somebody says otherwise, which is the overwhelmingly common case.
+    names: {},
     priceAdjustment: 0,
     cost: 0,
     active: true,

@@ -407,6 +407,10 @@ export const zh: Dictionary = {
   'modifierAdmin.badgeShared': '共用',
   'modifierAdmin.badgeItemOnly': '仅此商品',
   'modifierAdmin.createNew': '新建选项组',
+  'modifierAdmin.translateOption': '翻译{{name}}',
+  'modifierAdmin.translateOptionCountOne': '翻译{{name}}，已有 {{count}} 个翻译',
+  'modifierAdmin.translateOptionCountOther': '翻译{{name}}，已有 {{count}} 个翻译',
+  'modifierAdmin.namesHint': '翻译为选填。留空的语言将显示英文名称。',
   'modifierAdmin.draftHint': '保存商品时一并创建。',
   'modifierAdmin.sharedElsewhereOne': '另有 1 个商品在使用。删除后该商品也将失去此选项组。',
   'modifierAdmin.sharedElsewhereOther':
@@ -575,6 +579,7 @@ export const zh: Dictionary = {
   'validation.categoryNameRequired': '请输入分类名称。',
   'validation.loginRequired': '请输入电子邮件和密码。',
   'validation.itemNameTooLong': '名称最多 {{max}} 个字符。',
+  'validation.optionNameTooLong': '选项名称最多 {{max}} 个字符。',
   'validation.descriptionTooLong': '描述最多 {{max}} 个字符。',
   'validation.costRequired': '必须填写成本。',
   'validation.optionPrefix': '{{option}}：{{reason}}',

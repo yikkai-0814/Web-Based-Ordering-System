@@ -231,6 +231,105 @@ describe('what the rules refuse even from an admin', () => {
   })
 })
 
+/**
+ * Translations on a modifier option, and exactly how far these rules reach.
+ *
+ * An option's `names` map sits inside the `options` LIST, and rules cannot iterate a list.
+ * So — precisely as with the `name` and `priceAdjustment` sitting beside it, neither of which
+ * has ever been checked here — the group document is validated around the option and the
+ * option's own contents are validated at both ends of the app: `validateOptionNames` on the
+ * way out, `parseOptionNames` on the way in.
+ *
+ * These tests pin that boundary honestly rather than implying a check that does not exist.
+ * What the rules DO still guarantee is the part that matters most for this feature: only an
+ * admin can write any of it, so a staff account cannot rename an option in any language.
+ */
+describe('modifier option translations', () => {
+  const translated = (over: Record<string, unknown> = {}) =>
+    group({
+      options: [
+        {
+          id: 'add-egg',
+          name: 'Fried Egg',
+          names: { ms: 'Telur Goreng', zh: '煎蛋' },
+          priceAdjustment: 100,
+          active: true,
+          ...over,
+        },
+      ],
+    })
+
+  it('lets an admin write an option carrying Malay and Chinese names', async () => {
+    await seed()
+    await assertSucceeds(setDoc(doc(adminDb(), 'modifierGroups', 'translated'), translated()))
+  })
+
+  it('lets an admin write an option with an empty names map, as the editor sends', async () => {
+    await seed()
+    await assertSucceeds(
+      setDoc(doc(adminDb(), 'modifierGroups', 'plain'), translated({ names: {} })),
+    )
+  })
+
+  it('still reads back for staff, who need the names to take an order', async () => {
+    await seed()
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'modifierGroups', 'translated'), translated())
+    })
+
+    const snapshot = await assertSucceeds(getDoc(doc(staffDb(), 'modifierGroups', 'translated')))
+    expect(snapshot.get('options')[0].names).toEqual({ ms: 'Telur Goreng', zh: '煎蛋' })
+  })
+
+  it('refuses a staff account adding a translation to an option', async () => {
+    await seed()
+    await assertFails(setDoc(doc(staffDb(), 'modifierGroups', 'translated'), translated()))
+  })
+
+  it('refuses a staff account changing a translation that already exists', async () => {
+    await seed()
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'modifierGroups', 'translated'), translated())
+    })
+
+    await assertFails(
+      updateDoc(doc(staffDb(), 'modifierGroups', 'translated'), {
+        options: [
+          {
+            id: 'add-egg',
+            name: 'Fried Egg',
+            names: { ms: 'Telur Mata' },
+            priceAdjustment: 100,
+            active: true,
+          },
+        ],
+      }),
+    )
+  })
+
+  it('refuses a `names` map on the GROUP, which is not a thing this feature added', async () => {
+    // Group names are not translated. An unknown top-level field is refused here because the
+    // group document's own key set IS something rules can check.
+    await seed()
+    await assertFails(
+      setDoc(doc(adminDb(), 'modifierGroups', 'bad'), group({ names: { ms: 'Tambahan' } })),
+    )
+  })
+
+  it('cannot refuse a bad names map INSIDE an option — which is why the parse discards it', async () => {
+    // Stated rather than hidden: rules cannot iterate `options`, so an `en` key, an unknown
+    // language and a non-string value all get past them. The guarantee that none of those
+    // reaches a till is parseOptionNames', and tests/unit/option-names.test.ts holds it.
+    await seed()
+    await assertSucceeds(
+      setDoc(
+        doc(adminDb(), 'modifierGroups', 'hand-written'),
+        translated({ names: { en: 'Something Else', fr: 'Œuf', ms: 7 } }),
+      ),
+    )
+  })
+})
+
 describe('the cost collection is untouched by any of this', () => {
   it('still refuses staff the item cost, which is the reason it is a separate collection', async () => {
     await seed()
