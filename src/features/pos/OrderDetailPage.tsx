@@ -228,14 +228,19 @@ export function OrderDetailPage() {
    * and gives it back — the till's session is never elevated, and `voidOrder` is the same
    * writer either way, so the two routes cannot produce differently shaped voids.
    *
-   * Both record the operator at the till as the initiator, so an admin's own void answers
-   * "who asked for this" with their own name rather than leaving it blank.
+   * Both record the same initiator a payment or a fulfilment step records — `payer`: the
+   * selected operator, or the signed-in account when nobody has been picked — so an admin's
+   * own void answers "who asked for this" with their own name rather than leaving it blank.
+   * An admin never has a selected operator (the picker is on the staff-only till), and this
+   * used to require one: the void quietly did nothing. The rules accept both forms.
+   *
+   * Never a silent return: the dialog reads a normal return as "voided" and closes.
    */
   async function handleVoid(reason: string, credentials: ManagerCredentials | null) {
-    if (!profile || !order || !operator) return
+    if (!profile || !order || !payer) throw new MessageError(message('order.voidFailed'))
     setError(null)
 
-    const initiatedBy = { staffId: operator.id, staffName: operator.name }
+    const initiatedBy = { staffId: payer.id, staffName: payer.name }
 
     try {
       if (credentials) {

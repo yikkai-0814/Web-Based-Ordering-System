@@ -128,7 +128,10 @@ export function OrdersListPage() {
           page reading as a pile of unrelated toolbars on a laptop screen. */}
       <div className="space-y-4 rounded-xl border bg-card p-4 shadow-xs">
         <BusinessDateBar businessDate={businessDate} onChange={showDate}>
-          <div className="grid min-w-0 flex-1 gap-1.5 sm:max-w-xs">
+          {/* Grows into the rest of the row, but never below 14rem: where the row cannot
+              spare that much beside the date, the search takes a row of its own instead of
+              shrinking to a field too narrow to type in. */}
+          <div className="grid min-w-0 flex-[1_1_14rem] gap-1.5 sm:max-w-xs">
             <Label htmlFor="order-search">{t('orders.search')}</Label>
             <div className="relative">
               <Search

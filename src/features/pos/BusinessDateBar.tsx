@@ -42,11 +42,13 @@ export function BusinessDateBar({
 
   return (
     <div className="flex flex-wrap items-end gap-x-3 gap-y-4">
-      <div className="grid gap-1.5">
+      <div className="grid max-w-full min-w-0 gap-1.5">
         <Label htmlFor="business-date">{t('date.businessDate')}</Label>
         {/* One bordered group rather than four loose controls: they answer a single question,
-            and on a narrow screen a row of separated buttons wraps into nonsense. */}
-        <div className="flex items-center gap-1 rounded-lg border bg-card p-1 shadow-xs">
+            and on a narrow screen a row of separated buttons wraps into nonsense. The group
+            itself may wrap, though — on the very narrowest phones "Today" drops to a second
+            line inside the same border rather than pushing the whole page sideways. */}
+        <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1 shadow-xs">
           <Button
             variant="ghost"
             size="icon"
@@ -65,7 +67,10 @@ export function BusinessDateBar({
                 data-testid="business-date"
                 data-value={businessDate}
                 aria-label={t('date.chooseAnother', { date: businessDate })}
-                className="min-w-40 justify-start gap-2 font-medium tabular-nums"
+                // The fixed minimum keeps the group from changing width as the date changes,
+                // but it is what made the group wider than a 320px phone; below `sm` the date
+                // is only as wide as it needs to be.
+                className="min-w-0 justify-start gap-2 font-medium tabular-nums sm:min-w-40"
               >
                 <CalendarDays aria-hidden="true" className="text-muted-foreground" />
                 {businessDate}

@@ -7,10 +7,24 @@
    Phase 1 does not ship a theme toggle, but the tokens are defined for both. */
 @custom-variant dark (&:is(.dark *));
 
+/* A screen too short for a fixed-height column to hold its fixed parts AND something that
+   scrolls — a phone turned on its side, or a 1024x600 tablet. Width breakpoints cannot see
+   this, and without the app locking orientation it is a normal way to hold a till. The New
+   Order cart uses it to scroll as a whole rather than only its list, so Place order is always
+   reachable rather than cut off below the screen. */
+@custom-variant short (@media (max-height: 40rem));
+
 :root {
   color-scheme: light;
 
   --radius: 0.625rem;
+
+  /* The sticky Topbar's height, and so the line everything else that sticks to the top of
+     the page has to start below — the sidebar, and the New Order cart. One value rather than
+     `h-16` in one file and `top-16` or a hand-summed `6rem` in the others: those drifted
+     apart once already, and the cart slid 48px under the bar. Exposed to utilities as
+     `topbar` below (`h-topbar`, `top-topbar`); `calc()`s read this variable directly. */
+  --topbar-height: 4rem;
 
   /* Neutral surfaces.
 
@@ -165,6 +179,7 @@
      that sticks to the bottom on a small screen offsets by this instead of guessing, so the
      two can never end up on top of each other. */
   --spacing-mobile-nav: 4.25rem;
+  --spacing-topbar: var(--topbar-height);
   --font-heading: var(--font-sans);
   --font-sans: 'Geist Variable', sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);

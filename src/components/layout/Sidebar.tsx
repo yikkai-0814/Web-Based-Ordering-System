@@ -44,6 +44,14 @@ function writeStoredCollapsed(collapsed: boolean): void {
  * collapse state is therefore a desktop-only concern and deliberately does not reach it — a
  * bottom bar has no room to collapse into, and a phone has no cursor to hover a tooltip with.
  *
+ * **Between `md` and `xl` it is always the icon rail**, whatever the stored preference says.
+ * At a tablet's 768–1279px the full 224–240px column took up to 29% of the screen and left
+ * the page itself narrower than a large phone — too narrow for New Order to show its menu and
+ * its cart side by side. The rail is exactly the collapsed state that already existed, so it
+ * brings its tooltips, its accessible names and its active marker with it; the toggle is
+ * hidden there because there is nothing for it to change. From `xl` the preference applies
+ * again, so a laptop or desktop keeps the full sidebar unless somebody collapsed it.
+ *
  * The width is the whole mechanism: `main` is `flex-1`, so narrowing this column hands the
  * space straight to the page without either side knowing about the other.
  */
@@ -66,9 +74,11 @@ export function Sidebar() {
       aria-label={t('nav.main')}
       data-collapsed={collapsed}
       className={cn(
-        'sticky top-16 hidden h-[calc(100svh-4rem)] shrink-0 flex-col gap-1 self-start border-r bg-sidebar p-3 text-sidebar-foreground md:flex',
+        'sticky top-topbar hidden h-[calc(100svh-var(--topbar-height))] shrink-0 flex-col gap-1 self-start border-r bg-sidebar p-3 text-sidebar-foreground md:flex',
         'transition-[width] duration-200 ease-out',
-        collapsed ? 'w-16 items-center' : 'w-56 lg:w-60',
+        // The rail below `xl`; from `xl`, full width unless the person collapsed it.
+        'w-16 items-center',
+        !collapsed && 'xl:w-60 xl:items-stretch',
       )}
     >
       {items.map(({ to, labelKey, icon: Icon }) => {
@@ -85,7 +95,8 @@ export function Sidebar() {
               cn(
                 'group/nav relative flex h-touch items-center gap-3 rounded-lg text-base font-medium transition-colors',
                 'hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
-                collapsed ? 'w-touch justify-center px-0' : 'px-3',
+                'w-touch justify-center px-0',
+                !collapsed && 'xl:w-auto xl:justify-start xl:px-3',
                 // The accent bar is the addition: the filled pill alone reads as "a button",
                 // and at a glance in a busy kitchen it was not obvious WHICH section was
                 // open. A bar hard against the sidebar edge is the one shape nothing else in
@@ -101,32 +112,27 @@ export function Sidebar() {
             {({ isActive }) => (
               <>
                 <Icon className="size-5 shrink-0" aria-hidden="true" />
-                {collapsed ? (
-                  <>
-                    {/*
-                     * The tooltip. Shown on hover AND on keyboard focus — a tooltip that only
-                     * answers a mouse leaves a keyboard user with a column of anonymous icons.
-                     * `aria-hidden` because the link already carries the same text as its
-                     * accessible name, and announcing it twice helps nobody.
-                     */}
-                    <span
-                      role="tooltip"
-                      aria-hidden="true"
-                      className={cn(
-                        'pointer-events-none absolute left-full z-40 ml-2 rounded-md bg-popover px-2 py-1 text-sm whitespace-nowrap text-popover-foreground opacity-0 shadow-md ring-1 ring-foreground/10',
-                        'transition-opacity duration-100 group-hover/nav:opacity-100 group-focus-visible/nav:opacity-100',
-                      )}
-                    >
-                      {label}
-                    </span>
-                    {isActive && <span className="sr-only">(current page)</span>}
-                  </>
-                ) : (
-                  <>
-                    <span className="truncate">{label}</span>
-                    {isActive && <span className="sr-only">(current page)</span>}
-                  </>
-                )}
+                {/*
+                 * The tooltip. Shown on hover AND on keyboard focus — a tooltip that only
+                 * answers a mouse leaves a keyboard user with a column of anonymous icons.
+                 * `aria-hidden` because the link already carries the same text as its
+                 * accessible name, and announcing it twice helps nobody. Always present on the
+                 * rail; when the sidebar is expanded it is the rail's alone, and from `xl` the
+                 * painted label takes over.
+                 */}
+                <span
+                  role="tooltip"
+                  aria-hidden="true"
+                  className={cn(
+                    'pointer-events-none absolute left-full z-40 ml-2 rounded-md bg-popover px-2 py-1 text-sm whitespace-nowrap text-popover-foreground opacity-0 shadow-md ring-1 ring-foreground/10',
+                    'transition-opacity duration-100 group-hover/nav:opacity-100 group-focus-visible/nav:opacity-100',
+                    !collapsed && 'xl:hidden',
+                  )}
+                >
+                  {label}
+                </span>
+                {!collapsed && <span className="hidden truncate xl:inline">{label}</span>}
+                {isActive && <span className="sr-only">(current page)</span>}
               </>
             )}
           </NavLink>
@@ -141,7 +147,8 @@ export function Sidebar() {
         aria-expanded={!collapsed}
         aria-label={collapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')}
         className={cn(
-          'mt-auto flex h-touch items-center gap-3 rounded-lg text-sm font-medium text-muted-foreground transition-colors',
+          // Only from `xl`: below it the sidebar is always the rail, so there is nothing to toggle.
+          'mt-auto hidden h-touch items-center gap-3 rounded-lg text-sm font-medium text-muted-foreground transition-colors xl:flex',
           'hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
           collapsed ? 'w-touch justify-center px-0' : 'px-3',
         )}

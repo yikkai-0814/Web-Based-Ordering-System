@@ -143,6 +143,7 @@ export const zh: Dictionary = {
   'terminal.placedBanner':
     '订单 #{{number}} 已提交 · {{total}} · {{service}} · 未付款。客户付款后请在“订单”页面记录付款。',
   'terminal.placeOrderWithTotal': '下单 · {{total}}',
+  'terminal.reviewOrder': '查看订单',
 
   // ---- Cart ----------------------------------------------------------------------
   'cart.empty': '尚无项目',

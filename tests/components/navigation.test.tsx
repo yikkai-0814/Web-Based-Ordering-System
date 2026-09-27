@@ -43,10 +43,12 @@ function renderSidebar(role: Role | null) {
   )
 }
 
+// By accessible name: an expanded link carries its painted label and, for the icon rail
+// below `xl`, a tooltip with the same words, so its raw text says each name twice.
 const linkNames = () =>
   screen
     .getAllByRole('link')
-    .map((link) => link.textContent?.trim())
+    .map((link) => link.getAttribute('aria-label')?.trim())
     .filter(Boolean)
 
 describe('Sidebar: what each role is offered', () => {

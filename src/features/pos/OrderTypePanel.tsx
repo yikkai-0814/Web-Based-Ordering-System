@@ -43,7 +43,8 @@ export function OrderTypePanel({
   const error = typed && !validation.ok ? validation.error : null
 
   return (
-    <div className="space-y-3 border-t p-4">
+    // Never shrinks: in the New Order cart column only the list of lines gives up height.
+    <div className="shrink-0 space-y-3 border-t p-4">
       <div className="grid gap-2">
         <Label>{t('orderType.label')}</Label>
         <div className="grid grid-cols-2 gap-2" role="group" aria-label={t('orderType.label')}>

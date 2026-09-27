@@ -1,6 +1,6 @@
 import { isMessageError, message, type Message } from '@/features/i18n/messages'
 import { useTranslation } from '@/features/i18n/useTranslation'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { AlertCircle, CheckCircle2, CupSoda } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import { getLocalizedMenuItemName } from '@/features/menu/item-names'
 import {
   addToCart,
+  cartItemCount,
   cartTotal,
   clearCart,
   decrementLine,
@@ -101,6 +102,8 @@ export function TerminalPage() {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<Message | null>(null)
   const [lastOrder, setLastOrder] = useState<PlacedOrder | null>(null)
+  /** The cart column, which the phone summary bar's "Review order" brings into view. */
+  const cartRef = useRef<HTMLElement>(null)
 
   // Only what is actually for sale: archived items and hidden categories never reach the
   // till, so staff cannot ring up something the café has taken off the menu.
@@ -117,6 +120,7 @@ export function TerminalPage() {
   }, [categories, items])
 
   const total = cartTotal(cart)
+  const itemCount = cartItemCount(cart)
   // Both halves of the gate: a valid cart, and a settled answer to how it is served.
   const placement = validatePlacement(orderType, tableNumber)
   const canPlace = validateCart(cart).ok && placement.ok
@@ -197,6 +201,21 @@ export function TerminalPage() {
     }
   }
 
+  /**
+   * Below `md` the cart sits under the whole menu, so the summary bar offers a way down to it.
+   *
+   * It scrolls the existing cart into view rather than opening a second copy of it, and moves
+   * focus there as well, so a keyboard or screen-reader user lands where a sighted one is now
+   * looking. Motion is skipped for anyone who has asked their device for less of it.
+   */
+  function reviewOrder() {
+    const panel = cartRef.current
+    if (!panel) return
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    panel.scrollIntoView?.({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' })
+    panel.focus({ preventScroll: true })
+  }
+
   if (categoriesLoading || itemsLoading || staffLoading) {
     return <Skeleton className="h-[70vh] w-full" />
   }
@@ -222,7 +241,14 @@ export function TerminalPage() {
   }
 
   return (
-    <div className="mx-auto grid w-full max-w-7xl gap-4 lg:grid-cols-[1fr_24rem] xl:grid-cols-[1fr_26rem]">
+    /*
+     * Menu and cart side by side from `md`, one above the other below it.
+     *
+     * `md` rather than `lg` since the sidebar became a 64px rail between `md` and `xl`: a
+     * 768px tablet now has about 650px of page, enough for a two-column menu beside a 20rem
+     * cart. The cart widens with the screen, and the menu takes whatever is left.
+     */
+    <div className="mx-auto grid w-full max-w-7xl gap-4 md:grid-cols-[1fr_20rem] lg:grid-cols-[1fr_24rem] xl:grid-cols-[1fr_26rem]">
       {customising && (
         <ItemCustomisationDialog
           item={customising}
@@ -235,7 +261,10 @@ export function TerminalPage() {
         />
       )}
 
-      <section className="min-w-0 space-y-5">
+      {/* A size container, so the tile grid below counts columns from the width the menu
+          actually has — which depends on the sidebar and the cart beside it — rather than from
+          the width of the whole screen. */}
+      <section className="@container min-w-0 space-y-5">
         <div className="space-y-1">
           <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
             {t('nav.newOrder')}
@@ -263,7 +292,9 @@ export function TerminalPage() {
             <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
               {category.name}
             </h2>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {/* Two columns, three from 32rem of menu, four from 50rem: a 1024px tablet gets
+                three, a phone two, and a 1536px desktop four — as it had before. */}
+            <div className="grid grid-cols-2 gap-2 @lg:grid-cols-3 @[50rem]:grid-cols-4">
               {groupItems.map((item) => (
                 <button
                   key={item.id}
@@ -275,9 +306,12 @@ export function TerminalPage() {
                   data-item-name={item.name}
                   onClick={() => addItem(item)}
                   disabled={pending}
-                  className="flex h-touch-lg flex-col justify-center gap-0.5 rounded-xl border bg-card px-3 py-2 text-left shadow-xs transition-[box-shadow,border-color,background-color,transform] duration-100 hover:border-primary/40 hover:bg-primary/[0.04] hover:shadow-sm focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.98] active:bg-primary/[0.08] disabled:opacity-50"
+                  /* A minimum height, not a fixed one: a one-line name keeps the compact tile,
+                     and a name that needs two lines or more gets them, rather than being
+                     clipped under its own price. */
+                  className="flex min-h-touch-lg flex-col justify-center gap-0.5 rounded-xl border bg-card px-3 py-2 text-left shadow-xs transition-[box-shadow,border-color,background-color,transform] duration-100 hover:border-primary/40 hover:bg-primary/[0.04] hover:shadow-sm focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none active:scale-[0.98] active:bg-primary/[0.08] disabled:opacity-50"
                 >
-                  <span className="line-clamp-2 text-sm leading-snug font-medium">
+                  <span className="text-sm leading-snug font-medium wrap-break-word">
                     {getLocalizedMenuItemName(item, language)}
                   </span>
                   <span className="text-sm font-semibold tabular-nums text-muted-foreground">
@@ -288,11 +322,72 @@ export function TerminalPage() {
             </div>
           </div>
         ))}
+
+        {/*
+         * Below `md` only, and only once something is in the order: how much is in it, what it
+         * comes to, and the way down to it.
+         *
+         * `sticky` within the menu, not `fixed`. While the menu is being browsed it rides above
+         * the mobile nav (offset by that nav's own height, like the cart's footer). When the
+         * menu ends it comes to rest in the flow just above the cart it points at, so it never
+         * covers the last row of items and never sits on top of the cart's own Place order.
+         * Edge to edge, like the nav beneath it, rather than as another card. `z-10`, below
+         * the Topbar's `z-20`: once it has come to rest and scrolls up with the page, it passes
+         * under the bar rather than being painted over it.
+         */}
+        {itemCount > 0 && (
+          <div
+            className="sticky bottom-mobile-nav z-10 -mx-4 flex items-center gap-3 border-t bg-card px-4 py-3 md:hidden"
+            data-testid="order-summary"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-muted-foreground" data-testid="order-summary-count">
+                {t(itemCount === 1 ? 'cart.itemsOne' : 'cart.itemsOther', { count: itemCount })}
+              </p>
+              <p className="text-lg font-semibold tabular-nums" data-testid="order-summary-total">
+                {formatMoney(total)}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="lg"
+              className="h-touch px-4 text-base"
+              data-testid="review-order"
+              onClick={reviewOrder}
+            >
+              {t('terminal.reviewOrder')}
+            </Button>
+          </div>
+        )}
       </section>
 
-      {/* On a phone this sits below the menu in ordinary flow; from lg it becomes its own
-          column and stays put while the menu scrolls. */}
-      <aside className="flex min-h-96 min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-xs lg:sticky lg:top-4 lg:h-[calc(100svh-6rem)]">
+      {/*
+       * On a phone this sits below the menu in ordinary flow; from `md` it becomes its own
+       * column and stays put while the menu scrolls.
+       *
+       * Stuck 1rem below the Topbar and 1rem clear of the bottom of the screen, both measured
+       * from the Topbar's own height variable rather than from numbers that happen to match
+       * it today. Inside, only the list of lines scrolls: the service choice and the Place
+       * order footer never shrink, so no cart is ever long enough to push them out of sight.
+       *
+       * On a `short` screen (under 40rem tall — a phone on its side) those fixed parts alone
+       * are taller than the column can be, so there the whole column scrolls instead, and
+       * Place order is reached by scrolling the cart rather than lost below the screen.
+       *
+       * `overflow-clip`, not `overflow-hidden`, to round off the corners. Both clip, but
+       * `hidden` also makes this panel a scroll container, and a `sticky` descendant sticks to
+       * its nearest scroll container: the phone footer below was being held 68px up from the
+       * bottom of THIS panel — over the table number field — instead of above the mobile nav.
+       *
+       * Focusable (but not a tab stop) because "Review order" sends focus here, and labelled
+       * so that arriving is announced as arriving at the order.
+       */}
+      <aside
+        ref={cartRef}
+        tabIndex={-1}
+        aria-label={t('cart.currentOrder')}
+        className="flex min-h-96 min-w-0 scroll-mt-[calc(var(--topbar-height)+1rem)] flex-col overflow-clip rounded-xl border bg-card shadow-xs focus:outline-none md:sticky md:top-[calc(var(--topbar-height)+1rem)] md:h-[calc(100svh-var(--topbar-height)-2rem)] md:min-h-0 md:short:overflow-y-auto"
+      >
         <CartPanel
           cart={cart}
           disabled={pending}
@@ -303,7 +398,7 @@ export function TerminalPage() {
         />
 
         {error && (
-          <Alert variant="destructive" className="mx-4">
+          <Alert variant="destructive" className="mx-4 w-auto shrink-0">
             <AlertCircle aria-hidden="true" />
             <AlertDescription>{t(error)}</AlertDescription>
           </Alert>
@@ -332,15 +427,17 @@ export function TerminalPage() {
         {/* Placing the order is the only action here. Payment is a separate step, taken on
             the order's own page after the customer has collected and paid. */}
         {/*
-         * Sticky below `lg`, so the total and the one action are reachable without scrolling
+         * Sticky below `md`, so the total and the one action are reachable without scrolling
          * to the end of a long cart — and offset by the mobile nav's own height so the two
          * bottom-anchored things can never sit on top of each other. It is `sticky`, not
          * `fixed`: it stays inside this panel, cannot cover the menu or a dialog, and the
          * cart above it scrolls freely behind an opaque surface rather than being hidden by
-         * it.
+         * it. From `md` there is no mobile nav to clear, and the panel is its own
+         * screen-height column, so it simply sits at the bottom of it. `z-10`, like the
+         * summary bar, so it too scrolls under the Topbar rather than over it.
          */}
-        <div className="sticky bottom-mobile-nav z-20 space-y-2 border-t bg-card p-4 lg:static">
-          <div className="flex items-baseline justify-between gap-3 lg:hidden">
+        <div className="sticky bottom-mobile-nav z-10 shrink-0 space-y-2 border-t bg-card p-4 md:static">
+          <div className="flex items-baseline justify-between gap-3 md:hidden">
             <span className="text-sm text-muted-foreground">{t('common.total')}</span>
             <span className="text-xl font-semibold tabular-nums">{formatMoney(total)}</span>
           </div>

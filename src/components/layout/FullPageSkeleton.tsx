@@ -12,7 +12,7 @@ export function FullPageSkeleton() {
   const { t } = useTranslation()
   return (
     <div className="flex min-h-svh flex-col" aria-busy="true" aria-label={t('common.loading')}>
-      <div className="flex h-16 items-center gap-4 border-b px-6">
+      <div className="flex h-topbar items-center gap-4 border-b px-6">
         <Skeleton className="h-8 w-40" />
         <div className="ml-auto flex items-center gap-3">
           <Skeleton className="h-8 w-28" />

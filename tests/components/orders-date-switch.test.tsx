@@ -155,6 +155,32 @@ beforeEach(() => {
   listeners.clear()
 })
 
+/**
+ * The date and search row on a narrow phone. jsdom cannot measure it, so these pin the rules
+ * that keep it inside a 320px screen, checked there in a real browser: the date group may
+ * wrap and drops its fixed width below `sm`, and the search takes its own row rather than
+ * shrinking below 14rem. The same date group is the Queue's, so this covers both pages.
+ */
+describe('Orders list: the controls on a narrow phone', () => {
+  it('lets the date group wrap, and only fixes its width from sm', () => {
+    renderOrders()
+
+    const date = screen.getByTestId('business-date')
+    expect(date.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'sm:min-w-40']))
+    expect(date.parentElement?.className.split(/\s+/)).toContain('flex-wrap')
+  })
+
+  it('moves the search to its own row rather than squeezing it', () => {
+    renderOrders()
+
+    const field = screen.getByTestId('order-search').closest('.grid')
+    expect(field?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['flex-[1_1_14rem]', 'min-w-0', 'sm:max-w-xs']),
+    )
+    expect(field?.className.split(/\s+/)).not.toContain('flex-1')
+  })
+})
+
 describe('Orders list during a business-date change', () => {
   it('shows the skeleton on the first load, when there is genuinely nothing to show', () => {
     const { container } = renderOrders()

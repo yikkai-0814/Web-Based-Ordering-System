@@ -48,12 +48,66 @@ const linkNames = () =>
 
 const nav = () => screen.getByRole('navigation', { name: 'Main' })
 const toggle = () => screen.getByTestId('sidebar-toggle')
+/** The label painted beside the icon, as opposed to the rail's tooltip with the same words. */
+const paintedLabel = (name: string) =>
+  within(screen.getByRole('link', { name })).queryByText(name, {
+    selector: 'span:not([role=tooltip])',
+  })
+const tooltipOf = (name: string) =>
+  within(screen.getByRole('link', { name })).queryByRole('tooltip', { hidden: true })
+
+/**
+ * jsdom has no layout and no media queries, so what these can check is the classes that
+ * decide each width — the rail from `md`, the preference only from `xl` — and that nothing a
+ * rail needs (a name, a tooltip, the current-page marker) is missing in either state.
+ */
+describe('Sidebar: the icon rail below xl', () => {
+  it('is the rail below xl even when expanded, and full width only from xl', () => {
+    renderSidebar('staff')
+
+    const classes = nav().className.split(' ')
+    expect(classes).toContain('w-16')
+    expect(classes).toContain('xl:w-60')
+  })
+
+  it('paints the label only from xl, and keeps the tooltip for the rail', () => {
+    renderSidebar('staff')
+
+    expect(paintedLabel('Orders')?.className.split(' ')).toEqual(
+      expect.arrayContaining(['hidden', 'xl:inline']),
+    )
+    expect(tooltipOf('Orders')?.textContent).toBe('Orders')
+    expect(tooltipOf('Orders')?.className).toContain('xl:hidden')
+  })
+
+  it('offers the toggle only from xl, where it has something to change', () => {
+    renderSidebar('staff')
+
+    expect(toggle().className.split(' ')).toEqual(expect.arrayContaining(['hidden', 'xl:flex']))
+  })
+
+  it('stays the rail at every width once collapsed', async () => {
+    const { user } = renderSidebar('staff')
+    await user.click(toggle())
+
+    expect(nav().className).not.toContain('xl:w-60')
+    expect(paintedLabel('Orders')).toBeNull()
+    expect(tooltipOf('Orders')?.className).not.toContain('xl:hidden')
+  })
+
+  it('sticks below the Topbar by the shared height, not a number of its own', () => {
+    renderSidebar('staff')
+
+    expect(nav().className).toContain('top-topbar')
+    expect(nav().className).toContain('h-[calc(100svh-var(--topbar-height))]')
+  })
+})
 
 describe('Sidebar: collapsing', () => {
   it('starts expanded, showing the labels', () => {
     renderSidebar('staff')
     expect(nav().getAttribute('data-collapsed')).toBe('false')
-    expect(screen.getByText('New Order')).not.toBeNull()
+    expect(paintedLabel('New Order')).not.toBeNull()
     expect(toggle().getAttribute('aria-expanded')).toBe('true')
   })
 

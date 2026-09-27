@@ -150,6 +150,7 @@ export const ms: Dictionary = {
   'terminal.placedBanner':
     'Pesanan #{{number}} telah dibuat · {{total}} · {{service}} · belum dibayar. Rekod bayaran dari halaman Pesanan setelah pelanggan membayar.',
   'terminal.placeOrderWithTotal': 'Buat pesanan · {{total}}',
+  'terminal.reviewOrder': 'Semak pesanan',
 
   // ---- Cart ----------------------------------------------------------------------
   'cart.empty': 'Tiada item lagi',

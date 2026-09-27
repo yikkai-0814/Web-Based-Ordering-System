@@ -38,6 +38,8 @@ import {
 import { recordPayment } from '@/features/pos/payment-api'
 import { createOrder } from '@/features/pos/pos-api'
 import { businessDateOf } from '@/features/pos/types'
+import { buildReport } from '@/features/reports/aggregate'
+import { fetchReportData } from '@/features/reports/reports-api'
 import { voidOrder } from '@/features/pos/void-api'
 import { createStaffMember, renameStaffMember, setStaffActive } from '@/features/staff/staff-api'
 import { auth, db } from '@/lib/firebase'
@@ -888,6 +890,193 @@ describe('voidOrder cancels a sale without editing it', () => {
         staff: asOperator(staff),
       }),
     ).rejects.toThrow()
+  })
+})
+
+/**
+ * An admin voiding a COMPLETED sale — paid and handed over — with their own session, exactly
+ * as the Order Detail page sends it.
+ *
+ * The page used to insist on a selected till operator before it would void anything, and an
+ * admin never has one: the operator picker lives on the staff-only till. So an admin's void
+ * quietly did nothing at all. The page now records the admin's own account as the initiator —
+ * the same self-operator identity a payment or a fulfilment step records when nobody has been
+ * picked — and this drives that write against the real rules, then checks everything a void
+ * must leave alone and everything that must read it.
+ */
+describe('an admin voids a completed sale from their own session', () => {
+  const FLAT_WHITE_COST = 400
+  const CROISSANT_COST = 250
+  /** What one CART costs by the history seeded below: 400 x2 + 250 x1. */
+  const CART_COST = 1050
+
+  beforeEach(async () => {
+    // Costs recorded well before any sale today, so both history and current cost apply.
+    await seed(async (context) => {
+      const seedDb = context.firestore()
+      const longAgo = new Date('2026-01-01T00:00:00.000Z')
+      for (const [itemId, cost] of [
+        ['item-flat-white', FLAT_WHITE_COST],
+        ['item-croissant', CROISSANT_COST],
+      ] as const) {
+        await setDoc(doc(seedDb, 'menuItemCostHistory', `${itemId}-1`), {
+          itemId,
+          cost,
+          effectiveFrom: longAgo,
+        })
+        await setDoc(doc(seedDb, 'menuItemCosts', itemId), { cost })
+      }
+    })
+  })
+
+  /** Rung up, paid in cash and walked all the way to delivered, as the till does it. */
+  async function completedSale(): Promise<string> {
+    await signInAs(staff)
+    const created = await createOrder({
+      cart: CART,
+      placement: TAKEAWAY,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+    await recordPayment(created.id, {
+      method: 'cash',
+      amount: CART_TOTAL,
+      cashTendered: 5000,
+      user: asUser(staff),
+      staff: asOperator(staff),
+    })
+    const steps = [
+      ['pending', 'preparing'],
+      ['preparing', 'ready'],
+      ['ready', 'delivered'],
+    ] as const
+    for (const [from, to] of steps) {
+      await setFulfillment(created.id, { from, to, user: asUser(staff), staff: asOperator(staff) })
+    }
+    return created.id
+  }
+
+  /** The void exactly as the page writes it for an admin with no operator selected. */
+  function voidAsAdminItself(orderId: string) {
+    return voidOrder(orderId, {
+      amount: CART_TOTAL,
+      reason: 'Customer changed mind',
+      authorizedBy: asUser(admin),
+      initiatedBy: asInitiator(admin),
+    })
+  }
+
+  const read = async (collectionName: string, id: string) =>
+    (await getDoc(doc(db, collectionName, id))).data()
+
+  const today = () => businessDateOf(new Date())
+
+  it('1. lets the admin void it, recording the admin as authoriser and initiator', async () => {
+    const orderId = await completedSale()
+    await signInAs(admin)
+
+    await voidAsAdminItself(orderId)
+
+    const record = await getDoc(doc(db, 'orderVoids', orderId))
+    expect(record.exists()).toBe(true)
+    expect(record.get('amount')).toBe(CART_TOTAL)
+    expect(record.get('voidedBy')).toBe(admin.uid)
+    expect(record.get('voidedByName')).toBe('Ada Admin')
+    expect(record.get('initiatedByStaffId')).toBe(admin.uid)
+    expect(record.get('initiatedByStaffName')).toBe('Ada Admin')
+  })
+
+  it('2. refuses the same write from a staff session', async () => {
+    const orderId = await completedSale()
+
+    // Still signed in as staff: the admin-only rule judges the token, not the payload.
+    await expect(voidAsAdminItself(orderId)).rejects.toThrow()
+    await expect(
+      voidOrder(orderId, {
+        amount: CART_TOTAL,
+        reason: 'Customer changed mind',
+        authorizedBy: asUser(staff),
+        initiatedBy: asInitiator(staff),
+      }),
+    ).rejects.toThrow()
+    await signInAs(admin)
+    expect((await getDoc(doc(db, 'orderVoids', orderId))).exists()).toBe(false)
+  })
+
+  it('3. refuses it with nobody signed in', async () => {
+    const orderId = await completedSale()
+    await auth.signOut()
+
+    await expect(voidAsAdminItself(orderId)).rejects.toThrow()
+    await signInAs(admin)
+    expect((await getDoc(doc(db, 'orderVoids', orderId))).exists()).toBe(false)
+  })
+
+  it('4. keeps the sale in the day’s history, and readable by staff as voided', async () => {
+    const orderId = await completedSale()
+    await signInAs(admin)
+    await voidAsAdminItself(orderId)
+
+    // Staff look the sale up after the fact: it must still be there, and so must the void.
+    await signInAs(staff)
+    const day = await getDocs(collection(db, 'orders'))
+    expect(day.docs.map((each) => each.id)).toContain(orderId)
+    expect((await getDoc(doc(db, 'orderVoids', orderId))).get('reason')).toBe(
+      'Customer changed mind',
+    )
+  })
+
+  it('6. leaves the order, its payment and its fulfilment exactly as they were', async () => {
+    const orderId = await completedSale()
+    await signInAs(admin)
+    const before = {
+      order: await read('orders', orderId),
+      payment: await read('orderPayments', orderId),
+      fulfillment: await read('orderFulfillment', orderId),
+    }
+    expect(before.payment).toBeDefined()
+    expect(before.fulfillment?.status).toBe('delivered')
+
+    await voidAsAdminItself(orderId)
+
+    expect(await read('orders', orderId)).toEqual(before.order)
+    expect(await read('orderPayments', orderId)).toEqual(before.payment)
+    expect(await read('orderFulfillment', orderId)).toEqual(before.fulfillment)
+  })
+
+  it('5 and 7. takes it out of Reports, with every cost figure resolved as before', async () => {
+    const voidedId = await completedSale()
+    const keptId = await completedSale()
+    await signInAs(admin)
+    const range = { from: today(), to: today() }
+
+    const before = await fetchReportData(range)
+    const reportBefore = buildReport(before)
+    expect(reportBefore.orderCount).toBe(2)
+    expect(reportBefore.revenue).toBe(CART_TOTAL * 2)
+    expect(reportBefore.estimatedCost).toBe(CART_COST * 2)
+
+    await voidAsAdminItself(voidedId)
+
+    const after = await fetchReportData(range)
+    const reportAfter = buildReport(after)
+    // Not a sale any more: gone from revenue, cost, profit and the counts…
+    expect(reportAfter.orderCount).toBe(1)
+    expect(reportAfter.revenue).toBe(CART_TOTAL)
+    expect(reportAfter.collectedRevenue).toBe(CART_TOTAL)
+    expect(reportAfter.estimatedCost).toBe(CART_COST)
+    expect(reportAfter.estimatedProfit).toBe(CART_TOTAL - CART_COST)
+    // …and listed on its own, for exactly what was reversed.
+    expect(reportAfter.voided.map((row) => row.orderId)).toEqual([voidedId])
+    expect(reportAfter.voidedAmount).toBe(CART_TOTAL)
+    expect(reportAfter.voided[0]?.voidedByName).toBe('Ada Admin')
+    // The sale that was kept is costed exactly as it was before the void, from the same
+    // history — voiding writes nothing to any cost record.
+    expect(after.history).toEqual(before.history)
+    expect(after.currentCosts).toEqual(before.currentCosts)
+    expect(reportAfter.coverage).toEqual(
+      buildReport({ ...before, orders: before.orders.filter((o) => o.id === keptId) }).coverage,
+    )
   })
 })
 

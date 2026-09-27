@@ -156,6 +156,7 @@ export const en = {
   'terminal.placedBanner':
     'Order #{{number}} placed · {{total}} · {{service}} · unpaid. Record payment from the Orders page once the customer has paid.',
   'terminal.placeOrderWithTotal': 'Place order · {{total}}',
+  'terminal.reviewOrder': 'Review order',
 
   // ---- Cart ----------------------------------------------------------------------
   'cart.empty': 'No items yet',

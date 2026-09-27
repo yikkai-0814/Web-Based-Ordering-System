@@ -25,8 +25,18 @@ export function CartPanel({
   const count = cartItemCount(cart)
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-3">
+    /*
+     * `min-h-0 flex-1` rather than `h-full`: inside the New Order column this panel has to be
+     * able to be SHORTER than its lines, so that the list below scrolls and whatever follows
+     * the panel keeps its place. At full height it pushed the service choice and Place order
+     * out of the bottom of the column, where the column's rounded corners clipped them away.
+     *
+     * Also a size container, so each line lays itself out by the width this panel actually
+     * has rather than by the width of the screen — see the line below.
+     */
+    // On a `short` screen the whole column scrolls instead, so this keeps its natural height.
+    <div className="@container flex min-h-0 flex-1 flex-col short:flex-none">
+      <div className="flex shrink-0 items-center gap-2 border-b bg-muted/40 px-4 py-3">
         <h2 className="font-heading font-medium">{t('cart.currentOrder')}</h2>
         <span
           className="rounded-full bg-background px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground"
@@ -47,7 +57,7 @@ export function CartPanel({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto short:overflow-visible">
         {cart.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
             <ShoppingBasket className="size-6 text-muted-foreground/70" aria-hidden="true" />
@@ -57,14 +67,26 @@ export function CartPanel({
         ) : (
           <ul className="divide-y">
             {cart.map((line) => (
+              /*
+               * One row where the panel is at least 25rem wide, two rows where it is not.
+               *
+               * On one row the quantity, the line total and the delete button take a fixed
+               * ~300px, and in a phone-width or tablet-portrait cart that left the name 14–84px
+               * — often a single letter. Narrower than 25rem the line becomes two rows instead:
+               * the name and the line total across the top, the quantity and delete beneath.
+               * The DOM order, and so the reading and tab order, is the same in both.
+               */
               <li
                 key={line.lineId}
-                className="flex items-center gap-2 px-4 py-3"
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-3 @[25rem]:grid-cols-[minmax(0,1fr)_auto_auto_auto] @[25rem]:gap-x-2"
                 data-testid="cart-line"
                 data-item-name={line.name}
               >
-                <div className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{line.name}</span>
+                <div className="col-start-1 row-start-1 min-w-0">
+                  {/* Wraps on two rows, where it has the width to; truncates on one. */}
+                  <span className="block font-medium wrap-break-word @[25rem]:truncate">
+                    {line.name}
+                  </span>
                   {/* What makes this line different from the same dish ordered another way.
                       Without it two lines of "Chicken Chop Rice" would look like a bug. */}
                   {line.modifiers.length > 0 && (
@@ -80,10 +102,13 @@ export function CartPanel({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="col-start-1 row-start-2 flex items-center gap-1 @[25rem]:col-start-2 @[25rem]:row-start-1">
                   <Button
                     variant="outline"
                     size="icon"
+                    // 40px rather than the 32px `icon` size: thumb-sized on a till, and still
+                    // no taller than the name and price it sits beside.
+                    className="size-10"
                     aria-label={t('cart.removeOne', { name: line.name })}
                     onClick={() => onDecrement(line.lineId)}
                     disabled={disabled}
@@ -100,6 +125,7 @@ export function CartPanel({
                   <Button
                     variant="outline"
                     size="icon"
+                    className="size-10"
                     aria-label={t('cart.addOne', { name: line.name })}
                     onClick={() => onIncrement(line.lineId)}
                     disabled={disabled}
@@ -108,13 +134,17 @@ export function CartPanel({
                   </Button>
                 </div>
 
-                <span className="w-20 text-right tabular-nums" data-testid="line-total">
+                <span
+                  className="col-start-2 row-start-1 w-20 text-right tabular-nums @[25rem]:col-start-3"
+                  data-testid="line-total"
+                >
                   {formatMoney(lineTotal(line))}
                 </span>
 
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="col-start-2 row-start-2 size-10 justify-self-end @[25rem]:col-start-4 @[25rem]:row-start-1"
                   aria-label={t('cart.remove', { name: line.name })}
                   onClick={() => onRemove(line.lineId)}
                   disabled={disabled}
@@ -127,7 +157,7 @@ export function CartPanel({
         )}
       </div>
 
-      <div className="flex items-baseline gap-3 border-t bg-muted/40 px-4 py-3">
+      <div className="flex shrink-0 items-baseline gap-3 border-t bg-muted/40 px-4 py-3">
         <span className="text-base font-medium">{t('common.total')}</span>
         <span
           className="ml-auto text-2xl font-semibold tabular-nums sm:text-3xl"

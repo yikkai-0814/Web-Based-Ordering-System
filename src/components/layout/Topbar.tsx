@@ -26,7 +26,7 @@ export function Topbar() {
   const [switching, setSwitching] = useState(false)
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3 border-b bg-card/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-card/80 md:gap-4 md:px-6">
+    <header className="sticky top-0 z-20 flex h-topbar shrink-0 items-center gap-3 border-b bg-card/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-card/80 md:gap-4 md:px-6">
       <span className="font-heading text-base font-semibold tracking-tight">{t('app.name')}</span>
       {profile && (
         <span className="hidden rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground sm:inline">
