@@ -10,6 +10,9 @@
  *
  * The new behaviour is the reveal control and the submitting state, both presentation only.
  */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { screen } from '@testing-library/react'
 import { FirebaseError } from 'firebase/app'
 import { MemoryRouter, Route, Routes } from 'react-router'
@@ -66,12 +69,31 @@ describe('what the page presents', () => {
   it('names the product quietly, as text and nothing else', () => {
     renderLogin()
 
-    const brand = screen.getByText('Ordering System')
+    const brand = screen.getByText('ServeFlow')
     expect(brand).not.toBeNull()
     // An eyebrow above the heading, not a wordmark: small, muted, and with no icon beside it.
     expect(brand.className).toContain('text-xs')
     expect(brand.className).toContain('text-muted-foreground')
     expect(brand.querySelector('svg')).toBeNull()
+  })
+
+  it('keeps the product name in every language, because it is a name', async () => {
+    const { user } = renderLogin()
+
+    for (const language of ['ms', 'zh'] as const) {
+      await user.click(screen.getByTestId('login-language'))
+      await user.click(screen.getByTestId(`login-language-${language}`))
+      expect(screen.getByText('ServeFlow')).not.toBeNull()
+    }
+  })
+
+  it('names the browser tab after the product too', () => {
+    // index.html is what the browser reads before the app has loaded, and nothing in the app
+    // sets `document.title` afterwards — so the file is the tab's title, and the test reads it.
+    const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8')
+
+    expect(html).toContain('<title>ServeFlow</title>')
+    expect(html).not.toContain('Ordering System')
   })
 
   it('leads with the heading and one welcome line', () => {
@@ -111,6 +133,48 @@ describe('what the page presents', () => {
     expect(password().getAttribute('autocomplete')).toBe('current-password')
     expect(email().required).toBe(true)
     expect(password().required).toBe(true)
+  })
+})
+
+/**
+ * What a browser's password manager looks for when it offers to save, and later fills, a
+ * sign-in. Saving is left entirely to the browser: the page only has to be recognisable as a
+ * sign-in form, which comes down to standard names, standard autocomplete tokens, and both
+ * fields sharing one form with a real submit button.
+ */
+describe('saved credentials in the browser', () => {
+  it('gives both fields the standard names a password manager recognises', () => {
+    renderLogin()
+
+    expect(email().name).toBe('email')
+    expect(password().name).toBe('password')
+  })
+
+  it('keeps the password autocompleting as a password while it is revealed', async () => {
+    const { user } = renderLogin()
+
+    await user.click(reveal())
+
+    // Revealing switches the type to `text`; the token is what still marks it as the
+    // password, so a browser can fill it or offer to save it either way.
+    expect(password().type).toBe('text')
+    expect(password().name).toBe('password')
+    expect(password().getAttribute('autocomplete')).toBe('current-password')
+  })
+
+  it('puts both fields and a real submit button in one form', () => {
+    renderLogin()
+
+    const form = email().form
+    expect(form).not.toBeNull()
+    expect(password().form).toBe(form)
+    expect((submit() as HTMLButtonElement).type).toBe('submit')
+    expect((submit() as HTMLButtonElement).form).toBe(form)
+    // The reveal is inside the form too, so it must not be mistaken for its submit.
+    expect((reveal() as HTMLButtonElement).type).toBe('button')
+    // Exactly one username field and one password field — a second of either can make a
+    // browser treat this as a sign-up or change-password form instead.
+    expect(form?.querySelectorAll('input')).toHaveLength(2)
   })
 })
 

@@ -18,7 +18,7 @@
  */
 export const en = {
   // ---- The application itself ----------------------------------------------------
-  'app.name': 'Ordering System',
+  'app.name': 'ServeFlow',
 
   // ---- Shared actions and words --------------------------------------------------
   'common.save': 'Save',

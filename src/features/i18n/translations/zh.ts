@@ -12,7 +12,7 @@ import type { Dictionary } from '@/features/i18n/translations/en'
  */
 export const zh: Dictionary = {
   // ---- The application itself ----------------------------------------------------
-  'app.name': '点餐系统',
+  'app.name': 'ServeFlow',
 
   // ---- Shared actions and words --------------------------------------------------
   'common.save': '保存',

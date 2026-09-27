@@ -2,7 +2,7 @@ import { message, type Message } from '@/features/i18n/messages'
 import { useTranslation } from '@/features/i18n/useTranslation'
 import { useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
-import { AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ import { createMenuItem, updateMenuItem } from '@/features/menu/menu-api'
 import { ModifierGroupsEditor } from '@/features/menu/ModifierGroupsEditor'
 import { EMPTY_CUSTOMISATION, type DraftCustomisation } from '@/features/menu/item-customisation'
 import { NewItemCustomisation } from '@/features/menu/NewItemCustomisation'
+import { SortOrderInput } from '@/features/menu/SortOrderInput'
 import { useModifierGroups } from '@/features/menu/useModifierGroups'
 import { useItemCosts } from '@/features/menu/useItemCosts'
 import type { ModifierGroup } from '@/features/menu/modifiers'
@@ -100,22 +101,6 @@ export function MenuItemFormPage() {
   )
 }
 
-/**
- * The id of one language's name field. English keeps `name`, the id it has always had, so
- * anything pointing at it — a label, a test, a browser's own autofill memory — still finds
- * the field that holds the item's canonical name.
- */
-/**
- * The two arrows, which are the same button twice.
- *
- * A plain `<button>` rather than the `Button` component: the smallest that offers is `size-8`,
- * and two of those stacked would be half again as tall as the field they sit in. The colours,
- * the hover and the focus ring are the ones `Button`'s ghost variant uses, so they still look
- * like the rest of the application.
- */
-const STEPPER_BUTTON =
-  'flex flex-1 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50'
-
 function MenuItemForm({
   existing,
   existingCost,
@@ -177,26 +162,6 @@ function MenuItemForm({
   const [costError, setCostError] = useState<Message | null>(null)
   const costInput = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState(false)
-
-  /**
-   * One step of the sort order, from whatever is in the field at this moment.
-   *
-   * It reads the field rather than a number of its own, so typing and stepping stay the same
-   * value — the input is still the single source of truth and nothing about how the figure is
-   * validated or saved changes. There is no minimum or maximum to clamp against: the form has
-   * only ever required a whole number, and the security rule only `sortOrder is int`, so one
-   * is not invented here.
-   *
-   * A blank field reads as 0, which is already what the form saves for one. Anything the
-   * browser somehow let through that is not a number starts from 0 too, rather than turning
-   * the field into NaN.
-   */
-  function stepSortOrder(by: number) {
-    setSortOrder((current) => {
-      const value = Number(current)
-      return String((Number.isFinite(value) ? Math.trunc(value) : 0) + by)
-    })
-  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -467,55 +432,16 @@ function MenuItemForm({
 
             <div className="grid gap-2">
               <Label htmlFor="sortOrder">{t('common.sortOrder')}</Label>
-              {/* A plain number field with its own small arrows.
-
-                  `type="number"` rather than the text field this used to be, so the keyboard
-                  behaviour is the browser's own: Arrow Up and Arrow Down step the value, and a
-                  phone offers a numeric keypad. The browser's built-in spinners are switched
-                  off because they appear only in some engines, sit outside the field's padding
-                  and are far too small for a counter — these replace them everywhere rather
-                  than doubling up in Chrome and vanishing in Safari.
-
-                  The arrows are positioned inside the field's own box, so the control is
-                  exactly as wide and as tall as every other input on this form. */}
-              <div className="relative">
-                <Input
-                  id="sortOrder"
-                  type="number"
-                  step={1}
-                  inputMode="numeric"
-                  className="h-touch pr-9 text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                  value={sortOrder}
-                  onChange={(event) => setSortOrder(event.target.value)}
-                  disabled={pending}
-                  aria-describedby="sort-order-hint"
-                />
-                <div className="absolute inset-y-1 end-1 flex w-7 flex-col gap-px">
-                  {/* `type="button"`, or each of these would submit the form it sits in.
-                      Labelled rather than left to the icon: the glyph alone says "up", not
-                      "up what". */}
-                  <button
-                    type="button"
-                    data-testid="sort-order-increase"
-                    aria-label={t('menu.sortOrderIncrease')}
-                    className={STEPPER_BUTTON}
-                    disabled={pending}
-                    onClick={() => stepSortOrder(1)}
-                  >
-                    <ChevronUp aria-hidden="true" className="size-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="sort-order-decrease"
-                    aria-label={t('menu.sortOrderDecrease')}
-                    className={STEPPER_BUTTON}
-                    disabled={pending}
-                    onClick={() => stepSortOrder(-1)}
-                  >
-                    <ChevronDown aria-hidden="true" className="size-3.5" />
-                  </button>
-                </div>
-              </div>
+              {/* The shared sort-order field — the same number input and arrows as every
+                  other sort order in the admin screens. See SortOrderInput. */}
+              <SortOrderInput
+                id="sortOrder"
+                className="h-touch text-base"
+                value={sortOrder}
+                onValueChange={setSortOrder}
+                disabled={pending}
+                aria-describedby="sort-order-hint"
+              />
               <p id="sort-order-hint" className="text-xs text-muted-foreground">
                 {t('menu.sortOrderHint')}
               </p>

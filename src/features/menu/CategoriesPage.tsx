@@ -18,6 +18,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { ConfirmDeleteDialog } from '@/features/menu/ConfirmDeleteDialog'
+import { SortOrderInput } from '@/features/menu/SortOrderInput'
 import {
   createCategory,
   deleteCategory,
@@ -156,12 +157,12 @@ export function CategoriesPage() {
         </div>
         <div className="grid w-32 gap-2">
           <Label htmlFor="new-category-sort">{t('common.sortOrder')}</Label>
-          <Input
+          <SortOrderInput
             id="new-category-sort"
-            inputMode="numeric"
+            testId="new-category-sort-order"
             className="h-touch text-base"
             value={newSortOrder}
-            onChange={(event) => setNewSortOrder(event.target.value)}
+            onValueChange={setNewSortOrder}
             disabled={pending}
           />
         </div>
@@ -209,12 +210,13 @@ export function CategoriesPage() {
                     </TableCell>
                     <TableCell>
                       {editing ? (
-                        <Input
+                        <SortOrderInput
+                          id="edit-category-sort"
+                          testId="category-sort-order"
                           aria-label={t('menu.categorySortOrder')}
-                          inputMode="numeric"
                           className="h-touch text-base"
                           value={editSortOrder}
-                          onChange={(event) => setEditSortOrder(event.target.value)}
+                          onValueChange={setEditSortOrder}
                         />
                       ) : (
                         <span className="tabular-nums">{category.sortOrder}</span>

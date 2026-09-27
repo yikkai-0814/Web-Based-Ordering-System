@@ -12,7 +12,7 @@ import type { Dictionary } from '@/features/i18n/translations/en'
  */
 export const ms: Dictionary = {
   // ---- The application itself ----------------------------------------------------
-  'app.name': 'Sistem Pesanan',
+  'app.name': 'ServeFlow',
 
   // ---- Shared actions and words --------------------------------------------------
   'common.save': 'Simpan',

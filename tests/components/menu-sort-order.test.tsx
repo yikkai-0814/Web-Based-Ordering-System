@@ -16,6 +16,7 @@ import { screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { LANGUAGE_STORAGE_KEY } from '@/features/i18n/languages'
 import { MenuItemFormPage } from '@/features/menu/MenuItemFormPage'
 
 import { renderComponent } from './render'
@@ -106,6 +107,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  window.localStorage.clear()
   document.documentElement.removeAttribute('lang')
 })
 
@@ -150,6 +152,17 @@ describe('the arrows', () => {
     expect(decrease().getAttribute('aria-label')).toBe('Decrease sort order')
     expect(screen.getByRole('button', { name: 'Increase sort order' })).toBe(increase())
     expect(screen.getByRole('button', { name: 'Decrease sort order' })).toBe(decrease())
+  })
+
+  it.each([
+    ['ms', 'Tambah susunan', 'Kurangkan susunan'],
+    ['zh', '增加排序值', '减少排序值'],
+  ])('are labelled in the device language (%s)', (language, up, down) => {
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
+    renderForm()
+
+    expect(increase().getAttribute('aria-label')).toBe(up)
+    expect(decrease().getAttribute('aria-label')).toBe(down)
   })
 
   it('are buttons, not submits — a click must never create the item', async () => {

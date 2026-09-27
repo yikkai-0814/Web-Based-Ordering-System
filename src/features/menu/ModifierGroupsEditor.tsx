@@ -32,6 +32,7 @@ import {
   type SelectionMode,
 } from '@/features/menu/modifiers'
 import { modifierCostKey } from '@/features/menu/modifier-cost'
+import { SortOrderInput } from '@/features/menu/SortOrderInput'
 import { NameTranslationsDialog, TranslationsButton } from '@/features/menu/NameTranslations'
 import {
   MODIFIER_OPTION_NAME_MAX as OPTION_NAME_MAX,
@@ -541,11 +542,11 @@ export function GroupForm({
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="group-sort">{t('common.sortOrder')}</Label>
-          <Input
+          <SortOrderInput
             id="group-sort"
-            inputMode="numeric"
+            testId="group-sort-order"
             value={sortOrder}
-            onChange={(event) => setSortOrder(event.target.value)}
+            onValueChange={setSortOrder}
           />
         </div>
         <div className="grid gap-1.5">
