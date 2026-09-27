@@ -161,6 +161,38 @@ beforeEach(() => {
  * wrap and drops its fixed width below `sm`, and the search takes its own row rather than
  * shrinking below 14rem. The same date group is the Queue's, so this covers both pages.
  */
+/**
+ * A little more of the list above the fold on a laptop or tablet: from `md` the gaps between
+ * heading, controls and list tighten a step, the controls panel's padding with them, and the
+ * blurb may run wider so it wraps less. The controls themselves keep their size, and phones
+ * keep the roomier spacing they had.
+ */
+describe('Orders list: vertical space from md', () => {
+  it('tightens the page and panel spacing only from md', () => {
+    renderOrders()
+
+    const page = screen.getByRole('heading', { level: 1 }).closest('.max-w-7xl')!
+    expect(page.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['space-y-6', 'md:space-y-4']),
+    )
+
+    const panel = screen.getByTestId('order-search').closest('.rounded-xl')!
+    expect(panel.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['p-4', 'space-y-4', 'md:p-3', 'md:space-y-3']),
+    )
+  })
+
+  it('lets the blurb run wider from md, and keeps the controls their size', () => {
+    renderOrders()
+
+    const blurb = screen.getByRole('heading', { level: 1 }).nextElementSibling!
+    expect(blurb.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['max-w-3xl', 'md:max-w-5xl']),
+    )
+    expect(screen.getByTestId('order-search').className).toContain('sm:h-10')
+  })
+})
+
 describe('Orders list: the controls on a narrow phone', () => {
   it('lets the date group wrap, and only fixes its width from sm', () => {
     renderOrders()

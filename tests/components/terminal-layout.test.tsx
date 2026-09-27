@@ -307,6 +307,62 @@ describe('the cart column', () => {
   })
 })
 
+/**
+ * Dine-in and Takeaway are a switch. The Button primitive fades every colour over 150ms, and
+ * on a pair of buttons that reads as the highlight sliding from one to the other; these two
+ * opt out, so the chosen side is filled the instant it is pressed. The state change and the
+ * table number field it controls are unchanged.
+ */
+describe('switching between dine-in and takeaway', () => {
+  const dineIn = () => screen.getByTestId('order-type-dine_in')
+  const takeaway = () => screen.getByTestId('order-type-takeaway')
+  const tableField = () => screen.queryByLabelText('Table number')
+
+  it('has no colour fade on either side of the switch', async () => {
+    await openTheOrder()
+
+    for (const button of [dineIn(), takeaway()]) {
+      expect(classesOf(button)).toContain('transition-none')
+      expect(classesOf(button)).not.toContain('transition-all')
+    }
+  })
+
+  it('changes state at once, both ways, and shows the table field only for dine-in', async () => {
+    const { user } = await openTheOrder()
+    expect(dineIn().getAttribute('aria-pressed')).toBe('true')
+    expect(tableField()).not.toBeNull()
+
+    await user.click(takeaway())
+    expect(takeaway().getAttribute('aria-pressed')).toBe('true')
+    expect(dineIn().getAttribute('aria-pressed')).toBe('false')
+    expect(tableField()).toBeNull()
+
+    await user.click(dineIn())
+    expect(dineIn().getAttribute('aria-pressed')).toBe('true')
+    expect(tableField()).not.toBeNull()
+  })
+
+  it('keeps what was typed in the table field across a switch and back', async () => {
+    const { user } = await openTheOrder()
+    await user.type(tableField()!, '12')
+
+    await user.click(takeaway())
+    await user.click(dineIn())
+
+    expect((tableField() as HTMLInputElement).value).toBe('12')
+  })
+
+  it('leaves the fade on every other button alone', async () => {
+    const { user } = await openTheOrder()
+    await user.click(tile('Kopi O'))
+
+    // Place order keeps its own shadow transition; the change is confined to the switch.
+    expect(screen.getByTestId('place-order').className).toContain(
+      'transition-[box-shadow,transform]',
+    )
+  })
+})
+
 describe('the menu tiles', () => {
   it('grow for a long name instead of clipping it under the price', async () => {
     await openTheOrder()

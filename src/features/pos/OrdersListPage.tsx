@@ -34,6 +34,7 @@ import { operatorNameOf, PAYMENT_LABEL_KEYS } from '@/features/pos/types'
 import { useShownBusinessDate } from '@/features/pos/useBusinessToday'
 import type { OrderView } from '@/features/pos/orders-view'
 import { useOrdersWorkspace } from '@/features/pos/useOrdersWorkspace'
+import { useLastArrivedViews } from '@/features/pos/useLastArrivedViews'
 import { MD_BREAKPOINT, useMediaQuery } from '@/lib/useMediaQuery'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -50,31 +51,12 @@ import { cn } from '@/lib/utils'
 const NO_VIEWS: OrderView[] = []
 
 /**
- * The last workspace result that actually arrived.
- *
- * **Why the page needs this.** The business date IS the query, so choosing another day builds
- * a new Firestore query, and `useQueryDocs` reports "loading" with no rows from the very
- * render that changes it — deliberately, because returning the old rows as though they were
- * the new day's would put yesterday's sales under today's heading. Correct, but it meant the
- * whole list was replaced by a grey skeleton for as long as the switch took. Measured against
- * the emulator, a day that had been viewed before comes back from Firestore's local cache in
- * 27-48 ms: the skeleton was a flicker that communicated nothing.
- *
- * Holding the last arrived result lets the page keep showing it — dimmed, marked `aria-busy`,
- * and under a note naming the day being loaded — instead of blanking. The rows on screen are
- * always one day's, never a mixture: this returns whichever single result last arrived, and
- * the page stops trusting it for anything it would assert about the selected date.
- *
- * Set during render rather than in an effect, which is React's own pattern for deriving state
- * from changed input: the guard makes it idempotent, and it commits nothing to the DOM in
- * between.
+ * Why the list keeps its rows while a new date loads, rather than blanking to a skeleton: a
+ * day that has been viewed before comes back from Firestore's local cache in 27-48 ms, and a
+ * skeleton for that long is a flicker that communicates nothing. The rows on screen are always
+ * one day's, never a mixture — see `useLastArrivedViews`, now shared with the queue board —
+ * and the page stops trusting them for anything it would assert about the selected date.
  */
-function useLastArrivedViews(views: OrderView[], loading: boolean): OrderView[] | null {
-  const [arrived, setArrived] = useState<OrderView[] | null>(loading ? null : views)
-  if (!loading && arrived !== views) setArrived(views)
-  return arrived
-}
-
 export function OrdersListPage() {
   const { t } = useTranslation()
   // Follows today on its own, unless somebody has navigated to another day — see the hook.
@@ -115,18 +97,25 @@ export function OrdersListPage() {
   )
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-6">
+    /*
+     * From `md` the page is a laptop or a tablet, where the rows are what somebody came for
+     * and every pixel above the table is one row fewer on screen. So the gaps between the
+     * heading, the controls and the list tighten a step there, and the blurb may run wider —
+     * it is one paragraph, and at 768px wide it took three lines on a screen that had room for
+     * two. Phones keep the roomier rhythm; they scroll anyway, and they have the height.
+     */
+    <div className="mx-auto w-full max-w-7xl space-y-6 md:space-y-4">
       <div className="space-y-1">
         <h1 className="font-heading text-2xl font-semibold tracking-tight sm:text-3xl">
           {t('nav.orders')}
         </h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">{t('orders.blurb')}</p>
+        <p className="max-w-3xl text-sm text-muted-foreground md:max-w-5xl">{t('orders.blurb')}</p>
       </div>
 
       {/* The controls are one panel, not three rows of loose widgets: choosing a day,
           searching within it and narrowing it are the same task, and grouping them stops the
           page reading as a pile of unrelated toolbars on a laptop screen. */}
-      <div className="space-y-4 rounded-xl border bg-card p-4 shadow-xs">
+      <div className="space-y-4 rounded-xl border bg-card p-4 shadow-xs md:space-y-3 md:p-3">
         <BusinessDateBar businessDate={businessDate} onChange={showDate}>
           {/* Grows into the rest of the row, but never below 14rem: where the row cannot
               spare that much beside the date, the search takes a row of its own instead of

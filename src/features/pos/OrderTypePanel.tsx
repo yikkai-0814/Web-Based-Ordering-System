@@ -48,13 +48,17 @@ export function OrderTypePanel({
       <div className="grid gap-2">
         <Label>{t('orderType.label')}</Label>
         <div className="grid grid-cols-2 gap-2" role="group" aria-label={t('orderType.label')}>
+          {/* `transition-none`: the Button primitive fades every colour over 150ms, which on
+              a pair like this reads as the highlight sliding from one button to the other.
+              Choosing how an order is served is a switch, and it should look like one — the
+              chosen side is filled the instant it is pressed. */}
           {ORDER_TYPES.map((candidate) => (
             <Button
               key={candidate}
               type="button"
               variant={orderType === candidate ? 'default' : 'outline'}
               size="lg"
-              className="h-touch text-base"
+              className="h-touch text-base transition-none"
               aria-pressed={orderType === candidate}
               data-testid={`order-type-${candidate}`}
               disabled={disabled}

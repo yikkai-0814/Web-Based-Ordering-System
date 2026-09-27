@@ -28,6 +28,7 @@ import {
 } from '@/features/pos/queue'
 import { fulfillmentOperatorNameOf, operatorNameOf, PAYMENT_LABEL_KEYS } from '@/features/pos/types'
 import { useShownBusinessDate } from '@/features/pos/useBusinessToday'
+import { useLastArrivedViews } from '@/features/pos/useLastArrivedViews'
 import { useOrdersWorkspace } from '@/features/pos/useOrdersWorkspace'
 import { formatMoney } from '@/lib/money'
 
@@ -49,11 +50,31 @@ import { formatMoney } from '@/lib/money'
  * that somebody has to do something about, so hiding it would be wrong; taking the money is
  * the counter's job on the receipt, not the kitchen's.
  */
+/** Stable identity for "no board yet", so the grouping memo is not defeated. */
+const NO_VIEWS: OrderView[] = []
+
 export function QueuePage() {
   const { t } = useTranslation()
   // Follows today on its own, unless somebody has navigated to another day — see the hook.
   const { businessDate, showDate } = useShownBusinessDate()
   const { views, loading, error } = useOrdersWorkspace(businessDate)
+  /**
+   * The board to draw, and whether there is one at all.
+   *
+   * The workspace reports "loading" whenever any of its listeners has not answered — on the
+   * first load of a day, but also every time a sale is rung up at another till (the newest
+   * order joins the last chunk of ids, which opens a fresh listener for its payment, void
+   * and fulfilment) and after a reconnect. Rendering the skeleton straight from that flag
+   * replaced the whole board with a grey block for a network round trip each time, which on
+   * a slow connection read as the screen going blank.
+   *
+   * So the board stays up while the SAME day refreshes, and the new state replaces it the
+   * moment it is complete. The skeleton is kept for when nothing has arrived for the day
+   * being shown — the first load, or a switch to another date, whose cards must never be
+   * drawn under this date's heading.
+   */
+  const board = useLastArrivedViews(views, loading, businessDate)
+  const firstLoad = board === null
   const { profile } = useAuth()
   const { operator } = useStaffSession()
 
@@ -84,7 +105,7 @@ export function QueuePage() {
   const inFlightRef = useRef<ReadonlyMap<string, FulfillmentStatus>>(inFlight)
 
   const shownError = error ?? moveError
-  const columns = useMemo(() => groupQueue(views), [views])
+  const columns = useMemo(() => groupQueue(board ?? NO_VIEWS), [board])
   const queued = columns.reduce((count, column) => count + column.views.length, 0)
 
   /**
@@ -211,7 +232,7 @@ export function QueuePage() {
         </Alert>
       )}
 
-      {loading ? (
+      {firstLoad ? (
         <Skeleton className="h-96 w-full" />
       ) : queued === 0 ? (
         <div data-testid="queue-empty">
@@ -227,7 +248,7 @@ export function QueuePage() {
            timer, the status and the two actions wrap onto four lines apiece. Stacked,
            the same cards get the full width and a kitchen can read them at a glance,
            which matters more on this screen than keeping a board shape. */
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-3" aria-busy={loading}>
           {columns.map((column) => (
             <QueueColumnPanel
               key={column.status}
@@ -411,8 +432,13 @@ function QueueCard({
           uses for a secondary action beside a primary one.
 
           Offered only where the counter owns the step — never at `pending`, which has nothing
-          behind it, and never at `delivered`, which is an admin's correction. */}
-      <div className="flex gap-2">
+          behind it, and never at `delivered`, which is an admin's correction.
+
+          `flex-wrap`: the two labels do not shrink or wrap, and side by side they need about
+          340px — wider than a 320-360px phone, where they pushed the whole board sideways.
+          Where they fit they share the row exactly as before; where they do not, each takes a
+          full-width row of its own. */}
+      <div className="flex flex-wrap gap-2">
         {reversal && (
           <Button
             variant="outline"

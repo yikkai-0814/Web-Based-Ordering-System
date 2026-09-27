@@ -14,7 +14,7 @@
  * the test resolves when it chooses. That is the only way to hold a write "in flight" long
  * enough to assert what the board does meanwhile.
  */
-import { useSyncExternalStore } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 
 import { act, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -131,17 +131,18 @@ vi.mock('@/features/pos/BusinessDateBar', () => ({
 vi.mock('@/features/pos/useOrdersWorkspace', () => ({
   useOrdersWorkspace: () => {
     const status = useSyncExternalStore(subscribe, () => currentStatus)
-    const fulfillments = new Map<string, OrderFulfillment>()
-    if (status !== null) fulfillments.set(ORDER_ID, fulfillmentOf(status))
-    return {
-      views: buildOrderViews([orderOf()], {
+    // Memoised on the status, as the real workspace memoises its views: the board relies on
+    // an unchanged result keeping its identity from one render to the next.
+    const views = useMemo(() => {
+      const fulfillments = new Map<string, OrderFulfillment>()
+      if (status !== null) fulfillments.set(ORDER_ID, fulfillmentOf(status))
+      return buildOrderViews([orderOf()], {
         payments: new Map(),
         fulfillments,
         voids: new Map(),
-      }),
-      loading: false,
-      error: null,
-    }
+      })
+    }, [status])
+    return { views, loading: false, error: null }
   },
 }))
 
@@ -382,5 +383,24 @@ describe('rapid transitions do not regress the responsiveness fix', () => {
 
     expect(setFulfillmentMock).toHaveBeenCalledTimes(1)
     held.resolve()
+  })
+})
+
+/**
+ * A preparing or ready card carries two actions, and their labels neither shrink nor wrap:
+ * side by side they need about 340px, which pushed the whole board sideways on a 320-360px
+ * phone. The row wraps instead — the pair still shares one row wherever it fits.
+ */
+describe('the card actions on a narrow phone', () => {
+  it('lets the back and forward actions wrap rather than widen the board', () => {
+    renderQueue()
+    listenerReports('preparing')
+
+    const forward = within(card()).getByTestId('queue-advance')
+    const back = within(card()).getByTestId('queue-reverse')
+    expect(forward.parentElement).toBe(back.parentElement)
+    expect(forward.parentElement?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['flex', 'flex-wrap']),
+    )
   })
 })
