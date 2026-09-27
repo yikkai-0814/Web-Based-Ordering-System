@@ -30,6 +30,9 @@ const manifest = JSON.parse(read('public/manifest.webmanifest')) as Record<strin
 }
 const html = read('index.html')
 
+/** The ribbon's own colour blend, blue at one end and orange at the other. */
+const RIBBON = /stop-color="#1d5ee0"[\s\S]*stop-color="#e9582b"/
+
 /** A PNG's own width and height, from its IHDR chunk — no image library needed for two ints. */
 function pngSize(publicPath: string): { width: number; height: number } {
   const bytes = readFileSync(join(root, 'public', publicPath))
@@ -81,15 +84,45 @@ describe('index.html', () => {
     expect(existsSync(resolve(root, 'public/manifest.webmanifest'))).toBe(true)
   })
 
-  it('gives the browser tab the ServeFlow icon rather than the Vite logo', () => {
+  it('gives the browser tab the ServeFlow ribbon rather than the Vite logo', () => {
     expect(html).toContain('<link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />')
 
     const favicon = read('public/icons/favicon.svg')
-    // The same terracotta square as the app icons, with the S drawn as an outline so the tab
-    // does not depend on a font being available when it renders.
-    expect(favicon).toContain(`fill="${String(manifest.theme_color)}"`)
-    expect(favicon).not.toContain('<text')
+    expect(favicon).toMatch(RIBBON)
+    expect(favicon).not.toMatch(/<text|<image/)
     expect(existsSync(resolve(root, 'public/favicon.svg'))).toBe(false)
+  })
+})
+
+/**
+ * The logo files, generated from one geometry: the ribbon, blue through teal to orange.
+ *
+ * Everything is vector and self-contained — no live text, so the wordmark cannot fall back to
+ * another typeface on a machine without Geist, and no embedded raster. The reference image the
+ * design was drawn from is kept outside `public/`, because everything in there is deployed.
+ */
+describe('the ServeFlow logo files', () => {
+  it('keeps the master logo as the ribbon', () => {
+    const logo = read('public/icons/logo.svg')
+
+    expect(logo).toMatch(RIBBON)
+    expect(logo).not.toMatch(/<text|<image/)
+  })
+
+  it('draws the wordmark as outlines beside the same ribbon', () => {
+    const wordmark = read('public/icons/wordmark.svg')
+
+    expect(wordmark).toMatch(RIBBON)
+    // "Serve" and "Flow" are shapes, in the logo's text colour — not text in a font.
+    expect(wordmark).not.toMatch(/<text|<image|font-family/)
+    expect(wordmark.match(/fill="#334155"/g)).toHaveLength(2)
+    expect(wordmark).toContain('<title>ServeFlow</title>')
+  })
+
+  it('does not ship the reference image with the app', () => {
+    const shipped = readdirSync(resolve(root, 'public'), { recursive: true }).map(String)
+
+    expect(shipped.filter((name) => /\.(jpe?g)$/i.test(name))).toEqual([])
   })
 })
 
