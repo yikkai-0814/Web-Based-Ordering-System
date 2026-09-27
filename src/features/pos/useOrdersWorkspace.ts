@@ -1,5 +1,5 @@
 import type { Message } from '@/features/i18n/messages'
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 
 import { chunkOrderIds } from '@/features/pos/order-sidecars'
 import { buildOrderViews, type OrderView } from '@/features/pos/orders-view'
@@ -7,6 +7,7 @@ import { useOrderFulfillments } from '@/features/pos/useOrderFulfillments'
 import { useOrderPayments } from '@/features/pos/useOrderPayments'
 import { useOrders } from '@/features/pos/useOrders'
 import { useOrderVoids } from '@/features/pos/useOrderVoids'
+import { holdWorkspace, rememberWorkspace } from '@/features/pos/workspace-handoff'
 
 /**
  * Everything the Orders list and the fulfilment queue need for one business date, resolved
@@ -44,9 +45,19 @@ export function useOrdersWorkspace(businessDate: string): OrdersWorkspace {
     [orders, payments, fulfillments, voids],
   )
 
+  const loading = ordersLoading || paymentsLoading || voidsLoading || fulfillmentsLoading
+
+  // While this page shows the date, its latest complete result is what a page opened in its
+  // place starts from — see workspace-handoff.ts. Only complete results are handed over, so a
+  // page never inherits the half-loaded moment this one happened to be in.
+  useEffect(() => holdWorkspace(businessDate), [businessDate])
+  useEffect(() => {
+    if (!loading) rememberWorkspace(businessDate, views)
+  }, [businessDate, views, loading])
+
   return {
     views,
-    loading: ordersLoading || paymentsLoading || voidsLoading || fulfillmentsLoading,
+    loading,
     // The first failure wins. Orders come first because without them the rest is moot.
     error: ordersError ?? paymentsError ?? voidsError ?? fulfillmentsError,
   }

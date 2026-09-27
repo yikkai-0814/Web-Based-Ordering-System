@@ -14,6 +14,14 @@
    reachable rather than cut off below the screen. */
 @custom-variant short (@media (max-height: 40rem));
 
+/* Tablet width or wider, but no taller than 54rem: a tablet held landscape, a 1024x768 or a
+   1280x800 screen. Width cannot tell a Galaxy Tab A8 in landscape (1280px wide, about 670px
+   tall in Chrome) from a laptop, but height can. 54rem is where the menu-item customisation
+   dialog's original size stops holding its tallest item — 724px at 85% of the window — so
+   this is exactly the range that needs the roomier dialog, and a desktop with room to spare
+   keeps the one it had. */
+@custom-variant md-short (@media (width >= 48rem) and (height <= 54rem));
+
 :root {
   color-scheme: light;
 

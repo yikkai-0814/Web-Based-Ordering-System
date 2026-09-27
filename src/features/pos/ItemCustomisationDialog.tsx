@@ -76,7 +76,35 @@ export function ItemCustomisationDialog({
 
   return (
     <AlertDialog open onOpenChange={(open) => !open && onCancel()}>
-      <AlertDialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-lg">
+      {/*
+       * Sized for the tablet at the counter: `md-short` — tablet width or wider, but no taller
+       * than 54rem (see index.css). Width alone cannot tell a Galaxy Tab A8 in landscape, at
+       * 1280px, from a laptop; height can, and height is what this dialog runs out of. A
+       * desktop with room to spare, a portrait tablet and every phone keep the dialog they had.
+       *
+       * Wider, so the options can sit three to a row. The dialog used to be 384px on every
+       * tablet: it asked for `sm:max-w-lg`, but the primitive's own
+       * `data-[size=default]:sm:max-w-sm` is the more specific rule and always won, so the
+       * choices stood two to a row in 170px apiece and an item with three groups ran to 724px.
+       * On a Galaxy Tab A8 in Chrome, landscape, the window is about 670px tall, so that item
+       * scrolled with its Add button out of sight. Three to a row brings it to about 560px,
+       * and each option is wider than before rather than narrower. The override carries the
+       * same `data-[size=default]` so that it is as specific as the rule it replaces.
+       *
+       * Taller, so what does fit is not held back by a margin: the whole window less a 1rem
+       * gutter and any safe-area inset, instead of 85% of it. Content that genuinely needs
+       * more still scrolls — the fallback is unchanged.
+       *
+       * The backdrop keeps its dimming but not its blur. Blurring the whole POS page behind
+       * the dialog is paid for in the frame the dialog first appears, which is the frame a
+       * slower tablet stalls on: measured with the CPU slowed to a mid-range tablet, the
+       * dialog appeared after 175ms with the blur and 146ms without it. Phones keep the
+       * smaller, 85% dialog they had.
+       */}
+      <AlertDialogContent
+        className="max-h-[85svh] overflow-y-auto md-short:max-h-[calc(100svh-2rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] data-[size=default]:md-short:max-w-2xl"
+        overlayClassName="supports-backdrop-filter:backdrop-blur-none"
+      >
         <AlertDialogHeader>
           <AlertDialogTitle data-testid="customise-title">
             {getLocalizedMenuItemName(item, language)}
@@ -96,7 +124,7 @@ export function ItemCustomisationDialog({
                 </span>
               </legend>
 
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-2 md-short:grid-cols-3">
                 {group.options.map((option) => {
                   const selected = chosen.some((entry) => entry.optionId === option.id)
                   return (

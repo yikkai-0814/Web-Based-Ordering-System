@@ -86,7 +86,7 @@ export function OrdersListPage() {
    * the new rows arrive. That is what keeps "do not mix two dates" true while still not
    * blanking the page.
    */
-  const arrived = useLastArrivedViews(views, loading)
+  const arrived = useLastArrivedViews(views, loading, businessDate, { acrossDates: true })
   const showing = arrived ?? NO_VIEWS
   const firstLoad = loading && arrived === null
   const refreshing = loading && arrived !== null

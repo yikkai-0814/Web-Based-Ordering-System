@@ -248,3 +248,72 @@ describe('the snapshot handed to the cart', () => {
     ])
   })
 })
+
+/**
+ * Sized for the tablet at the counter. jsdom has no layout, so these pin the rules that decide
+ * the size — measured in a browser on a Galaxy Tab A8 viewport, where an item with three groups
+ * no longer scrolls — and that tall screens and phones keep what they had.
+ *
+ * `md-short` is tablet width or wider AND no taller than 54rem (index.css): width alone cannot
+ * tell a Galaxy Tab A8 in landscape from a laptop, and a desktop with room to spare keeps the
+ * original dialog.
+ */
+describe('the dialog on a tablet', () => {
+  const dialog = () => screen.getByRole('alertdialog')
+  const classes = (element: Element) => element.className.split(/\s+/)
+
+  it('is wider only on tablet-width screens that are short, with a rule as specific as the one it replaces', () => {
+    setup([group(), ADDONS])
+
+    // `sm:max-w-lg` alone never applied: the primitive's `data-[size=default]:sm:max-w-sm`
+    // is more specific and always won, leaving every tablet a 384px dialog.
+    expect(classes(dialog())).toContain('data-[size=default]:md-short:max-w-2xl')
+    expect(classes(dialog())).not.toContain('sm:max-w-lg')
+    // Never keyed on width alone, which would widen it on every desktop too.
+    expect(dialog().className).not.toMatch(/(^|\s)(data-\[size=default\]:)?md:max-w/)
+  })
+
+  it('sets the options three to a row on short tablet-width screens, two otherwise', () => {
+    setup([group(), ADDONS])
+
+    const grid = optionById('veg-normal').parentElement!
+    expect(classes(grid)).toEqual(
+      expect.arrayContaining(['sm:grid-cols-2', 'md-short:grid-cols-3']),
+    )
+    expect(classes(grid)).not.toContain('md:grid-cols-3')
+  })
+
+  it('may use the whole window less its gutter and safe areas there, and still scrolls', () => {
+    setup([group(), ADDONS])
+
+    expect(classes(dialog())).toEqual(
+      expect.arrayContaining([
+        'max-h-[85svh]',
+        'md-short:max-h-[calc(100svh-2rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))]',
+        'overflow-y-auto',
+      ]),
+    )
+  })
+
+  it('dims the page behind it without blurring it', () => {
+    setup([group()])
+
+    const overlay = document.querySelector('[data-slot="alert-dialog-overlay"]')!
+    expect(classes(overlay)).toContain('supports-backdrop-filter:backdrop-blur-none')
+    expect(classes(overlay)).not.toContain('supports-backdrop-filter:backdrop-blur-xs')
+    expect(classes(overlay)).toContain('bg-black/10')
+  })
+
+  it('keeps choosing, clearing and adding exactly as before', async () => {
+    const { user, onAdd } = setup([group(), ADDONS])
+
+    await user.click(optionById('veg-none'))
+    await user.click(optionById('add-egg'))
+    await user.click(optionById('add-egg'))
+    await user.click(addButton())
+
+    expect(onAdd).toHaveBeenCalledTimes(1)
+    const [chosen] = onAdd.mock.calls[0] as [{ optionId: string }[]]
+    expect(chosen.map((entry) => entry.optionId)).toEqual(['veg-none'])
+  })
+})

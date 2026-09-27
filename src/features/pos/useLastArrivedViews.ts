@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import type { OrderView } from '@/features/pos/orders-view'
+import { recallWorkspace } from '@/features/pos/workspace-handoff'
 
 /**
  * The last workspace result that actually arrived.
@@ -12,30 +13,39 @@ import type { OrderView } from '@/features/pos/orders-view'
  * a grey block for as long as the wait lasts. Holding the last arrived result lets it keep
  * showing that instead of blanking.
  *
+ * **It starts from the page it replaced.** A page that has just been opened has no result of
+ * its own yet, so it begins from the one the Orders list or the queue board had for the same
+ * date a moment ago — see workspace-handoff.ts. Switching between the two therefore shows the
+ * day's rows at once instead of the placeholder. Arriving from anywhere else there is nothing
+ * to begin from, and a first load still shows the placeholder, which is then the truth.
+ *
  * Set during render rather than in an effect, which is React's own pattern for deriving state
  * from changed input: the guard makes it idempotent, and it commits nothing to the DOM in
  * between. It relies on `views` keeping its identity while it is unchanged, which the
  * workspace guarantees by memoising it.
  *
- * **`scope`** is for a page that must never show one scope's rows under another — the queue
- * board, which has no way to mark a whole board as "not this day yet". Pass the business date
- * and a result is only ever returned for the date it arrived under: a new date starts from
- * nothing, while the SAME date keeps its board across a refresh (a sale rung up at another
- * till, a reconnect). Left out, the result is held across every change, which is what the
- * Orders list wants — it withholds its date-specific claims itself while it refreshes.
+ * **Across dates.** By default a result is only returned for the date it arrived under: a new
+ * date starts from nothing (or from a page handing that date over), while the SAME date keeps
+ * its rows across a refresh — a sale rung up at another till, a reconnect. The queue board
+ * needs exactly that, having no way to mark a whole board as "not this day yet".
+ * `acrossDates` holds the result through a date change instead, which is what the Orders list
+ * wants: it withholds its date-specific claims itself while it refreshes.
  */
 export function useLastArrivedViews(
   views: OrderView[],
   loading: boolean,
-  scope?: string,
+  businessDate: string,
+  { acrossDates = false }: { acrossDates?: boolean } = {},
 ): OrderView[] | null {
-  const [arrived, setArrived] = useState<{ views: OrderView[]; scope?: string } | null>(
-    loading ? null : { views, scope },
-  )
-  if (!loading && (arrived?.views !== views || arrived.scope !== scope)) {
-    setArrived({ views, scope })
+  const [arrived, setArrived] = useState<{ views: OrderView[]; date: string } | null>(() => {
+    if (!loading) return { views, date: businessDate }
+    const handedOver = recallWorkspace(businessDate)
+    return handedOver ? { views: handedOver, date: businessDate } : null
+  })
+  if (!loading && (arrived?.views !== views || arrived.date !== businessDate)) {
+    setArrived({ views, date: businessDate })
   }
   if (!arrived) return null
-  if (scope !== undefined && arrived.scope !== scope) return null
+  if (!acrossDates && arrived.date !== businessDate) return null
   return arrived.views
 }
